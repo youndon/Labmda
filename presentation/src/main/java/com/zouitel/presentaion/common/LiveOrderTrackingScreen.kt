@@ -1,4 +1,4 @@
-package com.zouitel.presentaion.screens.food
+package com.zouitel.presentaion.common
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -8,6 +8,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DirectionsBike
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -104,13 +106,70 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                         }
                     }
 
-                    // Delivery Details
+                    // Courier Information Section
+                    if (currentOrder.status == OrderStatus.OUT_FOR_DELIVERY || currentOrder.status == OrderStatus.DELIVERED || currentOrder.courierName.isNotBlank()) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "Courier Assigned",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                                        )
+                                        Text(
+                                            text = currentOrder.courierName.ifBlank { "Searching for nearby courier..." },
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        if (currentOrder.courierPhone.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Phone,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = currentOrder.courierPhone,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsBike,
+                                        contentDescription = "Courier Icon",
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Delivery Address Details
                     item {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text("Delivery Address", style = MaterialTheme.typography.titleSmall)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text(currentOrder.deliveryAddress, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = currentOrder.deliveryAddress.ifBlank { "Address not provided" },
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                         }
                     }
@@ -120,20 +179,28 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                         Text("Ordered Items", style = MaterialTheme.typography.titleMedium)
                     }
 
-                    items(currentOrder.items, key = { it.mealId }) { item ->
+                    items(currentOrder.items, key = { it.id }) { item ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("${item.quantity}x ${item.mealName}", style = MaterialTheme.typography.bodyMedium)
+                            Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodyMedium)
                             Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
 
                     item {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Courier Fee", style = MaterialTheme.typography.bodyMedium)
+                            Text("$${"%.2f".format(currentOrder.courierFee)}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -171,7 +238,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
             OrderStatus.PLACED to "Placed",
             OrderStatus.ACCEPTED to "Confirmed",
             OrderStatus.PREPARING to "Kitchen",
-            OrderStatus.OUT_FOR_DELIVERY to "On the way",
+            OrderStatus.OUT_FOR_DELIVERY to "Out for Courier",
             OrderStatus.DELIVERED to "Delivered"
         )
 
@@ -197,7 +264,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            steps.forEachIndexed { index, (status, label) ->
+            steps.forEachIndexed { index, (_, label) ->
                 val isCompleted = index <= currentStepIndex
                 val isCurrent = index == currentStepIndex
 

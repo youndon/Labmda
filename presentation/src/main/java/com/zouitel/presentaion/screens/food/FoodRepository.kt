@@ -13,7 +13,7 @@ class FoodRepository {
         return db.child("restaurants").valueEvents.map { snapshot ->
             snapshot.children.mapNotNull { child ->
                 val id = child.key ?: return@mapNotNull null
-                val name: String = child.child("name").value<String?>() ?: ""
+                val name: String = child.child("fullName").value<String?>() ?: ""
                 val imageUrl: String = child.child("imageUrl").value<String?>() ?: ""
                 val rating: Double = child.child("rating").value<Double?>() ?: 5.0
                 val deliveryFee: Double = child.child("deliveryFee").value<Double?>() ?: 0.0
@@ -47,7 +47,7 @@ class FoodRepository {
         val id = newRef.key ?: return
         val restaurantMap = mapOf(
             "id" to id,
-            "name" to name,
+            "fullName" to name,
             "imageUrl" to imageUrl,
             "rating" to 5.0,
             "deliveryFee" to deliveryFee,
@@ -63,7 +63,7 @@ class FoodRepository {
         return db.child("restaurants").child(restaurantId).child("meals").valueEvents.map { snapshot ->
             snapshot.children.mapNotNull { child ->
                 val id = child.key ?: return@mapNotNull null
-                val name: String = child.child("name").value<String?>() ?: ""
+                val name: String = child.child("fullName").value<String?>() ?: ""
                 val description: String = child.child("description").value<String?>() ?: ""
                 val basePrice: Double = child.child("basePrice").value<Double?>() ?: 0.0
                 val categoryStr: String = child.child("category").value<String?>() ?: ""
@@ -100,7 +100,7 @@ class FoodRepository {
         val mealMap = mapOf(
             "id" to mealId,
             "restaurantId" to restaurantId,
-            "name" to name,
+            "fullName" to name,
             "description" to description,
             "basePrice" to basePrice,
             "category" to category.name,

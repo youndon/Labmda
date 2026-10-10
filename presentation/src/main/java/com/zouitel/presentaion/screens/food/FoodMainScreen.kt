@@ -5,10 +5,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.ReceiptLong
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -20,15 +19,16 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.model.FoodMode
+import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.screens.account.AccountScreenModel
+import com.zouitel.presentaion.screens.courier.CourierDashboardScreen
 
-class MainFoodScreen : Screen {
+class FoodMainScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = koinScreenModel<MainFoodScreenModel>()
+        val screenModel = koinScreenModel<FoodMainScreenModel>()
         val accountModel = koinScreenModel<AccountScreenModel>()
         val restaurants by screenModel.restaurants.collectAsState()
         val profile by accountModel.profile.collectAsState()
@@ -38,15 +38,26 @@ class MainFoodScreen : Screen {
                 TopAppBar(
                     title = { Text("Restaurants") },
                     actions = {
-                        if (profile?.foodMode == FoodMode.MANAGER) {
-                            IconButton(onClick = { navigator?.push(DashboardScreen()) }) {
-                                Icon(
-                                    imageVector = Icons.Default.Dashboard,
-                                    contentDescription = "Dashboard"
-                                )
+                        if (profile?.foodMode == UserMode.MANAGER || profile?.foodMode == UserMode.COURIER) {
+                            if (profile?.foodMode == UserMode.MANAGER) {
+                                IconButton(onClick = { navigator?.push(DashboardScreen()) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Dashboard,
+                                        contentDescription = "Dashboard"
+                                    )
+                                }
+                            }
+
+                            if (profile?.foodMode == UserMode.COURIER) {
+                                IconButton(onClick = { navigator?.push(CourierDashboardScreen()) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsBike,
+                                        contentDescription = "Courier Dashboard"
+                                    )
+                                }
                             }
                         } else {
-                            IconButton(onClick = { navigator?.push(OrdersScreen()) }) {
+                            IconButton(onClick = { navigator?.push(FoodActivitiesScreen()) }) {
                                 Icon(
                                     imageVector = Icons.Default.ReceiptLong,
                                     contentDescription = "Orders"
@@ -64,13 +75,13 @@ class MainFoodScreen : Screen {
                 )
             },
             floatingActionButton = {
-                if (profile?.isAdmin == true) {
-                    FloatingActionButton(
-                        onClick = { navigator?.push(RestaurantWorkplaceScreen()) }
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Restaurant")
-                    }
-                }
+//                if (profile?.isAdmin == true) {
+//                    FloatingActionButton(
+//                        onClick = { navigator?.push(RestaurantWorkplaceScreen()) }
+//                    ) {
+//                        Icon(Icons.Default.Add, contentDescription = "Add Restaurant")
+//                    }
+//                }
             }
         ) { paddingValues ->
             if (restaurants.isEmpty()) {
@@ -121,7 +132,7 @@ private fun RestaurantCardItem(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Delivery: $${"%.2f".format(restaurant.deliveryFee)}",
+                    text = "Courier: $${"%.2f".format(restaurant.deliveryFee)}",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Text(

@@ -1,4 +1,4 @@
-package com.zouitel.presentaion.screens.food
+package com.zouitel.presentaion.common
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
@@ -37,19 +37,24 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                     val restaurantId: String = snapshot.child("restaurantId").value()
                     val restaurantName: String = snapshot.child("restaurantName").value()
                     val subtotal: Double = snapshot.child("subtotal").value()
-                    val deliveryFee: Double = snapshot.child("deliveryFee").value()
+                    val courierFee: Double = snapshot.child("courierFee").value()
                     val totalPrice: Double = snapshot.child("totalPrice").value()
                     val statusStr: String = snapshot.child("status").value()
                     val deliveryAddress: String = snapshot.child("deliveryAddress").value()
                     val createdAtTimestamp: Long = snapshot.child("createdAtTimestamp").value()
                     val paymentMethod: String = snapshot.child("paymentMethod").value()
 
-                    val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(OrderStatus.PLACED)
+                    val courierId: String = runCatching { snapshot.child("courierId").value<String>() }.getOrDefault("")
+                    val courierName: String = runCatching { snapshot.child("courierName").value<String>() }.getOrDefault("")
+                    val courierPhone: String = runCatching { snapshot.child("courierPhone").value<String>() }.getOrDefault("")
+
+                    val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(
+                        OrderStatus.PLACED)
 
                     val items = snapshot.child("items").children.map { itemChild ->
                         CartItem(
-                            mealId = itemChild.child("mealId").value(),
-                            mealName = itemChild.child("mealName").value(),
+                            id = itemChild.child("id").value(),
+                            name = itemChild.child("name").value(),
                             basePrice = itemChild.child("basePrice").value(),
                             quantity = itemChild.child("quantity").value(),
                             selectedOptions = emptyList()
@@ -63,12 +68,15 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                         restaurantName = restaurantName,
                         items = items,
                         subtotal = subtotal,
-                        deliveryFee = deliveryFee,
+                        courierFee = courierFee,
                         totalPrice = totalPrice,
                         status = status,
                         deliveryAddress = deliveryAddress,
                         createdAtTimestamp = createdAtTimestamp,
-                        paymentMethod = paymentMethod
+                        paymentMethod = paymentMethod,
+                        courierId = courierId,
+                        courierName = courierName,
+                        courierPhone = courierPhone
                     )
                 } catch (e: Exception) {
                     _order.value = null

@@ -15,6 +15,8 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.common.Order
+import com.zouitel.presentaion.common.OrderStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -68,7 +70,7 @@ class DashboardScreen : Screen {
                     items(orders, key = { it.id }) { order ->
                         ClientOrderCard(
                             order = order,
-                            onStatusChange = { newStatus -> screenModel.updateOrderStatus(order.id, newStatus) }
+                            onStatusChange = { newStatus -> screenModel.updateOrderStatus(order, newStatus) }
                         )
                     }
                 }
@@ -109,7 +111,7 @@ class DashboardScreen : Screen {
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-                // Client & Delivery Info
+                // Client & Courier Info
                 Text(
                     text = "Client Info & Delivery Address",
                     style = MaterialTheme.typography.labelLarge,
@@ -118,6 +120,15 @@ class DashboardScreen : Screen {
                 Text(text = "Client ID: ${order.userId.ifBlank { "Guest Client" }}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Address: ${order.deliveryAddress}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodyMedium)
+
+                if (order.courierName.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Courier: ${order.courierName} (${order.courierPhone})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -134,7 +145,7 @@ class DashboardScreen : Screen {
                             .padding(vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("${item.quantity}x ${item.mealName}", style = MaterialTheme.typography.bodySmall)
+                        Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
                         Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -168,7 +179,7 @@ class DashboardScreen : Screen {
             OrderStatus.PLACED -> MaterialTheme.colorScheme.error to "PLACED"
             OrderStatus.ACCEPTED -> MaterialTheme.colorScheme.tertiary to "ACCEPTED"
             OrderStatus.PREPARING -> MaterialTheme.colorScheme.secondary to "PREPARING"
-            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR DELIVERY"
+            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR COURIER"
             OrderStatus.DELIVERED -> MaterialTheme.colorScheme.outline to "DELIVERED"
             OrderStatus.CANCELLED -> MaterialTheme.colorScheme.error to "CANCELLED"
         }
@@ -222,15 +233,20 @@ class DashboardScreen : Screen {
                         onClick = { onStatusChange(OrderStatus.OUT_FOR_DELIVERY) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Send Out for Delivery")
+                        Text("Send Out for Courier")
                     }
                 }
                 OrderStatus.OUT_FOR_DELIVERY -> {
-                    Button(
-                        onClick = { onStatusChange(OrderStatus.DELIVERED) },
+                    // Managers cannot set DELIVERED; state transition belongs solely to Courier
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Mark as Delivered")
+                        Text(
+                            text = "Handed to courier. Awaiting courier delivery confirmation.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp)
+                        )
                     }
                 }
                 OrderStatus.DELIVERED, OrderStatus.CANCELLED -> {

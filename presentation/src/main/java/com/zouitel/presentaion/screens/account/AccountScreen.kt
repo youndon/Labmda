@@ -1,21 +1,17 @@
 package com.zouitel.presentaion.screens.account
 
 import android.widget.Toast
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreditCard
-import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.NotificationsNone
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
@@ -34,7 +30,7 @@ import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
-import com.zouitel.presentaion.model.DriveMode
+import com.zouitel.presentaion.common.UserMode
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import kotlinx.coroutines.launch
@@ -117,7 +113,7 @@ class AccountScreen : Screen {
 
                     Column {
                         Text(
-                            text = user?.displayName?.takeIf { it.isNotBlank() } ?: profile?.name ?: "Guest",
+                            text = user?.displayName?.takeIf { it.isNotBlank() } ?: profile?.fullName ?: "Guest",
                             fontSize = 18.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -133,10 +129,10 @@ class AccountScreen : Screen {
 
                 // --- Mode Switching Card ---
                 Switch(
-                    checked = profile?.driveMode == DriveMode.DRIVER,
+                    checked = profile?.driveMode == UserMode.DRIVER,
                     onCheckedChange = {
                         coroutineScope.launch {
-                            screenModel.updateUserMode(user?.uid ?: "", if (it) DriveMode.DRIVER else DriveMode.PASSENGER)
+                            screenModel.updateUserMode(user?.uid ?: "", if (it) UserMode.DRIVER else UserMode.PASSENGER)
                         }
                     }
 
@@ -169,131 +165,6 @@ class AccountScreen : Screen {
         }
     }
 
-    @Composable
-    private fun ModeSwitchCard(
-        currentMode: DriveMode,
-        isLoading: Boolean,
-        isApprovedDriver: Boolean,
-        onModeChanged: (DriveMode) -> Unit
-    ) {
-        ElevatedCard(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            )
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = "Account Mode",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            color = MaterialTheme.colorScheme.surface,
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    ModeOptionSegment(
-                        label = "Passenger",
-                        icon = Icons.Filled.Person,
-                        isSelected = currentMode == DriveMode.PASSENGER,
-                        isLoading = isLoading,
-                        modifier = Modifier.weight(1f),
-                        onClick = { if (currentMode != DriveMode.PASSENGER) onModeChanged(DriveMode.PASSENGER) }
-                    )
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    ModeOptionSegment(
-                        label = "Driver",
-                        icon = Icons.Filled.DirectionsCar,
-                        isSelected = currentMode == DriveMode.DRIVER,
-                        isLoading = isLoading,
-                        modifier = Modifier.weight(1f),
-                        onClick = { if (currentMode != DriveMode.DRIVER) onModeChanged(DriveMode.DRIVER) }
-                    )
-                }
-
-                if (!isApprovedDriver) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Driver approval is required to unlock Driver mode.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun ModeOptionSegment(
-        label: String,
-        icon: ImageVector,
-        isSelected: Boolean,
-        isLoading: Boolean,
-        modifier: Modifier = Modifier,
-        onClick: () -> Unit
-    ) {
-        val backgroundColor by animateColorAsState(
-            targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-            label = "segment_background"
-        )
-        val contentColor by animateColorAsState(
-            targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            label = "segment_content"
-        )
-
-        Surface(
-            onClick = onClick,
-            enabled = !isLoading,
-            modifier = modifier.height(44.dp),
-            shape = RoundedCornerShape(10.dp),
-            color = backgroundColor
-        ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (isLoading && isSelected) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        color = contentColor,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = label,
-                        tint = contentColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = label,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = contentColor
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Composable

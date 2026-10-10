@@ -44,6 +44,14 @@ class LogInScreen : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+
+        // Check if user is already signed in before showing login UI
+        LaunchedEffect(Unit) {
+            if (Firebase.auth.currentUser != null) {
+                navigator.replaceAll(MainScreen())
+            }
+        }
+
         LogIn(onSignedIn = { navigator.replaceAll(MainScreen()) })
     }
 
@@ -81,9 +89,9 @@ class LogInScreen : Screen {
 
                         if (firebaseUser != null && firebaseUser.uid.isNotBlank()) {
                             val cc = screenModel.saveUserProfile(
-                                UserProfile(
+                                UserProfile().copy(
                                     uid = firebaseUser.uid,
-                                    name = firebaseUser.displayName ?: "",
+                                    fullName = firebaseUser.displayName ?: "",
                                     email = firebaseUser.email ?: "",
                                     phoneNumber = firebaseUser.phoneNumber ?: "",
                                     photoUrl = firebaseUser.photoURL

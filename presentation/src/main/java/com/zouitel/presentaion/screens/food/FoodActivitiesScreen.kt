@@ -15,15 +15,18 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.common.LiveOrderTrackingScreen
+import com.zouitel.presentaion.common.Order
+import com.zouitel.presentaion.common.OrderStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
-class OrdersScreen : Screen {
+class FoodActivitiesScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = rememberScreenModel { OrdersScreenModel() }
+        val screenModel = rememberScreenModel { FoodActivitiesScreenModel() }
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
@@ -120,12 +123,16 @@ class OrdersScreen : Screen {
 
                 // Delivery Info
                 Text(
-                    text = "Delivery Information",
+                    text = "Delivery & Courier Info",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(text = "Address: ${order.deliveryAddress}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
+
+                if (order.courierName.isNotBlank()) {
+                    Text(text = "Courier: ${order.courierName}", style = MaterialTheme.typography.bodyMedium)
+                }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -142,7 +149,7 @@ class OrdersScreen : Screen {
                             .padding(vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("${item.quantity}x ${item.mealName}", style = MaterialTheme.typography.bodySmall)
+                        Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
                         Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -200,7 +207,7 @@ class OrdersScreen : Screen {
             OrderStatus.PLACED -> MaterialTheme.colorScheme.tertiary to "ORDER PLACED"
             OrderStatus.ACCEPTED -> MaterialTheme.colorScheme.secondary to "CONFIRMED BY RESTAURANT"
             OrderStatus.PREPARING -> MaterialTheme.colorScheme.primary to "IN KITCHEN"
-            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR DELIVERY"
+            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR COURIER"
             OrderStatus.DELIVERED -> MaterialTheme.colorScheme.outline to "DELIVERED"
             OrderStatus.CANCELLED -> MaterialTheme.colorScheme.error to "CANCELLED"
         }

@@ -250,7 +250,7 @@ class PassengerActiveTripScreen(
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text("Your Driver", color = Color.Gray, fontSize = 12.sp)
-                            Text(text = trip.driverId ?: "NON", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text(text = trip.driverId ?: "NONE", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Star, contentDescription = null, tint = Color(0xFFFFC107), modifier = Modifier.size(18.dp))

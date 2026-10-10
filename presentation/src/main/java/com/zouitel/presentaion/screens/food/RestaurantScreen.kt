@@ -4,7 +4,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -21,6 +20,10 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.common.CartItem
+import com.zouitel.presentaion.common.LiveOrderTrackingScreen
+import com.zouitel.presentaion.common.Order
+import com.zouitel.presentaion.common.OrderStatus
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -38,15 +41,15 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         val profile by accountModel.profile.collectAsState()
 
         val isAuthorizedManager = profile?.let { user ->
-            user.isAdmin || user.email in restaurant.managers || user.phoneNumber in restaurant.managers
+            user.email in restaurant.managers || user.phoneNumber in restaurant.managers
         } ?: false
 
-        // Order Sheet State (mealId -> CartItem)
+        // Order Sheet State (id -> CartItem)
         val orderSheetItems = remember { mutableStateMapOf<String, CartItem>() }
         var showOrderBottomSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember { mutableStateOf("Cash on Delivery") }
+        var paymentMethod by remember { mutableStateOf("Cash on Courier") }
         var isSubmittingOrder by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
@@ -127,8 +130,8 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(text = "Rating: ⭐ ${restaurant.rating}", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Delivery Fee: $${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Est. Delivery: ${restaurant.estimatedTimeMinutes} mins", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Courier Fee: $${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Est. Courier: ${restaurant.estimatedTimeMinutes} mins", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
 
@@ -173,8 +176,8 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                 },
                                 onQuickAdd = {
                                     orderSheetItems[meal.id] = CartItem(
-                                        mealId = meal.id,
-                                        mealName = meal.name,
+                                        id = meal.id,
+                                        name = meal.name,
                                         basePrice = meal.basePrice,
                                         quantity = currentQuantity + 1,
                                         selectedOptions = emptyList()
@@ -220,12 +223,12 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             .heightIn(max = 240.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(orderSheetItems.values.toList(), key = { it.mealId }) { item ->
+                        items(orderSheetItems.values.toList(), key = { it.id }) { item ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        val meal = meals.find { it.id == item.mealId }
+                                        val meal = meals.find { it.id == item.id }
                                         if (meal != null) {
                                             navigator?.push(
                                                 MealScreen(
@@ -242,7 +245,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = item.mealName, style = MaterialTheme.typography.bodyLarge)
+                                    Text(text = item.name, style = MaterialTheme.typography.bodyLarge)
                                     Text(
                                         text = "$${"%.2f".format(item.basePrice)} x ${item.quantity} = $${"%.2f".format(item.totalPrice)}",
                                         style = MaterialTheme.typography.bodySmall,
@@ -260,9 +263,9 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     IconButton(onClick = {
                                         if (item.quantity > 1) {
-                                            orderSheetItems[item.mealId] = item.copy(quantity = item.quantity - 1)
+                                            orderSheetItems[item.id] = item.copy(quantity = item.quantity - 1)
                                         } else {
-                                            orderSheetItems.remove(item.mealId)
+                                            orderSheetItems.remove(item.id)
                                         }
                                     }) {
                                         Icon(
@@ -275,7 +278,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     Text("${item.quantity}", style = MaterialTheme.typography.titleMedium)
 
                                     IconButton(onClick = {
-                                        orderSheetItems[item.mealId] = item.copy(quantity = item.quantity + 1)
+                                        orderSheetItems[item.id] = item.copy(quantity = item.quantity + 1)
                                     }) {
                                         Icon(Icons.Default.Add, contentDescription = "Increase")
                                     }
@@ -290,7 +293,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     OutlinedTextField(
                         value = deliveryAddress,
                         onValueChange = { deliveryAddress = it },
-                        label = { Text("Delivery Address") },
+                        label = { Text("Courier Address") },
                         placeholder = { Text("Enter building, street, floor #") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
@@ -317,7 +320,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Delivery Fee:", style = MaterialTheme.typography.bodyMedium)
+                            Text("Courier Fee:", style = MaterialTheme.typography.bodyMedium)
                             Text("$${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
@@ -466,7 +469,7 @@ private suspend fun sendOrderCardToManager(
         restaurantName = restaurant.name,
         items = cartItems,
         subtotal = subtotal,
-        deliveryFee = restaurant.deliveryFee,
+        courierFee = restaurant.deliveryFee,
         totalPrice = totalPrice,
         status = OrderStatus.PLACED,
         deliveryAddress = deliveryAddress,

@@ -1,18 +1,8 @@
 package com.zouitel.presentaion.model
 
+import com.zouitel.presentaion.common.Status
+import com.zouitel.presentaion.common.UserMode
 import kotlinx.serialization.Serializable
-
-@Serializable
-enum class DriveMode {
-    PASSENGER,
-    DRIVER
-}
-
-@Serializable
-enum class FoodMode {
-    CLIENT,
-    MANAGER
-}
 
 @Serializable
 data class VehicleInfo(
@@ -20,7 +10,7 @@ data class VehicleInfo(
     val model: String = "Corolla",
     val color: String = "Silver",
     val licensePlate: String = "12345-121-16",
-    val serviceType: String = "Ride" // Ride, Moto, Courier, Freight
+    val serviceType: String = "Ride"
 )
 
 @Serializable
@@ -33,17 +23,32 @@ data class DriverLocation(
 @Serializable
 data class UserProfile(
     val uid: String = "",
-    val name: String = "",
+    val fullName: String = "",
     val email: String? = null,
     val phoneNumber: String? = null,
     val photoUrl: String? = null,
-    val isAdmin: Boolean = false,
     val currentLocation: DriverLocation? = null,
-    val driveMode: DriveMode = DriveMode.PASSENGER,
-    val isApprovedDriver: Boolean = true,
+    //---------------------------
+    val driveMode: UserMode = UserMode.PASSENGER,
+    val driverStatus: Status = Status.NONE,
     val isDriverOnline: Boolean = false,
-    val foodMode: FoodMode = FoodMode.CLIENT,
-    val vehicleInfo: VehicleInfo? = VehicleInfo()
+    //---------------------------------
+    val foodMode: UserMode = UserMode.CLIENT,
+    val orderStatus: Status = Status.NONE,
+    val isFoodServiceOnline: Boolean = false,
+    //----------------------------------
+    val shopMode: UserMode = UserMode.CLIENT,
+    val shopStatus: Status = Status.NONE,
+    val isShopServiceOnline: Boolean = false,
+    //----------------------------------
+    val vehicleInfo: VehicleInfo? = VehicleInfo(),
+    //--------------------------------
+    val courierMode: UserMode = UserMode.COURIER,
+    val courierStatus: Status = Status.NONE,
+    val isCourierOnline: Boolean = false,
+    //--------------------------------
+    val freightMode: UserMode = UserMode.FREIGHT,
+    val freightStatus: Status = Status.NONE,
+    val isFreightServiceOnline: Boolean = false
 ) {
-    fun canSwitchToDriverMode(): Boolean = isApprovedDriver && vehicleInfo != null
 }

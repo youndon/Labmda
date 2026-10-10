@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.DirectionsCar
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.Storefront
@@ -37,8 +39,9 @@ import cafe.adriel.voyager.navigator.CurrentScreen
 import cafe.adriel.voyager.navigator.Navigator
 import coil3.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
+import com.zouitel.presentaion.admin.PanelScreen
 import com.zouitel.presentaion.screens.account.AccountScreen
-import com.zouitel.presentaion.screens.food.MainFoodScreen
+import com.zouitel.presentaion.screens.food.FoodMainScreen
 import com.zouitel.presentaion.screens.shops.ShopsScreen
 
 private data class MainTab(
@@ -62,8 +65,9 @@ class MainScreen(
                 } else {
                     MainTab(PassengerScreen(), "Ride", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
                 },
-                MainTab(MainFoodScreen(), "Food", Icons.Filled.Restaurant, Icons.Outlined.Restaurant),
+                MainTab(FoodMainScreen(), "Food", Icons.Filled.Restaurant, Icons.Outlined.Restaurant),
                 MainTab(ShopsScreen(), "Shops", Icons.Filled.Storefront, Icons.Outlined.Storefront),
+                MainTab(PanelScreen(), "Panel", Icons.Filled.AdminPanelSettings, Icons.Outlined.AdminPanelSettings),
                 MainTab(AccountScreen(), "Account", Icons.Filled.AccountCircle, Icons.Outlined.AccountCircle),
             )
         }

@@ -3,8 +3,7 @@ package com.zouitel.presentaion.screens.account
 import android.content.Context
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.FoodMode
-import com.zouitel.presentaion.model.DriveMode
+import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.auth.FirebaseAuth
 import dev.gitlive.firebase.auth.FirebaseUser
@@ -92,7 +91,7 @@ class AccountScreenModel(
     }
 
     // Toggle active ride user mode in Realtime Database
-    suspend fun updateUserMode(uid: String, mode: DriveMode) {
+    suspend fun updateUserMode(uid: String, mode: UserMode) {
         if (uid.isBlank()) return
         db.child("users")
             .child(uid)
@@ -102,7 +101,7 @@ class AccountScreenModel(
     }
 
     // Toggle active food user mode in Realtime Database
-    suspend fun updateFoodUserMode(uid: String, mode: FoodMode) {
+    suspend fun updateFoodUserMode(uid: String, mode: UserMode) {
         if (uid.isBlank()) return
         db.child("users")
             .child(uid)
@@ -111,10 +110,4 @@ class AccountScreenModel(
             )
     }
 
-    suspend fun updateUserProfile(user: UserProfile) {
-        if (user.uid.isBlank()) return
-        db.child("users").child(user.uid).updateChildren(
-            mapOf("name" to user.name)
-        )
-    }
 }

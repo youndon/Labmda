@@ -1,7 +1,6 @@
 package com.zouitel.presentaion.screens.food
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -11,10 +10,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.common.CartItem
 
 data class MealScreen(
     val meal: Meal,
@@ -69,8 +68,8 @@ data class MealScreen(
                         Button(
                             onClick = {
                                 val item = CartItem(
-                                    mealId = meal.id,
-                                    mealName = meal.name,
+                                    id = meal.id,
+                                    name = meal.name,
                                     basePrice = meal.basePrice,
                                     quantity = quantity,
                                     selectedOptions = emptyList(),

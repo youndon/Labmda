@@ -75,7 +75,7 @@ class RestaurantWorkplaceScreen : Screen {
                 OutlinedTextField(
                     value = deliveryFee,
                     onValueChange = { deliveryFee = it },
-                    label = { Text("Delivery Fee ($)") },
+                    label = { Text("Courier Fee ($)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )

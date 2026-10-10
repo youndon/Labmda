@@ -5,10 +5,9 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.launch
 
-// ScreenModel for MainFoodScreen
-class MainFoodScreenModel(
+// ScreenModel for FoodMainScreen
+class FoodMainScreenModel(
     private val repository: FoodRepository = FoodRepository()
 ) : ScreenModel {
 

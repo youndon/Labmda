@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.model.FoodMode
+import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -35,7 +35,7 @@ class FoodSettingsScreen : Screen {
             currentUser?.uid?.let { uid ->
                 try {
                     accountScreenModel.getUserProfile(uid).collect {
-                        it?.foodMode ?: FoodMode.CLIENT
+                        it?.foodMode ?: UserMode.CLIENT
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -43,7 +43,7 @@ class FoodSettingsScreen : Screen {
             }
         }
 
-        fun onModeSelected(selectedMode: FoodMode) {
+        fun onModeSelected(selectedMode: UserMode) {
             currentUser?.uid?.let { uid ->
                 scope.launch(Dispatchers.IO) {
                     accountScreenModel.updateFoodUserMode(uid, selectedMode)
@@ -81,8 +81,8 @@ class FoodSettingsScreen : Screen {
                     title = "Client Mode",
                     description = "Browse restaurants, place meal orders, and track active deliveries.",
                     icon = Icons.Default.Person,
-                    isSelected = profile?.foodMode == FoodMode.CLIENT,
-                    onClick = { onModeSelected(FoodMode.CLIENT) }
+                    isSelected = profile?.foodMode == UserMode.CLIENT,
+                    onClick = { onModeSelected(UserMode.CLIENT) }
                 )
 
                 // Manager Mode Card
@@ -90,11 +90,11 @@ class FoodSettingsScreen : Screen {
                     title = "Restaurant Manager Mode",
                     description = "Receive orders live from clients, manage kitchen progress, and update status.",
                     icon = Icons.Default.Badge,
-                    isSelected = profile?.foodMode == FoodMode.MANAGER,
-                    onClick = { onModeSelected(FoodMode.MANAGER) }
+                    isSelected = profile?.foodMode == UserMode.MANAGER,
+                    onClick = { onModeSelected(UserMode.MANAGER) }
                 )
 
-                if (profile?.foodMode == FoodMode.MANAGER) {
+                if (profile?.foodMode == UserMode.MANAGER) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = { navigator?.push(DashboardScreen()) },

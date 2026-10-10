@@ -2,6 +2,9 @@ package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.zouitel.presentaion.common.CartItem
+import com.zouitel.presentaion.common.Order
+import com.zouitel.presentaion.common.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -10,7 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class OrdersScreenModel : ScreenModel {
+class FoodActivitiesScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUserId = Firebase.auth.currentUser?.uid
 
@@ -40,19 +43,27 @@ class OrdersScreenModel : ScreenModel {
                         val restaurantId: String = child.child("restaurantId").value()
                         val restaurantName: String = child.child("restaurantName").value()
                         val subtotal: Double = child.child("subtotal").value()
-                        val deliveryFee: Double = child.child("deliveryFee").value()
+
+                        val courierFee: Double = runCatching { child.child("courierFee").value<Double>() }
+                            .getOrElse { runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(0.0) }
+
                         val totalPrice: Double = child.child("totalPrice").value()
                         val statusStr: String = child.child("status").value()
                         val deliveryAddress: String = child.child("deliveryAddress").value()
                         val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()
                         val paymentMethod: String = child.child("paymentMethod").value()
 
-                        val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(OrderStatus.PLACED)
+                        val courierId: String = runCatching { child.child("courierId").value<String>() }.getOrDefault("")
+                        val courierName: String = runCatching { child.child("courierName").value<String>() }.getOrDefault("")
+                        val courierPhone: String = runCatching { child.child("courierPhone").value<String>() }.getOrDefault("")
+
+                        val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(
+                            OrderStatus.PLACED)
 
                         val items = child.child("items").children.map { itemChild ->
                             CartItem(
-                                mealId = itemChild.child("mealId").value(),
-                                mealName = itemChild.child("mealName").value(),
+                                id = itemChild.child("id").value(),
+                                name = itemChild.child("name").value(),
                                 basePrice = itemChild.child("basePrice").value(),
                                 quantity = itemChild.child("quantity").value(),
                                 selectedOptions = emptyList()
@@ -66,12 +77,15 @@ class OrdersScreenModel : ScreenModel {
                             restaurantName = restaurantName,
                             items = items,
                             subtotal = subtotal,
-                            deliveryFee = deliveryFee,
+                            courierFee = courierFee,
                             totalPrice = totalPrice,
                             status = status,
                             deliveryAddress = deliveryAddress,
                             createdAtTimestamp = createdAtTimestamp,
-                            paymentMethod = paymentMethod
+                            paymentMethod = paymentMethod,
+                            courierId = courierId,
+                            courierName = courierName,
+                            courierPhone = courierPhone
                         )
                     } catch (e: Exception) {
                         null

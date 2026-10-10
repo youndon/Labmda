@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 
-// ScreenModel for RestaurantScreen
+// ScreenModel for Restaurants
 class RestaurantDetailScreenModel(
     restaurantId: String,
     repository: FoodRepository = FoodRepository()
