@@ -1,4 +1,4 @@
-package com.zouitel.presentaion.screens.ride
+package com.zouitel.presentaion.screens
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -42,6 +42,8 @@ import com.google.firebase.auth.FirebaseAuth
 import com.zouitel.presentaion.admin.PanelScreen
 import com.zouitel.presentaion.screens.account.AccountScreen
 import com.zouitel.presentaion.screens.food.FoodMainScreen
+import com.zouitel.presentaion.screens.ride.DriverDashboardScreen
+import com.zouitel.presentaion.screens.ride.PassengerScreen
 import com.zouitel.presentaion.screens.shops.ShopsScreen
 
 private data class MainTab(
@@ -52,7 +54,7 @@ private data class MainTab(
 )
 
 class MainScreen(
-    private val isDriverMode: Boolean = true // Default to Passenger mode
+    private val isDriverMode: Boolean = false // Default to Passenger mode
 ) : Screen {
 
     @Composable
@@ -61,9 +63,9 @@ class MainScreen(
             listOf(
                 // Dynamically assign the first tab based on the selected mode
                 if (isDriverMode) {
-                    MainTab(DriverScreen(), "Drive", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
+                    MainTab(DriverDashboardScreen(), "Drive", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
                 } else {
-                    MainTab(PassengerScreen(), "Ride", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
+                    MainTab(PassengerScreen(), "Passenger", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
                 },
                 MainTab(FoodMainScreen(), "Food", Icons.Filled.Restaurant, Icons.Outlined.Restaurant),
                 MainTab(ShopsScreen(), "Shops", Icons.Filled.Storefront, Icons.Outlined.Storefront),

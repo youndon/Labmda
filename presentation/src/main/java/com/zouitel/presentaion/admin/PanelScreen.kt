@@ -3,6 +3,7 @@ package com.zouitel.presentaion.admin
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsBike
+import androidx.compose.material.icons.filled.DriveEta
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Storefront
@@ -67,6 +68,15 @@ class PanelScreen : Screen {
                     Icon(Icons.Default.LocalShipping, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Manage Freight Applications")
+                }
+                Button(
+                    onClick = { navigator?.push(AdminDriverScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.DriveEta, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Manage Driver Applications")
                 }
             }
         }

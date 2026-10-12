@@ -21,9 +21,10 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import com.zouitel.presentaion.screens.MainScreen
 import com.zouitel.presentaion.screens.courier.CourierWorkplaceScreen
 import com.zouitel.presentaion.screens.freight.FreightWorkplaceScreen
-import com.zouitel.presentaion.screens.ride.MainScreen
+import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
 
 class SettingsScreen() : Screen {
 
@@ -79,6 +80,9 @@ class SettingsScreen() : Screen {
                 }
                 SettingsRow(Icons.Filled.LocalShipping, "Business (Freight Workplace)") {
                     navigator.push(FreightWorkplaceScreen())
+                }
+                SettingsRow(Icons.Filled.DirectionsCar, "Business (Driver Workplace)") {
+                    navigator.push(DriverWorkplaceScreen())
                 }
                 SettingsSwitchRow(
                     icon = Icons.Filled.NotificationsNone,

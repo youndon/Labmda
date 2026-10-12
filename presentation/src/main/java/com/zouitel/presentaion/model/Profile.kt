@@ -5,7 +5,13 @@ import com.zouitel.presentaion.common.UserMode
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class VehicleType {
+    CAR, BIKE, MOTORCYCLE, TRUCK, VAN, OTHER
+}
+
+@Serializable
 data class VehicleInfo(
+    val type: VehicleType? = null,
     val make: String = "Toyota",
     val model: String = "Corolla",
     val color: String = "Silver",
@@ -41,7 +47,7 @@ data class UserProfile(
     val shopStatus: Status = Status.NONE,
     val isShopServiceOnline: Boolean = false,
     //----------------------------------
-    val vehicleInfo: VehicleInfo? = VehicleInfo(),
+    val vehicleInfo: VehicleInfo? = null,
     //--------------------------------
     val courierMode: UserMode = UserMode.COURIER,
     val courierStatus: Status = Status.NONE,

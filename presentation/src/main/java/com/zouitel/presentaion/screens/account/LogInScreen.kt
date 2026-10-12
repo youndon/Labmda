@@ -23,10 +23,9 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
-
 import com.mmk.kmpauth.google.rememberGoogleSignInState
 import com.zouitel.presentaion.model.UserProfile
-import com.zouitel.presentaion.screens.ride.MainScreen
+import com.zouitel.presentaion.screens.MainScreen
 
 // GitLive Firebase (Used for Sign-In Execution)
 import dev.gitlive.firebase.Firebase
@@ -97,10 +96,6 @@ class LogInScreen : Screen {
                                     photoUrl = firebaseUser.photoURL
                                 )
                             )
-
-                            cc.e?.let {
-                                println("saved user, but couldn't save your profile: ${it.message}")
-                            }
                         }
 
                         onSignedIn()
