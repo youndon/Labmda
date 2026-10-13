@@ -1,5 +1,11 @@
 package com.zouitel.presentaion.screens.ride
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.os.Looper
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,10 +18,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.LatLng
@@ -29,6 +42,7 @@ import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.Trip
 
 class DriverDashboardScreen : Screen {
+    @SuppressLint("MissingPermission")
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
@@ -43,7 +57,63 @@ class DriverDashboardScreen : Screen {
         val cameraPositionState = rememberCameraPositionState()
         val routeColor = MaterialTheme.colorScheme.primary
 
-        val currentList = if (selectedTab == 0) availableTrips else activeTrips
+        // --- Online status + live location ---
+        val context = LocalContext.current
+        val isOnline by screenModel.isOnline.collectAsState()
+        val hasActiveTrip = activeTrips.isNotEmpty()
+        var myLocation by remember { mutableStateOf<LatLng?>(null) }
+
+        var hasLocationPermission by remember {
+            mutableStateOf(
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                        PackageManager.PERMISSION_GRANTED ||
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                        PackageManager.PERMISSION_GRANTED
+            )
+        }
+        val permissionLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { result ->
+            hasLocationPermission = result.values.any { it }
+            // The driver tapped "online", so continue once permission is granted
+            if (hasLocationPermission) screenModel.setOnline(true)
+        }
+        val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
+        // While online (and permitted), push the driver's position to Firebase
+        DisposableEffect(isOnline, hasLocationPermission) {
+            if (!isOnline || !hasLocationPermission) {
+                return@DisposableEffect onDispose { }
+            }
+
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
+                .setMinUpdateDistanceMeters(10f)
+                .build()
+
+            val callback = object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    result.lastLocation?.let { loc ->
+                        myLocation = LatLng(loc.latitude, loc.longitude)
+                        screenModel.updateDriverLocation(loc.latitude, loc.longitude, loc.bearing)
+                    }
+                }
+            }
+
+            fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+
+            onDispose { fusedClient.removeLocationUpdates(callback) }
+        }
+
+        // Center on the driver the first time a fix arrives
+        LaunchedEffect(myLocation == null) {
+            myLocation?.let {
+                runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(it, 15f), 600) }
+            }
+        }
+
+        // Offline drivers don't see requests
+        val requests = if (isOnline) availableTrips else emptyList()
+        val currentList = if (selectedTab == 0) requests else activeTrips
         val focusedTrip = currentList.firstOrNull { it.id == focusedTripId }
 
         // Frame the pickup and the destination of the trip the driver tapped
@@ -87,6 +157,14 @@ class DriverDashboardScreen : Screen {
                     uiSettings = MapUiSettings(zoomControlsEnabled = false),
                     contentPadding = PaddingValues(bottom = 340.dp)
                 ) {
+                    myLocation?.let {
+                        Marker(
+                            state = rememberUpdatedMarkerState(position = it),
+                            title = "You",
+                            icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
+                        )
+                    }
+
                     currentList.forEach { trip ->
                         val p = trip.pickupPoint()
                         val d = trip.dropoffPoint()
@@ -124,6 +202,49 @@ class DriverDashboardScreen : Screen {
                     }
                 }
 
+                Card(
+                    modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                if (isOnline) "You're online" else "You're offline",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                when {
+                                    isOnline && hasActiveTrip -> "Finish your trip to go offline"
+                                    isOnline -> "Sharing your location and receiving requests"
+                                    else -> "Go online to receive ride requests"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isOnline,
+                            // Can't go offline in the middle of a trip
+                            enabled = !(isOnline && hasActiveTrip),
+                            onCheckedChange = { wantOnline ->
+                                if (wantOnline && !hasLocationPermission) {
+                                    permissionLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
+                                } else {
+                                    screenModel.setOnline(wantOnline)
+                                }
+                            }
+                        )
+                    }
+                }
+
                 Column(
                     modifier = Modifier.fillMaxSize().padding(16.dp),
                     verticalArrangement = Arrangement.Bottom
@@ -139,7 +260,7 @@ class DriverDashboardScreen : Screen {
                                 Tab(
                                     selected = selectedTab == 0,
                                     onClick = { selectedTab = 0; focusedTripId = null },
-                                    text = { Text("Requests (${availableTrips.size})") }
+                                    text = { Text("Requests (${requests.size})") }
                                 )
                                 Tab(
                                     selected = selectedTab == 1,
@@ -155,7 +276,10 @@ class DriverDashboardScreen : Screen {
                             } else if (currentList.isEmpty()) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     Text(
-                                        if (selectedTab == 0) "No ride requests available."
+                                        if (selectedTab == 0) {
+                                            if (isOnline) "No ride requests available."
+                                            else "You're offline. Switch to online to receive ride requests."
+                                        }
                                         else "You have no active trips right now."
                                     )
                                 }

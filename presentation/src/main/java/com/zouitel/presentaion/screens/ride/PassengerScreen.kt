@@ -85,6 +85,7 @@ class PassengerScreen : Screen {
         var destinationAddress by remember { mutableStateOf("") }
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
+        var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember { mutableStateOf(false) }
         var hasCenteredOnPickup by remember { mutableStateOf(false) }
 
@@ -102,6 +103,8 @@ class PassengerScreen : Screen {
         ) { result -> hasLocationPermission = result.values.any { it } }
 
         val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+        var tappedDriverId by remember { mutableStateOf<String?>(null) }
+        val tappedDriver = onlineDrivers.firstOrNull { it.uid == tappedDriverId }
 
         fun locateMe() {
             if (!hasLocationPermission) {
@@ -175,6 +178,30 @@ class PassengerScreen : Screen {
         val fare = estimateFare(distanceKm)
         val visibleDrivers = onlineDrivers.filter { (it.vehicleInfo?.type ?: VehicleType.CAR) == vehicleType }
 
+        fun submitTrip(name: String, phone: String, driver: UserProfile?) {
+            val p = pickup
+            val d = destination
+            if (p == null || d == null) return
+            screenModel.requestTrip(
+                pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
+                pickupLat = p.latitude,
+                pickupLng = p.longitude,
+                dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
+                dropoffLat = d.latitude,
+                dropoffLng = d.longitude,
+                fare = fare,
+                passengerName = name,
+                passengerPhone = phone,
+                requestedVehicleType = driver?.vehicleInfo?.type ?: vehicleType,
+                targetDriver = driver
+            )
+            destination = null
+            destinationAddress = ""
+            selectedDriver = null
+            tappedDriverId = null
+            scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
+        }
+
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -237,24 +264,43 @@ class PassengerScreen : Screen {
                     }
 
                     if (activeTrip == null) {
-                        // Pick a specific driver by tapping his marker
-                        visibleDrivers.forEach { driver ->
+                        onlineDrivers.forEach { driver ->
                             val loc = driver.currentLocation ?: return@forEach
                             if (loc.latitude == 0.0 && loc.longitude == 0.0) return@forEach
-                            Marker(
-                                state = rememberUpdatedMarkerState(position = LatLng(loc.latitude, loc.longitude)),
-                                title = driver.fullName,
-                                snippet = "${driver.vehicleInfo?.color} ${driver.vehicleInfo?.make}",
-                                icon = BitmapDescriptorFactory.defaultMarker(
-                                    if (selectedDriver?.uid == driver.uid) BitmapDescriptorFactory.HUE_GREEN
-                                    else BitmapDescriptorFactory.HUE_ORANGE
-                                ),
-                                onClick = {
-                                    selectedDriver = driver
-                                    false
-                                }
-                            )
+                            key(driver.uid) {
+                                Marker(
+                                    state = rememberUpdatedMarkerState(position = LatLng(loc.latitude, loc.longitude)),
+                                    title = driver.fullName,
+                                    icon = BitmapDescriptorFactory.defaultMarker(
+                                        if (tappedDriverId == driver.uid) BitmapDescriptorFactory.HUE_GREEN
+                                        else BitmapDescriptorFactory.HUE_ORANGE
+                                    ),
+                                    onClick = {
+                                        tappedDriverId = driver.uid
+                                        true // consume the click so the default info window doesn't pop up
+                                    }
+                                )
+                            }
                         }
+                        // Pick a specific driver by tapping his marker
+//                        visibleDrivers.forEach { driver ->
+//                            val loc = driver.currentLocation ?: return@forEach
+//                            if (loc.latitude == 0.0 && loc.longitude == 0.0) return@forEach
+//                            Marker(
+//                                state = rememberUpdatedMarkerState(position = LatLng(loc.latitude, loc.longitude)),
+//                                title = driver.fullName,
+//                                snippet = "${driver.vehicleInfo?.color} ${driver.vehicleInfo?.make}",
+//                                icon = BitmapDescriptorFactory.defaultMarker(
+//                                    if (selectedDriver?.uid == driver.uid) BitmapDescriptorFactory.HUE_GREEN
+//                                    else BitmapDescriptorFactory.HUE_ORANGE
+//                                ),
+//                                onClick = {
+//                                    selectedDriver = driver
+//                                    requestSheetDriver = driver
+//                                    false
+//                                }
+//                            )
+//                        }
                     } else {
                         // Follow the assigned driver live
                         onlineDrivers.firstOrNull { it.uid == activeTrip.driverId }?.currentLocation?.let { loc ->
@@ -321,33 +367,55 @@ class PassengerScreen : Screen {
                                         destination = null
                                         destinationAddress = ""
                                     },
-                                    onSubmit = { name, phone ->
-                                        val p = pickup
-                                        val d = destination
-                                        if (p != null && d != null) {
-                                            screenModel.requestTrip(
-                                                pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
-                                                pickupLat = p.latitude,
-                                                pickupLng = p.longitude,
-                                                dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
-                                                dropoffLat = d.latitude,
-                                                dropoffLng = d.longitude,
-                                                fare = fare,
-                                                passengerName = name,
-                                                passengerPhone = phone,
-                                                requestedVehicleType = vehicleType,
-                                                targetDriver = selectedDriver
-                                            )
-                                            destination = null
-                                            destinationAddress = ""
-                                            selectedDriver = null
-                                            scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
-                                        }
-                                    }
+                                    onSubmit = { name, phone -> submitTrip(name, phone, selectedDriver) }
                                 )
                             }
                         }
                     }
+                }
+            }
+
+            // Tap a driver marker -> request that driver directly
+            requestSheetDriver?.let { driver ->
+                ModalBottomSheet(onDismissRequest = {
+                    requestSheetDriver = null
+                    selectedDriver = null
+                }) {
+                    DriverRequestSheet(
+                        driver = driver,
+                        hasPickup = pickup != null,
+                        pickupAddress = pickupAddress,
+                        hasDestination = destination != null,
+                        destinationAddress = destinationAddress,
+                        distanceKm = distanceKm,
+                        fare = fare,
+                        initialName = passengerInfo.name,
+                        initialPhone = passengerInfo.phone,
+                        onRequest = { name, phone ->
+                            val p = pickup
+                            val d = destination
+                            if (p != null && d != null) {
+                                screenModel.requestTrip(
+                                    pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
+                                    pickupLat = p.latitude,
+                                    pickupLng = p.longitude,
+                                    dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
+                                    dropoffLat = d.latitude,
+                                    dropoffLng = d.longitude,
+                                    fare = fare,
+                                    passengerName = name,
+                                    passengerPhone = phone,
+                                    requestedVehicleType = vehicleType,
+                                    targetDriver = driver
+                                )
+                                destination = null
+                                destinationAddress = ""
+                                selectedDriver = null
+                                requestSheetDriver = null
+                                scope.launch { snackbarHostState.showSnackbar("Trip requested with ${driver.fullName}") }
+                            }
+                        }
+                    )
                 }
             }
 
@@ -371,6 +439,24 @@ class PassengerScreen : Screen {
                             }
                         }
                     }
+                }
+            }
+            if (tappedDriver != null && activeTrip == null) {
+                ModalBottomSheet(onDismissRequest = { tappedDriverId = null }) {
+                    DriverRequestSheet(
+                        driver = tappedDriver,
+                        driverDistanceKm = pickup?.let { p ->
+                            tappedDriver.currentLocation?.let { distanceKm(p, LatLng(it.latitude, it.longitude)) }
+                        },
+                        hasDestination = destination != null,
+                        destinationAddress = destinationAddress,
+                        tripDistanceKm = distanceKm,
+                        fare = fare,
+                        initialName = passengerInfo.name,
+                        initialPhone = passengerInfo.phone,
+                        onPickDestination = { tappedDriverId = null },
+                        onRequest = { name, phone -> submitTrip(name, phone, tappedDriver) }
+                    )
                 }
             }
         }
@@ -511,6 +597,218 @@ class PassengerScreen : Screen {
                 ) {
                     Text(if (selectedDriver != null) "Request ${selectedDriver.fullName}" else "Request ride")
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun DriverRequestSheet(
+        driver: UserProfile,
+        driverDistanceKm: Double?,
+        hasDestination: Boolean,
+        destinationAddress: String,
+        tripDistanceKm: Double,
+        fare: Double,
+        initialName: String,
+        initialPhone: String,
+        onPickDestination: () -> Unit,
+        onRequest: (String, String) -> Unit
+    ) {
+        var name by remember(initialName) { mutableStateOf(initialName) }
+        var phone by remember(initialPhone) { mutableStateOf(initialPhone) }
+        val v = driver.vehicleInfo
+
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(driver.fullName, style = MaterialTheme.typography.titleLarge)
+
+            if (v != null) {
+                Text(
+                    "${v.color} ${v.make} ${v.model}" +
+                            if (v.licensePlate.isNotBlank()) " · ${v.licensePlate}" else "",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                v.type?.let { AssistChip(onClick = {}, label = { Text(it.name) }) }
+            }
+
+            driverDistanceKm?.let {
+                val eta = maxOf(1, Math.ceil(it / 30.0 * 60).toInt()) // assumes ~30 km/h
+                Text(
+                    "${"%.1f".format(it)} km away · ~$eta min",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            HorizontalDivider()
+
+            if (!hasDestination) {
+                Text(
+                    "Tap the map to choose your destination, then tap this driver again.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Button(onClick = onPickDestination, modifier = Modifier.fillMaxWidth()) {
+                    Text("Choose destination")
+                }
+            } else {
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(Icons.Default.Flag, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(12.dp))
+                    Text(destinationAddress.ifBlank { "Resolving address…" })
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = name, onValueChange = { name = it },
+                        label = { Text("Name") }, singleLine = true, modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = phone, onValueChange = { phone = it },
+                        label = { Text("Phone") }, singleLine = true, modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Distance: ${"%.1f".format(tripDistanceKm)} km")
+                    Text(
+                        "$${"%.2f".format(fare)}",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Button(
+                    onClick = { onRequest(name.trim(), phone.trim()) },
+                    enabled = name.isNotBlank() && tripDistanceKm > 0.05,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Request ${driver.fullName}")
+                }
+            }
+        }
+    }
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun DriverRequestSheet(
+        driver: UserProfile,
+        hasPickup: Boolean,
+        pickupAddress: String,
+        hasDestination: Boolean,
+        destinationAddress: String,
+        distanceKm: Double,
+        fare: Double,
+        initialName: String,
+        initialPhone: String,
+        onRequest: (String, String) -> Unit
+    ) {
+        var name by remember(initialName) { mutableStateOf(initialName) }
+        var phone by remember(initialPhone) { mutableStateOf(initialPhone) }
+
+        Column(modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 28.dp)) {
+            Text("Request this driver", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(12.dp))
+
+            // Driver summary
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            driver.fullName.take(1).uppercase(),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(driver.fullName, style = MaterialTheme.typography.titleSmall)
+                    driver.vehicleInfo?.let { v ->
+                        Text(
+                            "${v.color} ${v.make} ${v.model} · ${v.licensePlate}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Route summary
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.MyLocation, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (hasPickup) pickupAddress.ifBlank { "Resolving address…" } else "Locating you…",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Flag, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (hasDestination) destinationAddress.ifBlank { "Resolving address…" }
+                    else "Tap the map to set a destination first",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (hasDestination) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.error
+                )
+            }
+
+            if (hasDestination && hasPickup) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "$${"%.2f".format(fare)}",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Button(
+                onClick = { onRequest(name.trim(), phone.trim()) },
+                enabled = hasPickup && hasDestination && name.isNotBlank() && distanceKm > 0.05,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Request ${driver.fullName}")
             }
         }
     }

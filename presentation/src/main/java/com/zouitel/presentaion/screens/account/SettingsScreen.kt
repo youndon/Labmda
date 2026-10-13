@@ -69,21 +69,12 @@ class SettingsScreen() : Screen {
                         // TODO: Save this preference to your DataStore/SharedPreferences here
 
                         // Restart the main screen with the newly selected mode
-                        rootNavigator.replaceAll(MainScreen(isDriverMode = newMode))
+                        rootNavigator.replaceAll(MainScreen())
                     }
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
-                SettingsRow(Icons.Filled.Work, "Business (Courier Workplace)") {
-                    navigator.push(CourierWorkplaceScreen())
-                }
-                SettingsRow(Icons.Filled.LocalShipping, "Business (Freight Workplace)") {
-                    navigator.push(FreightWorkplaceScreen())
-                }
-                SettingsRow(Icons.Filled.DirectionsCar, "Business (Driver Workplace)") {
-                    navigator.push(DriverWorkplaceScreen())
-                }
                 SettingsSwitchRow(
                     icon = Icons.Filled.NotificationsNone,
                     label = "Push notifications",

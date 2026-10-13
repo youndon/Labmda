@@ -25,6 +25,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,16 +36,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.CurrentScreen
 import cafe.adriel.voyager.navigator.Navigator
 import coil3.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.zouitel.presentaion.admin.PanelScreen
+import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.screens.account.AccountScreen
-import com.zouitel.presentaion.screens.food.FoodMainScreen
+import com.zouitel.presentaion.screens.account.AccountScreenModel
+import com.zouitel.presentaion.screens.food.FoodDashboardScreen
+import com.zouitel.presentaion.screens.food.RestaurantsScreen
 import com.zouitel.presentaion.screens.ride.DriverDashboardScreen
 import com.zouitel.presentaion.screens.ride.PassengerScreen
+import com.zouitel.presentaion.screens.shops.ShopOrdersScreen
 import com.zouitel.presentaion.screens.shops.ShopsScreen
+import com.zouitel.presentaion.screens.shops.ShopsScreenModel
 
 private data class MainTab(
     val screen: Screen,
@@ -53,22 +60,32 @@ private data class MainTab(
     val unselectedIcon: ImageVector,
 )
 
-class MainScreen(
-    private val isDriverMode: Boolean = false // Default to Passenger mode
-) : Screen {
+class MainScreen() : Screen {
 
     @Composable
     override fun Content() {
-        val tabs = remember(isDriverMode) {
+        val accountScreen = koinScreenModel<AccountScreenModel>()
+        val shopModel = koinScreenModel<ShopsScreenModel>()
+        val profile by accountScreen.profile.collectAsState()
+
+        val tabs = remember(profile?.driveMode, profile?.foodMode, profile?.shopMode) {
             listOf(
                 // Dynamically assign the first tab based on the selected mode
-                if (isDriverMode) {
+                if (profile?.driveMode == UserMode.DRIVER) {
                     MainTab(DriverDashboardScreen(), "Drive", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
                 } else {
                     MainTab(PassengerScreen(), "Passenger", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
                 },
-                MainTab(FoodMainScreen(), "Food", Icons.Filled.Restaurant, Icons.Outlined.Restaurant),
-                MainTab(ShopsScreen(), "Shops", Icons.Filled.Storefront, Icons.Outlined.Storefront),
+                if (profile?.foodMode == UserMode.MANAGER) {
+                    MainTab(FoodDashboardScreen(), "Orders", Icons.Filled.Restaurant, Icons.Outlined.Restaurant)
+                } else {
+                    MainTab(RestaurantsScreen(), "Food", Icons.Filled.Restaurant, Icons.Outlined.Restaurant)
+                },
+                if (profile?.shopMode == UserMode.MANAGER) {
+                    MainTab(ShopOrdersScreen(), "Orders", Icons.Filled.Storefront, Icons.Outlined.Storefront)
+                } else {
+                    MainTab(ShopsScreen(), "Shops", Icons.Filled.Storefront, Icons.Outlined.Storefront)
+                },
                 MainTab(PanelScreen(), "Panel", Icons.Filled.AdminPanelSettings, Icons.Outlined.AdminPanelSettings),
                 MainTab(AccountScreen(), "Account", Icons.Filled.AccountCircle, Icons.Outlined.AccountCircle),
             )

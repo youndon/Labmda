@@ -6,6 +6,7 @@ import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.screens.shops.Shop
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,23 +26,23 @@ class AdminShopsModel : ScreenModel {
     }
 
     private fun listenToShopApplications() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("shops").valueEvents.collect { snapshot ->
                 val list = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
                         val ownerUid: String = child.child("ownerUid").value()
-                        // Fixed: read "name" instead of "fullName"
-                        val name: String = child.child("name").value()
-                        val description: String = child.child("description").value()
-                        val category: String = child.child("category").value()
-                        val phone: String = child.child("phone").value()
-                        val address: String = child.child("address").value()
-                        val imageUrl: String = child.child("imageUrl").value()
-                        val statusStr: String = child.child("status").value()
-                        val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()
+                        val name: String = child.child("name").value()   
+                        val description: String = child.child("description").value()   
+                        val category: String = child.child("category").value()   
+                        val phone: String = child.child("phone").value()   
+                        val address: String = child.child("address").value()   
+                        val imageUrl: String = child.child("imageUrl").value()   
+                        val statusStr: String = child.child("status").value()   
+                        val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()   
 
-                        val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.PENDING)
+                        val isOnline: Boolean = child.child("isOnline").value()   
+                        val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.PENDING)   
 
                         Shop(
                             id = id,
@@ -53,7 +54,8 @@ class AdminShopsModel : ScreenModel {
                             address = address,
                             imageUrl = imageUrl,
                             status = status,
-                            createdAtTimestamp = createdAtTimestamp
+                            createdAtTimestamp = createdAtTimestamp,
+                            isOnline = isOnline
                         )
                     } catch (e: Exception) {
                         null
@@ -66,9 +68,12 @@ class AdminShopsModel : ScreenModel {
         }
     }
 
-    fun updateShopStatus(shopId: String, newStatus: Status) {
-        screenModelScope.launch {
+    fun updateShopStatus(shopId: String, ownerUid: String, newStatus: Status) {
+        screenModelScope.launch(Dispatchers.IO) {
+            // Update the shop status
             db.child("shops").child(shopId).child("status").setValue(newStatus.name)
+            // Synchronize shopStatus in the user's profile[cite: 28]
+            db.child("users").child(ownerUid).child("shopStatus").setValue(newStatus.name)
         }
     }
 }

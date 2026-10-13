@@ -51,7 +51,7 @@ class PanelScreen : Screen {
                 }
 
                 Button(
-                    onClick = { navigator?.push(Restaurants()) },
+                    onClick = { navigator?.push(AdminRestaurantScreen()) },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)
                 ) {

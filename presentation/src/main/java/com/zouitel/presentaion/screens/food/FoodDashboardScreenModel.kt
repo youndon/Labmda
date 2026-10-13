@@ -5,15 +5,15 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.CartItem
 import com.zouitel.presentaion.common.Order
 import com.zouitel.presentaion.common.OrderStatus
-import com.zouitel.presentaion.screens.courier.Courier
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class DashboardScreenModel : ScreenModel {
+class FoodDashboardScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
@@ -27,7 +27,7 @@ class DashboardScreenModel : ScreenModel {
     }
 
     private fun listenToIncomingOrders() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").valueEvents.collect { snapshot ->
                 val fetchedOrders = snapshot.children.mapNotNull { child ->
                     try {
@@ -105,7 +105,7 @@ class DashboardScreenModel : ScreenModel {
             return
         }
 
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             // Update status in orders table
             db.child("orders").child(order.id).child("status").setValue(nextStatus.name)
 

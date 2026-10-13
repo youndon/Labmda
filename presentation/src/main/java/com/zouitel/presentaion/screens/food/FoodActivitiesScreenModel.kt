@@ -8,6 +8,7 @@ import com.zouitel.presentaion.common.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,7 +29,7 @@ class FoodActivitiesScreenModel : ScreenModel {
     }
 
     private fun listenToUserOrders() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").valueEvents.collect { snapshot ->
                 val fetchedOrders = snapshot.children.mapNotNull { child ->
                     try {
@@ -99,7 +100,7 @@ class FoodActivitiesScreenModel : ScreenModel {
     }
 
     fun cancelOrder(orderId: String) {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
         }
     }

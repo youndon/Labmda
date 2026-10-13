@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class ShopOrdersScreenModel(val shopId: String) : ScreenModel {
+class ShopOrdersScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())

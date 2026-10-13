@@ -40,7 +40,7 @@ data class UserProfile(
     val isDriverOnline: Boolean = false,
     //---------------------------------
     val foodMode: UserMode = UserMode.CLIENT,
-    val orderStatus: Status = Status.NONE,
+    val foodStatus: Status = Status.NONE,
     val isFoodServiceOnline: Boolean = false,
     //----------------------------------
     val shopMode: UserMode = UserMode.CLIENT,
@@ -49,7 +49,7 @@ data class UserProfile(
     //----------------------------------
     val vehicleInfo: VehicleInfo? = null,
     //--------------------------------
-    val courierMode: UserMode = UserMode.COURIER,
+    val courierMode: UserMode = UserMode.CLIENT,
     val courierStatus: Status = Status.NONE,
     val isCourierOnline: Boolean = false,
     //--------------------------------

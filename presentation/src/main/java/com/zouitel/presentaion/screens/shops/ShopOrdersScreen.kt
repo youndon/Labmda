@@ -20,12 +20,12 @@ import com.zouitel.presentaion.common.OrderStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
-data class ShopOrdersScreen(val shopId: String) : Screen {
+class ShopOrdersScreen() : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = rememberScreenModel { ShopOrdersScreenModel(shopId) }
+        val screenModel = rememberScreenModel { ShopOrdersScreenModel() }
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 

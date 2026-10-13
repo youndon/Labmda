@@ -6,6 +6,7 @@ import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +24,7 @@ class AdminCouriersModel : ScreenModel {
     }
 
     private fun listenToApplications() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("users").valueEvents.collect { snapshot ->
                 val profiles = snapshot.children.mapNotNull { child ->
                     try {
@@ -43,7 +44,7 @@ class AdminCouriersModel : ScreenModel {
     }
 
     fun updateCourierStatus(uid: String, newStatus: Status) {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("users").child(uid).child("courierStatus").setValue(newStatus.name)
         }
     }

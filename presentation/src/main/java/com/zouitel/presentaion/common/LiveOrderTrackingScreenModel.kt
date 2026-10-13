@@ -4,6 +4,7 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +24,7 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
     }
 
     private fun listenToOrderUpdates() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(orderId).valueEvents.collect { snapshot ->
                 if (!snapshot.exists) {
                     _order.value = null
@@ -88,7 +89,7 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
     }
 
     fun cancelOrder() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
         }
     }

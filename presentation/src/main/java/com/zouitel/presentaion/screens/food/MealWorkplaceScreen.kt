@@ -9,29 +9,28 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 
-data class MealWorkplaceScreen(val restaurantId: String) : Screen {
+data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
         val screenModel = koinScreenModel<MealWorkplaceScreenModel>()
 
-        var name by remember { mutableStateOf("") }
-        var description by remember { mutableStateOf("") }
-        var basePrice by remember { mutableStateOf("") }
-        var imageUrl by remember { mutableStateOf("") }
-        var selectedCategory by remember { mutableStateOf(MealCategory.BREAKFAST) }
+        var name by remember { mutableStateOf(meal?.name ?: "") }
+        var description by remember { mutableStateOf(meal?.description ?: "") }
+        var basePrice by remember { mutableStateOf(if (meal != null && meal.basePrice > 0.0) meal.basePrice.toString() else "") }
+        var imageUrl by remember { mutableStateOf(meal?.imageUrls?.firstOrNull() ?: "") }
+        var selectedCategory by remember { mutableStateOf(meal?.category ?: MealCategory.BREAKFAST) }
         var expandedCategoryDropdown by remember { mutableStateOf(false) }
 
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Add Meal Unit") },
+                    title = { Text(if (meal == null) "Add Meal Unit" else "Edit Meal Unit") },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -76,7 +75,6 @@ data class MealWorkplaceScreen(val restaurantId: String) : Screen {
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Category Selection Dropdown
                 ExposedDropdownMenuBox(
                     expanded = expandedCategoryDropdown,
                     onExpandedChange = { expandedCategoryDropdown = !expandedCategoryDropdown }
@@ -113,22 +111,44 @@ data class MealWorkplaceScreen(val restaurantId: String) : Screen {
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                Button(
-                    onClick = {
-                        screenModel.saveMeal(
-                            restaurantId = restaurantId,
-                            name = name,
-                            description = description,
-                            basePrice = basePrice.toDoubleOrNull() ?: 0.0,
-                            category = selectedCategory,
-                            imageUrl = imageUrl,
-                            onSuccess = { navigator?.pop() }
-                        )
-                    },
-                    enabled = name.isNotBlank() && basePrice.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("Save Meal")
+                    if (meal != null) {
+                        OutlinedButton(
+                            onClick = {
+                                screenModel.deleteMeal(
+                                    restaurantId = restaurantId,
+                                    mealId = meal.id,
+                                    onSuccess = { navigator?.pop() }
+                                )
+                            },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Delete Meal")
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            screenModel.saveMeal(
+                                restaurantId = restaurantId,
+                                mealId = meal?.id ?: "",
+                                name = name,
+                                description = description,
+                                basePrice = basePrice.toDoubleOrNull() ?: 0.0,
+                                category = selectedCategory,
+                                imageUrl = imageUrl,
+                                onSuccess = { navigator?.pop() }
+                            )
+                        },
+                        enabled = name.isNotBlank() && basePrice.isNotBlank(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (meal == null) "Save Meal" else "Update Meal")
+                    }
                 }
             }
         }

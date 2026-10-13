@@ -6,8 +6,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 
-// ScreenModel for FoodMainScreen
-class FoodMainScreenModel(
+// ScreenModel for RestaurantsScreen
+class RestaurantsScreenModel(
     private val repository: FoodRepository = FoodRepository()
 ) : ScreenModel {
 

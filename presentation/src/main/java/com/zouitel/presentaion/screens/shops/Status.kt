@@ -14,5 +14,6 @@ data class Shop(
     val address: String = "",
     val imageUrl: String = "",
     val status: Status = Status.PENDING,
-    val createdAtTimestamp: Long = 0L
+    val createdAtTimestamp: Long = 0L,
+    val isOnline: Boolean
 )

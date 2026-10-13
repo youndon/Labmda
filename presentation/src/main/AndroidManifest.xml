@@ -16,12 +16,6 @@
             tools:ignore="BackgroundLocationPolicy" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application>
-        <service
-            android:name="com.zouitel.presentaion.screens.ride.driver.DriverLocationService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="location" />
-
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyCTxle8zvYU-pM41AS2MR2zoWo2gO9gRwk" />

@@ -7,6 +7,7 @@ import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,7 +33,7 @@ class CourierWorkplaceScreenModel : ScreenModel {
             return
         }
 
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("users").child(uid).valueEvents.collect { snapshot ->
                 if (snapshot.exists) {
                     val name = runCatching { snapshot.child("fullName").value<String>() }
@@ -61,7 +62,7 @@ class CourierWorkplaceScreenModel : ScreenModel {
         val uid = auth.currentUser?.uid ?: return
         _isLoading.value = true
 
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             val updates = mapOf(
                 "fullName" to fullName,
                 "phone" to phone,

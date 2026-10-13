@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Store
@@ -15,24 +16,30 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.screens.account.AccountScreenModel
+import androidx.compose.runtime.collectAsState
 
 class ShopWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = koinScreenModel<ShopWorkplaceScreenModel>()
+        val screenModel = rememberScreenModel { ShopWorkplaceScreenModel() }
         val accountModel = koinScreenModel<AccountScreenModel>()
+        val profile by accountModel.profile.collectAsState()
         val userShop by screenModel.userShop.collectAsState()
+        val isOnline by screenModel.isOnline.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
-        var selectedRoleMode by remember { mutableStateOf(accountModel.profile.value?.shopMode ?: UserMode.CLIENT) }
+        var selectedRoleMode by remember(profile?.shopMode) {
+            mutableStateOf(accountModel.profile.value?.shopMode ?: UserMode.CLIENT)
+        }
 
         Scaffold(
             topBar = {
@@ -41,6 +48,15 @@ class ShopWorkplaceScreen : Screen {
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        if (selectedRoleMode == UserMode.MANAGER && userShop != null) {
+                            IconButton(onClick = {
+                                navigator?.push(ShopRegistrationScreen(userShop))
+                            }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit Store")
+                            }
                         }
                     }
                 )
@@ -107,23 +123,32 @@ class ShopWorkplaceScreen : Screen {
                                 when (val shop = userShop) {
                                     null -> ShopRegistrationForm(
                                         onSubmit = { name, desc, cat, phone, addr, img ->
-                                            screenModel.submitShopApplication(name, desc, cat, phone, addr, img)
+                                            screenModel.submitShopApplication(
+                                                name,
+                                                desc,
+                                                cat,
+                                                phone,
+                                                addr,
+                                                img,
+                                                isOnline
+                                            )
                                         }
                                     )
                                     else -> when (shop.status) {
                                         Status.PENDING -> PendingVerificationView(shop)
                                         Status.REJECTED -> RejectedApplicationView(shop)
-                                        Status.APPROVED -> ApprovedDashboardView(shop) {
-                                            navigator?.push(ShopDashboardScreen(shop.id))
-                                        }
-
+                                        Status.APPROVED -> ApprovedDashboardView(
+                                            shop = shop,
+                                            isOnline = isOnline,
+                                            onOnlineChanged = { screenModel.updateShopOnlineStatus(shop.id, it) },
+                                            onOpenDashboard = { navigator?.push(ShopDashboardScreen(shop.id)) }
+                                        )
                                         else -> {}
                                     }
                                 }
                             }
                         }
                     }
-
                     else -> {}
                 }
             }
@@ -300,32 +325,75 @@ class ShopWorkplaceScreen : Screen {
     }
 
     @Composable
-    private fun ApprovedDashboardView(shop: Shop, onOpenDashboard: () -> Unit) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+    private fun ApprovedDashboardView(
+        shop: Shop,
+        isOnline: Boolean,
+        onOnlineChanged: (Boolean) -> Unit,
+        onOpenDashboard: () -> Unit
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Store,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Text("Store Active & Approved", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "Store: ${shop.name}\nCategory: ${shop.category}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            item {
+                // Online/Offline Availability Switch Card
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Store, contentDescription = null)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Store Status", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    text = if (isOnline) "Online & Accepting Orders" else "Offline",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                        Switch(checked = isOnline, onCheckedChange = onOnlineChanged)
+                    }
+                }
+            }
 
-            Button(
-                onClick = onOpenDashboard,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Store, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Open Store Manager Dashboard")
+            item {
+                // Store Details Summary Card
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(text = shop.name, style = MaterialTheme.typography.headlineSmall)
+                        HorizontalDivider()
+                        Text(text = "Category: ${shop.category}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Description: ${shop.description.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Address: ${shop.address}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Phone: ${shop.phone}", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+
+            item {
+                Button(
+                    onClick = onOpenDashboard,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Store, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Open Store Manager Dashboard")
+                }
             }
         }
     }

@@ -97,7 +97,7 @@ class FoodSettingsScreen : Screen {
                 if (profile?.foodMode == UserMode.MANAGER) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
-                        onClick = { navigator?.push(DashboardScreen()) },
+                        onClick = { navigator?.push(FoodDashboardScreen()) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Store, contentDescription = null)

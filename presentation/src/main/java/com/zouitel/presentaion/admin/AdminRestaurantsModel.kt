@@ -19,6 +19,7 @@ package com.zouitel.presentaion.admin
     import cafe.adriel.voyager.navigator.LocalNavigator
     import com.zouitel.presentaion.screens.food.FoodRepository
     import com.zouitel.presentaion.screens.food.Restaurant
+    import kotlinx.coroutines.Dispatchers
     import kotlinx.coroutines.flow.MutableStateFlow
     import kotlinx.coroutines.flow.StateFlow
     import kotlinx.coroutines.flow.asStateFlow
@@ -39,7 +40,7 @@ class AdminRestaurantsModel(
     }
 
     private fun loadRestaurants() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             repository.getRestaurants().collect { list ->
                 _restaurants.value = list
                 _isLoading.value = false
@@ -48,7 +49,7 @@ class AdminRestaurantsModel(
     }
 
     fun deleteRestaurant(restaurantId: String) {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             // Add repository deletion trigger if applicable or handle removal via DB reference
         }
     }

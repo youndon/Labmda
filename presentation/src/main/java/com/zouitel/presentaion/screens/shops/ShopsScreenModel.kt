@@ -60,7 +60,6 @@ class ShopsScreenModel : ScreenModel {
                         try {
                             val id = child.key ?: return@forEach
                             val ownerUid: String = child.child("ownerUid").value()
-                            // Fixed: read "name" instead of "fullName"
                             val name: String = child.child("name").value()
                             val description: String = child.child("description").value()
                             val category: String = child.child("category").value()
@@ -69,6 +68,9 @@ class ShopsScreenModel : ScreenModel {
                             val imageUrl: String = child.child("imageUrl").value()
                             val statusStr: String = child.child("status").value()
                             val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()
+
+                            // Read online/offline status
+                            val isOnline = runCatching { child.child("isOnline").value<Boolean>() }.getOrDefault(false)
 
                             val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.PENDING)
 
@@ -82,7 +84,8 @@ class ShopsScreenModel : ScreenModel {
                                 address = address,
                                 imageUrl = imageUrl,
                                 status = status,
-                                createdAtTimestamp = createdAtTimestamp
+                                createdAtTimestamp = createdAtTimestamp,
+                                isOnline = isOnline
                             )
 
                             if (uid != null && ownerUid == uid && status == Status.APPROVED) {

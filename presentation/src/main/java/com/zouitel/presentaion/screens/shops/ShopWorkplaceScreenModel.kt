@@ -19,11 +19,15 @@ class ShopWorkplaceScreenModel : ScreenModel {
     private val _userShop = MutableStateFlow<Shop?>(null)
     val userShop: StateFlow<Shop?> = _userShop.asStateFlow()
 
+    private val _isOnline = MutableStateFlow(false)
+    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
         observeUserShopApplication()
+        observeShopOnlineStatus()
     }
 
     private fun observeUserShopApplication() {
@@ -40,7 +44,6 @@ class ShopWorkplaceScreenModel : ScreenModel {
                         val ownerUid: String = child.child("ownerUid").value()
                         if (ownerUid != uid) return@mapNotNull null
 
-                        // Fixed: read "name" instead of "fullName"
                         val name: String = child.child("name").value()
                         val description: String = child.child("description").value()
                         val category: String = child.child("category").value()
@@ -49,7 +52,7 @@ class ShopWorkplaceScreenModel : ScreenModel {
                         val imageUrl: String = child.child("imageUrl").value()
                         val statusStr: String = child.child("status").value()
                         val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()
-
+                        val isOnline: Boolean = child.child("isOnline").value()
                         val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.PENDING)
 
                         Shop(
@@ -62,7 +65,8 @@ class ShopWorkplaceScreenModel : ScreenModel {
                             address = address,
                             imageUrl = imageUrl,
                             status = status,
-                            createdAtTimestamp = createdAtTimestamp
+                            createdAtTimestamp = createdAtTimestamp,
+                            isOnline = isOnline
                         )
                     } catch (e: Exception) {
                         null
@@ -75,10 +79,30 @@ class ShopWorkplaceScreenModel : ScreenModel {
         }
     }
 
+    private fun observeShopOnlineStatus() {
+        val uid = auth.currentUser?.uid ?: return
+        screenModelScope.launch {
+            db.child("users").child(uid).child("isShopServiceOnline").valueEvents.collect { snapshot ->
+                val online = runCatching { snapshot.value<Boolean>() }.getOrDefault(false)
+                _isOnline.value = online
+            }
+        }
+    }
+
     fun updateShopMode(shopMode: UserMode) {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch {
             db.child("users").child(uid).child("shopMode").setValue(shopMode.name)
+        }
+    }
+
+    fun updateShopOnlineStatus(shopId: String, isOnline: Boolean) {
+        val uid = auth.currentUser?.uid ?: return
+        screenModelScope.launch {
+            // Update user profile service status (`isShopServiceOnline`)[cite: 41]
+            db.child("users").child(uid).child("isShopServiceOnline").setValue(isOnline)
+            // Update store active state
+            db.child("shops").child(shopId).child("isOnline").setValue(isOnline)
         }
     }
 
@@ -88,7 +112,8 @@ class ShopWorkplaceScreenModel : ScreenModel {
         category: String,
         phone: String,
         address: String,
-        imageUrl: String
+        imageUrl: String,
+        isOnline: Boolean
     ) {
         val uid = auth.currentUser?.uid ?: return
         _isLoading.value = true
@@ -106,11 +131,35 @@ class ShopWorkplaceScreenModel : ScreenModel {
                 phone = phone,
                 address = address,
                 imageUrl = imageUrl,
-                status = Status.PENDING,
-                createdAtTimestamp = System.currentTimeMillis()
+                createdAtTimestamp = System.currentTimeMillis(),
+                isOnline = isOnline
             )
 
             newShopRef.setValue(shop)
+            _isLoading.value = false
+        }
+    }
+
+    fun updateShopApplication(
+        shopId: String,
+        name: String,
+        description: String,
+        category: String,
+        phone: String,
+        address: String,
+        imageUrl: String
+    ) {
+        _isLoading.value = true
+        screenModelScope.launch {
+            val updates = mapOf(
+                "name" to name,
+                "description" to description,
+                "category" to category,
+                "phone" to phone,
+                "address" to address,
+                "imageUrl" to imageUrl
+            )
+            db.child("shops").child(shopId).updateChildren(updates)
             _isLoading.value = false
         }
     }

@@ -91,5 +91,5 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     //Location(Native).
-    implementation("com.google.android.gms:play-services-location:21.4.0")
+implementation("com.google.android.gms:play-services-location:21.4.0")
 }

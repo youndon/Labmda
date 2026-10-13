@@ -7,6 +7,7 @@ import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleInfo
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +24,7 @@ class AdminDriverModel : ScreenModel {
     }
 
     private fun listenToDriverApplications() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("users").valueEvents.collect { snapshot ->
                 val profiles = snapshot.children.mapNotNull { child ->
                     try {
@@ -62,7 +63,7 @@ class AdminDriverModel : ScreenModel {
     }
 
     fun updateDriverStatus(uid: String, newStatus: Status) {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("users").child(uid).child("driverStatus").setValue(newStatus.name)
         }
     }

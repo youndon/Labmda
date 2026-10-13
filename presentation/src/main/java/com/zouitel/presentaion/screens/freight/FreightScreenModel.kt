@@ -7,6 +7,7 @@ import com.zouitel.presentaion.common.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +31,7 @@ class FreightScreenModel : ScreenModel {
     }
 
     private fun listenToOrdersTable() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").valueEvents.collect { snapshot ->
                 val allTasks = snapshot.children.mapNotNull { child ->
                     try {
@@ -118,7 +119,7 @@ class FreightScreenModel : ScreenModel {
             "freightName" to (currentUser?.displayName ?: "Active Freight Driver"),
             "freightPhone" to (currentUser?.phoneNumber ?: "")
         )
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(freight.orderId).updateChildren(updates)
         }
     }
@@ -129,7 +130,7 @@ class FreightScreenModel : ScreenModel {
             "freightName" to "",
             "freightPhone" to ""
         )
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(freight.orderId).updateChildren(updates)
         }
     }
@@ -139,7 +140,7 @@ class FreightScreenModel : ScreenModel {
             "status" to OrderStatus.DELIVERED.name,
             "deliveredAtTimestamp" to System.currentTimeMillis()
         )
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(freight.orderId).updateChildren(updates)
         }
     }

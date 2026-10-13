@@ -7,6 +7,7 @@ import com.zouitel.presentaion.common.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,7 +32,7 @@ class CourierDashboardScreenModel : ScreenModel {
     }
 
     private fun listenToOrdersTable() {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").valueEvents.collect { snapshot ->
                 val allTasks = snapshot.children.mapNotNull { child ->
                     try {
@@ -118,7 +119,7 @@ class CourierDashboardScreenModel : ScreenModel {
     fun claimCourierTask(courier: Courier) {
         val uid = currentUid ?: return
 
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             // Don't overwrite an order another courier already took
             val existing = runCatching {
                 db.child("orders").child(courier.orderId).child("courierId")
@@ -142,7 +143,7 @@ class CourierDashboardScreenModel : ScreenModel {
     }
 
     fun rejectCourierTask(courier: Courier) {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(courier.orderId).updateChildren(
                 mapOf(
                     "courierId" to "",
@@ -154,7 +155,7 @@ class CourierDashboardScreenModel : ScreenModel {
     }
 
     fun markCourierOrderDelivered(courier: Courier) {
-        screenModelScope.launch {
+        screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(courier.orderId).updateChildren(
                 mapOf(
                     "status" to OrderStatus.DELIVERED.name,

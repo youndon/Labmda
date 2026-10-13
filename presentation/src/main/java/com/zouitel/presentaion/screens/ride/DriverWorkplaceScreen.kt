@@ -28,13 +28,12 @@ class DriverWorkplaceScreen : Screen {
     override fun Content() {
         val navigator = LocalNavigator.current
         val screenModel = koinScreenModel<DriverWorkplaceScreenModel>()
-        val accountModel = koinScreenModel<AccountScreenModel>()
 
         val profile by screenModel.profile.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
-        var selectedRoleMode by remember {
-            mutableStateOf(accountModel.profile.value?.driveMode ?: UserMode.PASSENGER)
+        val selectedRoleMode = remember(profile.driveMode) {
+            profile.driveMode
         }
 
         Scaffold(
@@ -68,7 +67,6 @@ class DriverWorkplaceScreen : Screen {
                     SegmentedButton(
                         selected = selectedRoleMode == UserMode.PASSENGER,
                         onClick = {
-                            selectedRoleMode = UserMode.PASSENGER
                             screenModel.updateDriveMode(UserMode.PASSENGER)
                         },
                         shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
@@ -80,7 +78,6 @@ class DriverWorkplaceScreen : Screen {
                     SegmentedButton(
                         selected = selectedRoleMode == UserMode.DRIVER,
                         onClick = {
-                            selectedRoleMode = UserMode.DRIVER
                             screenModel.updateDriveMode(UserMode.DRIVER)
                         },
                         shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),

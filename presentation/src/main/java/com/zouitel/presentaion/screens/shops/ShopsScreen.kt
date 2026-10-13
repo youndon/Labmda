@@ -1,3 +1,4 @@
+
 package com.zouitel.presentaion.screens.shops
 
 import androidx.compose.foundation.clickable
@@ -38,22 +39,8 @@ class ShopsScreen : Screen {
                 TopAppBar(
                     title = { Text("Available Shops & Stores") },
                     actions = {
-                        // Corrected routing: MANAGER opens store orders, CLIENT opens personal activities
-                        if (userProfile?.shopMode == UserMode.MANAGER) {
-                            if (managerShop != null) {
-                                IconButton(onClick = { navigator?.push(ShopOrdersScreen(managerShop!!.id)) }) {
-                                    Icon(Icons.Default.ListAlt, contentDescription = "Store Manager Orders")
-                                }
-                            }
-                        } else {
-                            IconButton(onClick = { navigator?.push(ShopActivitiesScreen()) }) {
-                                Icon(Icons.Default.AutoAwesomeMosaic, contentDescription = "My Client Store Activities")
-                            }
-                        }
-
-                        // Settings / Application Workplace setup toggle
-                        IconButton(onClick = { navigator?.push(ShopWorkplaceScreen()) }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Shop Business Setup")
+                        IconButton(onClick = { navigator?.push(ShopActivitiesScreen()) }) {
+                            Icon(Icons.Default.AutoAwesomeMosaic, contentDescription = "My Client Store Activities")
                         }
                     }
                 )
@@ -118,7 +105,28 @@ class ShopsScreen : Screen {
                 )
                 Spacer(modifier = Modifier.width(16.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = shop.name, style = MaterialTheme.typography.titleLarge)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = shop.name, style = MaterialTheme.typography.titleLarge)
+
+                        // Online / Offline Status Badge
+                        Badge(
+                            containerColor = if (shop.isOnline) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.errorContainer
+                            }
+                        ) {
+                            Text(
+                                text = if (shop.isOnline) "Online" else "Offline",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(text = shop.category, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     Text(text = shop.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

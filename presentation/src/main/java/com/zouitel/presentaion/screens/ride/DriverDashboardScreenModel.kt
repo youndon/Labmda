@@ -6,6 +6,8 @@ import com.zouitel.presentaion.common.Trip
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,8 +27,38 @@ class DriverDashboardScreenModel : ScreenModel {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    // Mirrors users/{uid}/isDriverOnline so the switch always shows the real stored value
+    private val _isOnline = MutableStateFlow(false)
+    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+
     init {
+        listenToOnlineState()
         listenToDriverDashboardTrips()
+    }
+
+    private fun listenToOnlineState() {
+        val uid = currentUser?.uid ?: return
+        screenModelScope.launch {
+            db.child("users").child(uid).child("isDriverOnline").valueEvents.collect { snap ->
+                _isOnline.value = runCatching { snap.value<Boolean>() }.getOrDefault(false)
+            }
+        }
+    }
+
+    fun setOnline(online: Boolean) {
+        val uid = currentUser?.uid ?: return
+        val onlineRef = db.child("users").child(uid).child("isDriverOnline")
+
+        screenModelScope.launch {
+            if (online) {
+                // If the app is killed or loses connection, Firebase flips the driver offline
+                runCatching { onlineRef.onDisconnect().setValue(false) }
+                onlineRef.setValue(true)
+            } else {
+                runCatching { onlineRef.onDisconnect().cancel() }
+                onlineRef.setValue(false)
+            }
+        }
     }
 
     private fun listenToDriverDashboardTrips() {
@@ -136,23 +168,27 @@ class DriverDashboardScreenModel : ScreenModel {
     fun updateDriverLocation(latitude: Double, longitude: Double, heading: Float = 0f) {
         val uid = currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).updateChildren(
+            // Location only. Online/offline is controlled by setOnline(), so a late
+            // location callback can never flip an offline driver back online.
+            db.child("users").child(uid).child("currentLocation").setValue(
                 mapOf(
-                    "currentLocation" to mapOf(
-                        "latitude" to latitude,
-                        "longitude" to longitude,
-                        "heading" to heading
-                    ),
-                    "isDriverOnline" to true
+                    "latitude" to latitude,
+                    "longitude" to longitude,
+                    "heading" to heading
                 )
             )
         }
     }
 
-    fun setDriverOffline() {
+    fun setDriverOffline() = setOnline(false)
+
+    // Leaving the dashboard stops location updates, so don't leave a stale "online" marker.
+    // screenModelScope is cancelled on dispose, hence the global scope to finish the write.
+    @OptIn(DelicateCoroutinesApi::class)
+    override fun onDispose() {
         val uid = currentUser?.uid ?: return
-        screenModelScope.launch {
-            db.child("users").child(uid).child("isDriverOnline").setValue(false)
+        GlobalScope.launch {
+            runCatching { db.child("users").child(uid).child("isDriverOnline").setValue(false) }
         }
     }
 }

@@ -8,11 +8,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,7 +36,13 @@ import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
+import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
+import com.zouitel.presentaion.screens.courier.CourierWorkplaceScreen
+import com.zouitel.presentaion.screens.food.RestaurantWorkplaceScreen
+import com.zouitel.presentaion.screens.freight.FreightWorkplaceScreen
+import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
+import com.zouitel.presentaion.screens.shops.ShopWorkplaceScreen
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import kotlinx.coroutines.launch
@@ -46,20 +58,8 @@ class AccountScreen : Screen {
         val screenModel = koinScreenModel<AccountScreenModel>()
         val user by screenModel.currentUser.collectAsState()
         val profile by screenModel.profile.collectAsState()
-
-        // --- Fetch (or initialize) the user's Firestore profile ---
-//        var userProfile by remember { mutableStateOf(profile) }
-        var isInitializingProfile by remember { mutableStateOf(true) }
-        var isUpdatingMode by remember { mutableStateOf(false) }
-
-        LaunchedEffect(user?.uid) {
-            val firebaseUser = user
-            val uid = firebaseUser?.uid
-            if (uid == null) {
-                isInitializingProfile = false
-                return@LaunchedEffect
-            }
-        }
+        val restaurantStatus = remember(profile?.foodStatus) { profile?.foodStatus ?: Status.NONE }
+        val shopStatus = remember(profile?.shopStatus) { profile?.shopStatus ?: Status.NONE }
 
         Scaffold(
             topBar = {
@@ -79,18 +79,17 @@ class AccountScreen : Screen {
                     .padding(innerPadding)
                     .padding(horizontal = 20.dp)
             ) {
-                Spacer(Modifier.height(12.dp))
-
-                // --- Profile header ---
+                // --- Profile header ---[cite: 34]
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val photoUrl = user?.photoURL
-                    if (photoUrl != null) {
+                    if (!photoUrl.isNullOrEmpty()) {
                         AsyncImage(
                             model = photoUrl,
                             contentDescription = "Profile photo",
                             modifier = Modifier
                                 .size(64.dp)
-                                .clip(CircleShape)
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
                         )
                     } else {
                         Box(
@@ -127,7 +126,7 @@ class AccountScreen : Screen {
 
                 Spacer(Modifier.height(20.dp))
 
-                // --- Mode Switching Card ---
+                // --- Mode Switching Card ---[cite: 34]
                 Switch(
                     checked = profile?.driveMode == UserMode.DRIVER,
                     onCheckedChange = {
@@ -135,13 +134,72 @@ class AccountScreen : Screen {
                             screenModel.updateUserMode(user?.uid ?: "", if (it) UserMode.DRIVER else UserMode.PASSENGER)
                         }
                     }
-
                 )
-
                 Spacer(Modifier.height(20.dp))
                 HorizontalDivider()
 
-                // --- Account actions ---
+                // --- Businesses ---[cite: 34]
+                Text(
+                    text = "Businesses",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+
+                AccountRow(Icons.Filled.Work, "Courier Workplace") {
+                    navigator.push(CourierWorkplaceScreen())
+                }
+                AccountRow(Icons.Filled.LocalShipping, "Freight Workplace") {
+                    navigator.push(FreightWorkplaceScreen())
+                }
+                AccountRow(Icons.Filled.DirectionsCar, "Driver Workplace") {
+                    navigator.push(DriverWorkplaceScreen())
+                }
+
+                // --- Smart Move for Food Workplace ---[cite: 34]
+                AccountStatusRow(
+                    icon = Icons.Filled.Fastfood,
+                    label = "Food Workplace",
+                    statusText = when (restaurantStatus) {
+                        Status.APPROVED -> "Active"
+                        Status.PENDING -> "Pending Review"
+                        Status.REJECTED -> "Declined"
+                        Status.NONE -> "Apply"
+                    },
+                    statusColor = when (restaurantStatus) {
+                        Status.APPROVED -> MaterialTheme.colorScheme.primary
+                        Status.PENDING -> MaterialTheme.colorScheme.tertiary
+                        Status.REJECTED -> MaterialTheme.colorScheme.error
+                        Status.NONE -> MaterialTheme.colorScheme.outline
+                    }
+                ) {
+                    navigator.push(RestaurantWorkplaceScreen())
+                }
+
+                // --- Smart Move for Shop Workplace ---
+                AccountStatusRow(
+                    icon = Icons.Filled.Storefront,
+                    label = "Shop Workplace",
+                    statusText = when (shopStatus) {
+                        Status.APPROVED -> "Active"
+                        Status.PENDING -> "Pending Review"
+                        Status.REJECTED -> "Declined"
+                        Status.NONE -> "Apply"
+                    },
+                    statusColor = when (shopStatus) {
+                        Status.APPROVED -> MaterialTheme.colorScheme.primary
+                        Status.PENDING -> MaterialTheme.colorScheme.tertiary
+                        Status.REJECTED -> MaterialTheme.colorScheme.error
+                        Status.NONE -> MaterialTheme.colorScheme.outline
+                    }
+                ) {
+                    navigator.push(ShopWorkplaceScreen())
+                }
+
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider()
+
+                // --- Account actions ---[cite: 34]
                 AccountRow(Icons.Filled.History, "Ride history") { /* TODO */ }
                 AccountRow(Icons.Filled.CreditCard, "Payment methods") { /* TODO */ }
                 AccountRow(Icons.Filled.NotificationsNone, "Notifications") { /* TODO */ }
@@ -164,7 +222,6 @@ class AccountScreen : Screen {
             }
         }
     }
-
 }
 
 @Composable
@@ -184,6 +241,43 @@ private fun AccountRow(
         Icon(icon, contentDescription = null, tint = tint)
         Spacer(Modifier.width(16.dp))
         Text(text = label, modifier = Modifier.weight(1f), color = tint)
+        Icon(
+            imageVector = Icons.Filled.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun AccountStatusRow(
+    icon: ImageVector,
+    label: String,
+    statusText: String,
+    statusColor: Color,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null)
+        Spacer(Modifier.width(16.dp))
+        Text(text = label, modifier = Modifier.weight(1f))
+
+        Badge(containerColor = statusColor.copy(alpha = 0.15f)) {
+            Text(
+                text = statusText,
+                color = statusColor,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
+
+        Spacer(Modifier.width(8.dp))
         Icon(
             imageVector = Icons.Filled.ChevronRight,
             contentDescription = null,

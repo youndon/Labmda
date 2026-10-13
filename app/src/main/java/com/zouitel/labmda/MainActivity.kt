@@ -25,13 +25,6 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            setSingletonImageLoaderFactory { context ->
-                ImageLoader.Builder(context)
-                    .crossfade(true)
-                    .logger(DebugLogger())
-                    .build()
-            }
-
             Navigator(LogInScreen())
         }
     }

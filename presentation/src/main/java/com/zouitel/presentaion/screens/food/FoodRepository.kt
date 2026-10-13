@@ -8,18 +8,20 @@ import kotlinx.coroutines.flow.map
 class FoodRepository {
     private val db = Firebase.database.reference()
 
-    // Read all restaurants in real-time
     fun getRestaurants(): Flow<List<Restaurant>> {
         return db.child("restaurants").valueEvents.map { snapshot ->
             snapshot.children.mapNotNull { child ->
                 val id = child.key ?: return@mapNotNull null
-                val name: String = child.child("fullName").value<String?>() ?: ""
+                val name: String = child.child("name").value<String?>()
+                    ?: child.child("fullName").value<String?>()
+                    ?: "Restaurant"
                 val imageUrl: String = child.child("imageUrl").value<String?>() ?: ""
                 val rating: Double = child.child("rating").value<Double?>() ?: 5.0
                 val deliveryFee: Double = child.child("deliveryFee").value<Double?>() ?: 0.0
-                val estimatedTimeMinutes: Int = child.child("estimatedTimeMinutes").value<Int?>() ?: 0
-                val managers: List<String> = child.child("managers").value<List<String>?>() ?: emptyList()
+                val estimatedTimeMinutes: Int = child.child("estimatedTimeMinutes").value<Int?>() ?: 20
                 val isOpen: Boolean = child.child("isOpen").value<Boolean?>() ?: true
+                val managers: List<String> = child.child("managers").value<List<String>?>() ?: emptyList()
+                val paymentMethods: List<String> = child.child("paymentMethods").value<List<String>?>() ?: emptyList()
 
                 Restaurant(
                     id = id,
@@ -28,14 +30,14 @@ class FoodRepository {
                     rating = rating,
                     deliveryFee = deliveryFee,
                     estimatedTimeMinutes = estimatedTimeMinutes,
+                    isOpen = isOpen,
                     managers = managers,
-                    isOpen = isOpen
+                    paymentMethods = paymentMethods
                 )
             }
         }
     }
 
-    // Add a new restaurant unit
     suspend fun addRestaurant(
         name: String,
         imageUrl: String,
@@ -47,23 +49,25 @@ class FoodRepository {
         val id = newRef.key ?: return
         val restaurantMap = mapOf(
             "id" to id,
-            "fullName" to name,
+            "name" to name,
             "imageUrl" to imageUrl,
             "rating" to 5.0,
             "deliveryFee" to deliveryFee,
             "estimatedTimeMinutes" to estimatedTimeMinutes,
+            "isOpen" to true,
             "managers" to managers,
-            "isOpen" to true
+            "paymentMethods" to listOf("Cash on Courier", "Card on Courier")
         )
         newRef.setValue(restaurantMap)
     }
 
-    // Read all meals for a specific restaurant in real-time
     fun getMealsForRestaurant(restaurantId: String): Flow<List<Meal>> {
         return db.child("restaurants").child(restaurantId).child("meals").valueEvents.map { snapshot ->
             snapshot.children.mapNotNull { child ->
                 val id = child.key ?: return@mapNotNull null
-                val name: String = child.child("fullName").value<String?>() ?: ""
+                val name: String = child.child("name").value<String?>()
+                    ?: child.child("fullName").value<String?>()
+                    ?: ""
                 val description: String = child.child("description").value<String?>() ?: ""
                 val basePrice: Double = child.child("basePrice").value<Double?>() ?: 0.0
                 val categoryStr: String = child.child("category").value<String?>() ?: ""
@@ -86,21 +90,25 @@ class FoodRepository {
         }
     }
 
-    // Add a meal unit to a specific restaurant
     suspend fun addMeal(
         restaurantId: String,
+        mealId: String = "",
         name: String,
         description: String,
         basePrice: Double,
         category: MealCategory,
         imageUrl: String
     ) {
-        val mealRef = db.child("restaurants").child(restaurantId).child("meals").push()
-        val mealId = mealRef.key ?: return
+        val mealRef = if (mealId.isBlank()) {
+            db.child("restaurants").child(restaurantId).child("meals").push()
+        } else {
+            db.child("restaurants").child(restaurantId).child("meals").child(mealId)
+        }
+        val id = mealRef.key ?: return
         val mealMap = mapOf(
-            "id" to mealId,
+            "id" to id,
             "restaurantId" to restaurantId,
-            "fullName" to name,
+            "name" to name,
             "description" to description,
             "basePrice" to basePrice,
             "category" to category.name,
@@ -108,5 +116,9 @@ class FoodRepository {
             "isAvailable" to true
         )
         mealRef.setValue(mealMap)
+    }
+
+    suspend fun deleteMeal(restaurantId: String, mealId: String) {
+        db.child("restaurants").child(restaurantId).child("meals").child(mealId).removeValue()
     }
 }
