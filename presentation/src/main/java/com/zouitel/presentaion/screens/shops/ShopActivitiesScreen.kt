@@ -16,8 +16,8 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -82,7 +82,7 @@ class ShopActivitiesScreen : Screen {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(order.shopName.ifBlank { "Store" }, style = MaterialTheme.typography.titleMedium)
+                    Text(order.sourceName.ifBlank { "Store" }, style = MaterialTheme.typography.titleMedium)
                     Text(formattedDate, style = MaterialTheme.typography.bodySmall)
                 }
 
@@ -92,7 +92,7 @@ class ShopActivitiesScreen : Screen {
                 StatusChip(order.status)
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-                Text("Delivery Address: ${order.deliveryAddress}", style = MaterialTheme.typography.bodyMedium)
+                Text("Delivery Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
                 Text("Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
 
                 Spacer(modifier = Modifier.height(12.dp))

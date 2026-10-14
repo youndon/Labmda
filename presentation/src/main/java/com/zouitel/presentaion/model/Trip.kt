@@ -25,7 +25,7 @@ data class Trip(
     val id: String = "",
     val passengerId: String = "",
     val driverId: String? = null,
-    val serviceType: String = "Ride", // Ride, Moto, Courier, Freight
+    val serviceType: String = "Ride", // Ride, Moto, Delivery, Freight
     val pickupLocation: LocationInfo = LocationInfo(),
     val dropoffLocation: LocationInfo = LocationInfo(),
     val fareAmount: Double = 0.0,

@@ -176,7 +176,7 @@ class PassengerScreen : Screen {
         val activeTrip = trips.firstOrNull { it.status in ACTIVE_STATUSES }
         val distanceKm = if (pickup != null && destination != null) distanceKm(pickup!!, destination!!) else 0.0
         val fare = estimateFare(distanceKm)
-        val visibleDrivers = onlineDrivers.filter { (it.vehicleInfo?.type ?: VehicleType.CAR) == vehicleType }
+//        val visibleDrivers = onlineDrivers.filter { (/*it.vehicleInfo?.type */?: VehicleType.CAR) == vehicleType }
 
         fun submitTrip(name: String, phone: String, driver: UserProfile?) {
             val p = pickup
@@ -192,7 +192,6 @@ class PassengerScreen : Screen {
                 fare = fare,
                 passengerName = name,
                 passengerPhone = phone,
-                requestedVehicleType = driver?.vehicleInfo?.type ?: vehicleType,
                 targetDriver = driver
             )
             destination = null
@@ -265,7 +264,7 @@ class PassengerScreen : Screen {
 
                     if (activeTrip == null) {
                         onlineDrivers.forEach { driver ->
-                            val loc = driver.currentLocation ?: return@forEach
+                            val loc = driver.driverService?.currentLocation ?: return@forEach
                             if (loc.latitude == 0.0 && loc.longitude == 0.0) return@forEach
                             key(driver.uid) {
                                 Marker(
@@ -303,7 +302,7 @@ class PassengerScreen : Screen {
 //                        }
                     } else {
                         // Follow the assigned driver live
-                        onlineDrivers.firstOrNull { it.uid == activeTrip.driverId }?.currentLocation?.let { loc ->
+                        onlineDrivers.firstOrNull { it.uid == activeTrip.driverId }?.driverService?.currentLocation?.let { loc ->
                             Marker(
                                 state = rememberUpdatedMarkerState(position = LatLng(loc.latitude, loc.longitude)),
                                 title = activeTrip.driverName.ifBlank { "Your driver" },
@@ -354,7 +353,7 @@ class PassengerScreen : Screen {
                                     distanceKm = distanceKm,
                                     fare = fare,
                                     vehicleType = vehicleType,
-                                    drivers = visibleDrivers,
+                                    drivers = null,
                                     selectedDriver = selectedDriver,
                                     initialName = passengerInfo.name,
                                     initialPhone = passengerInfo.phone,
@@ -405,7 +404,6 @@ class PassengerScreen : Screen {
                                     fare = fare,
                                     passengerName = name,
                                     passengerPhone = phone,
-                                    requestedVehicleType = vehicleType,
                                     targetDriver = driver
                                 )
                                 destination = null
@@ -446,7 +444,7 @@ class PassengerScreen : Screen {
                     DriverRequestSheet(
                         driver = tappedDriver,
                         driverDistanceKm = pickup?.let { p ->
-                            tappedDriver.currentLocation?.let { distanceKm(p, LatLng(it.latitude, it.longitude)) }
+                            tappedDriver.driverService?.currentLocation?.let { distanceKm(p, LatLng(it.latitude, it.longitude)) }
                         },
                         hasDestination = destination != null,
                         destinationAddress = destinationAddress,
@@ -471,7 +469,7 @@ class PassengerScreen : Screen {
         distanceKm: Double,
         fare: Double,
         vehicleType: VehicleType,
-        drivers: List<UserProfile>,
+        drivers: List<UserProfile>?,
         selectedDriver: UserProfile?,
         initialName: String,
         initialPhone: String,
@@ -538,27 +536,28 @@ class PassengerScreen : Screen {
                         label = { Text("Driver: ${selectedDriver.fullName}") },
                         trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Remove driver", modifier = Modifier.size(16.dp)) }
                     )
-                } else if (drivers.isNotEmpty()) {
-                    Text(
-                        "${drivers.size} ${vehicleType.name.lowercase()} driver(s) online. Tap a driver on the map or below, or let us match you.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(drivers, key = { it.uid }) { driver ->
-                            AssistChip(
-                                onClick = { onSelectDriver(driver) },
-                                label = { Text("${driver.fullName} · ${driver.vehicleInfo?.make ?: ""}") }
-                            )
-                        }
-                    }
-                } else {
-                    Text(
-                        "No ${vehicleType.name.lowercase()} drivers online right now. You can still request and the first available driver will accept.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
+//                else if (drivers?.isNotEmpty()) {
+//                    Text(
+//                        "${drivers?.size} ${vehicleType.name.lowercase()} driver(s) online. Tap a driver on the map or below, or let us match you.",
+//                        style = MaterialTheme.typography.bodySmall,
+//                        color = MaterialTheme.colorScheme.onSurfaceVariant
+//                    )
+//                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+////                        items(drivers, key = { it.uid }) { driver ->
+////                            AssistChip(
+////                                onClick = { onSelectDriver(driver) },
+////                                label = { Text("${driver.fullName} · driver.vehicleInfo?.make ?: }")}
+////                            )
+////                        }
+//                    }
+//                } else {
+//                    Text(
+//                        "No ${vehicleType.name.lowercase()} drivers online right now. You can still request and the first available driver will accept.",
+//                        style = MaterialTheme.typography.bodySmall,
+//                        color = MaterialTheme.colorScheme.onSurfaceVariant
+//                    )
+//                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -616,7 +615,7 @@ class PassengerScreen : Screen {
     ) {
         var name by remember(initialName) { mutableStateOf(initialName) }
         var phone by remember(initialPhone) { mutableStateOf(initialPhone) }
-        val v = driver.vehicleInfo
+//        val v = driver.vehicleInfo
 
         Column(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp),
@@ -624,14 +623,14 @@ class PassengerScreen : Screen {
         ) {
             Text(driver.fullName, style = MaterialTheme.typography.titleLarge)
 
-            if (v != null) {
-                Text(
-                    "${v.color} ${v.make} ${v.model}" +
-                            if (v.licensePlate.isNotBlank()) " · ${v.licensePlate}" else "",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                v.type?.let { AssistChip(onClick = {}, label = { Text(it.name) }) }
-            }
+//            if (v != null) {
+//                Text(
+//                    "${v.color} ${v.make} ${v.model}" +
+//                            if (v.licensePlate.isNotBlank()) " · ${v.licensePlate}" else "",
+//                    style = MaterialTheme.typography.bodyMedium
+//                )
+//                v.type?.let { AssistChip(onClick = {}, label = { Text(it.name) }) }
+//            }
 
             driverDistanceKm?.let {
                 val eta = maxOf(1, Math.ceil(it / 30.0 * 60).toInt()) // assumes ~30 km/h
@@ -732,13 +731,13 @@ class PassengerScreen : Screen {
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(driver.fullName, style = MaterialTheme.typography.titleSmall)
-                    driver.vehicleInfo?.let { v ->
-                        Text(
-                            "${v.color} ${v.make} ${v.model} · ${v.licensePlate}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+//                    driver.vehicleInfo?.let { v ->
+//                        Text(
+//                            "${v.color} ${v.make} ${v.model} · ${v.licensePlate}",
+//                            style = MaterialTheme.typography.bodySmall,
+//                            color = MaterialTheme.colorScheme.onSurfaceVariant
+//                        )
+//                    }
                 }
             }
 

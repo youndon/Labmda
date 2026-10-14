@@ -3,9 +3,7 @@ package com.zouitel.presentaion.screens.ride
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
-import com.zouitel.presentaion.model.DriverLocation
 import com.zouitel.presentaion.model.UserProfile
-import com.zouitel.presentaion.model.VehicleInfo
 import com.zouitel.presentaion.model.VehicleType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -126,14 +124,10 @@ class PassengerScreenModel : ScreenModel {
                             uid = uid,
                             fullName = fullName,
                             phoneNumber = phone,
-                            currentLocation = DriverLocation(latitude = lat, longitude = lng, heading = heading),
-                            isDriverOnline = true,
-                            vehicleInfo = VehicleInfo(
-                                type = vehicleType,
-                                make = runCatching { v.child("make").value<String>() }.getOrDefault("Toyota"),
-                                model = runCatching { v.child("model").value<String>() }.getOrDefault("Corolla"),
-                                color = runCatching { v.child("color").value<String>() }.getOrDefault("Silver"),
-                                licensePlate = runCatching { v.child("licensePlate").value<String>() }.getOrDefault("")
+
+                            driverService = DriverAccountInfo(
+                                currentLocation = DriverLocation(latitude = lat, longitude = lng, heading = heading),
+                                isOnline = true,
                             )
                         )
                     } catch (e: Exception) {
@@ -155,7 +149,6 @@ class PassengerScreenModel : ScreenModel {
         fare: Double,
         passengerName: String,
         passengerPhone: String,
-        requestedVehicleType: VehicleType,
         targetDriver: UserProfile? = null
     ) {
         val uid = currentUser?.uid ?: return
@@ -163,9 +156,9 @@ class PassengerScreenModel : ScreenModel {
             val ref = db.child("trips").push()
             val tripId = ref.key ?: System.currentTimeMillis().toString()
 
-            val vehicleStr = targetDriver?.vehicleInfo?.let {
-                "[${it.type?.name ?: requestedVehicleType.name}] ${it.color} ${it.make} ${it.model} (${it.licensePlate})"
-            } ?: "[${requestedVehicleType.name}] Standard Request"
+//            val vehicleStr = targetDriver?.vehicleInfo?.let {
+//                "[${it.type?.name ?: requestedVehicleType.name}] ${it.color} ${it.make} ${it.model} (${it.licensePlate})"
+//            } ?: "[${requestedVehicleType.name}] Standard Request"
 
             val trip = Trip(
                 id = tripId,
@@ -182,7 +175,7 @@ class PassengerScreenModel : ScreenModel {
                 driverId = targetDriver?.uid ?: "",
                 driverName = targetDriver?.fullName ?: "",
                 driverPhone = targetDriver?.phoneNumber ?: "",
-                vehicleDetails = vehicleStr,
+//                vehicleDetails = vehicleStr,
                 status = if (targetDriver != null) "ACCEPTED" else "REQUESTED",
                 createdAtTimestamp = System.currentTimeMillis()
             )

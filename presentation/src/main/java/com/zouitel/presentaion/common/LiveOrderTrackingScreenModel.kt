@@ -2,6 +2,9 @@ package com.zouitel.presentaion.common
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import com.zouitel.presentaion.model.CartItem
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
@@ -34,20 +37,20 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
 
                 try {
                     val id = snapshot.key ?: orderId
-                    val userId: String = snapshot.child("userId").value()
-                    val restaurantId: String = snapshot.child("restaurantId").value()
-                    val restaurantName: String = snapshot.child("restaurantName").value()
+                    val userId: String = snapshot.child("clientId").value()
+                    val restaurantId: String = snapshot.child("sourceId").value()
+                    val restaurantName: String = snapshot.child("sourceName").value()
                     val subtotal: Double = snapshot.child("subtotal").value()
-                    val courierFee: Double = snapshot.child("courierFee").value()
+                    val courierFee: Double = snapshot.child("deliveryFee").value()
                     val totalPrice: Double = snapshot.child("totalPrice").value()
                     val statusStr: String = snapshot.child("status").value()
-                    val deliveryAddress: String = snapshot.child("deliveryAddress").value()
+                    val deliveryAddress: String = snapshot.child("clientAddress").value()
                     val createdAtTimestamp: Long = snapshot.child("createdAtTimestamp").value()
                     val paymentMethod: String = snapshot.child("paymentMethod").value()
 
-                    val courierId: String = runCatching { snapshot.child("courierId").value<String>() }.getOrDefault("")
-                    val courierName: String = runCatching { snapshot.child("courierName").value<String>() }.getOrDefault("")
-                    val courierPhone: String = runCatching { snapshot.child("courierPhone").value<String>() }.getOrDefault("")
+                    val courierId: String = runCatching { snapshot.child("deliveryId").value<String>() }.getOrDefault("")
+                    val courierName: String = runCatching { snapshot.child("deliveryName").value<String>() }.getOrDefault("")
+                    val courierPhone: String = runCatching { snapshot.child("deliveryPhone").value<String>() }.getOrDefault("")
 
                     val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(
                         OrderStatus.PLACED)
@@ -64,20 +67,20 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
 
                     _order.value = Order(
                         id = id,
-                        userId = userId,
-                        restaurantId = restaurantId,
-                        restaurantName = restaurantName,
+                        clientId = userId,
+                        sourceId = restaurantId,
+                        sourceName = restaurantName,
                         items = items,
                         subtotal = subtotal,
-                        courierFee = courierFee,
+                        deliveryFee = courierFee,
                         totalPrice = totalPrice,
                         status = status,
-                        deliveryAddress = deliveryAddress,
+                        clientAddress = deliveryAddress,
                         createdAtTimestamp = createdAtTimestamp,
                         paymentMethod = paymentMethod,
-                        courierId = courierId,
-                        courierName = courierName,
-                        courierPhone = courierPhone
+                        deliveryId = courierId,
+                        deliveryName = courierName,
+                        deliveryPhone = courierPhone
                     )
                 } catch (e: Exception) {
                     _order.value = null

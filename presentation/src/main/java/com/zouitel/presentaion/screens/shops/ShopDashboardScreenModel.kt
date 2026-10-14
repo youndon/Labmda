@@ -2,7 +2,7 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -117,11 +117,11 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
 //                val courierRecord = mapOf(
 //                    "id" to order.id,
 //                    "orderId" to order.id,
-//                    "restaurantId" to order.shopId,
-//                    "restaurantName" to order.shopName,
-//                    "customerAddress" to order.deliveryAddress,
+//                    "sourceId" to order.shopId,
+//                    "sourceName" to order.shopName,
+//                    "customerAddress" to order.clientAddress,
 //                    "totalPrice" to order.totalPrice,
-//                    "courierFee" to order.courierFee,
+//                    "deliveryFee" to order.deliveryFee,
 //                    "status" to OrderStatus.OUT_FOR_DELIVERY.name,
 //                    "dispatchedAtTimestamp" to System.currentTimeMillis()
 //                )

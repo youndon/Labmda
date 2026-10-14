@@ -44,11 +44,10 @@ class FreightWorkplaceScreenModel : ScreenModel {
                     _profile.value = UserProfile(
                         uid = uid,
                         fullName = name,
-                        phoneNumber = phone,
-                        freightStatus = freightStatus
+                        phoneNumber = phone
                     )
                 } else {
-                    _profile.value = UserProfile(uid = uid, freightStatus = Status.NONE)
+                    _profile.value = UserProfile(uid = uid)
                 }
                 _isLoading.value = false
             }

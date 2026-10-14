@@ -25,8 +25,6 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
-import com.zouitel.presentaion.screens.account.AccountScreenModel
-import org.koin.compose.viewmodel.koinViewModel
 
 class RestaurantWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -167,6 +165,9 @@ class RestaurantWorkplaceScreen : Screen {
                                         isOnline = profile.isFoodServiceOnline,
                                         onOnlineChanged = { screenModel.updateOnlineStatus(it) }
                                     )
+                                    else -> {
+                                        Text("Unknown Status")
+                                    }
                                 }
                             }
                         }
@@ -258,7 +259,7 @@ class RestaurantWorkplaceScreen : Screen {
             OutlinedTextField(
                 value = deliveryFee,
                 onValueChange = { deliveryFee = it },
-                label = { Text("Courier Fee ($)") },
+                label = { Text("Delivery Fee ($)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth()
             )

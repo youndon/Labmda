@@ -21,7 +21,7 @@ import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.screens.account.AccountScreenModel
-import com.zouitel.presentaion.screens.courier.CourierDashboardScreen
+import com.zouitel.presentaion.screens.delivery.DeliveryDashboardScreen
 
 class RestaurantsScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -49,10 +49,10 @@ class RestaurantsScreen : Screen {
                         }
 
                         if (profile?.foodMode == UserMode.COURIER) { 
-                            IconButton(onClick = { navigator?.push(CourierDashboardScreen()) }) { 
+                            IconButton(onClick = { navigator?.push(DeliveryDashboardScreen()) }) {
                                 Icon(
                                     imageVector = Icons.Default.DirectionsBike,
-                                    contentDescription = "Courier Dashboard"
+                                    contentDescription = "Delivery Dashboard"
                                 )
                             }
                         }
@@ -146,7 +146,7 @@ private fun RestaurantCardItem(
                 modifier = Modifier.fillMaxWidth() 
             ) {
                 Text(
-                    text = "Courier: $${"%.2f".format(restaurant.deliveryFee)}", 
+                    text = "Delivery: $${"%.2f".format(restaurant.deliveryFee)}",
                 style = MaterialTheme.typography.bodyMedium
                 )
                 Text(

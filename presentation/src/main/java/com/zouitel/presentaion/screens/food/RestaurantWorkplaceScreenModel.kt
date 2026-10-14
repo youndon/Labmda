@@ -81,7 +81,7 @@ class RestaurantWorkplaceScreenModel(
                         observeMeals(uid)
                     }
                 } else {
-                    _profile.value = UserProfile(uid = uid, foodStatus = Status.NONE, foodMode = UserMode.CLIENT)
+                    _profile.value = UserProfile(uid = uid)
                 }
                 _isLoading.value = false
             }
@@ -91,7 +91,7 @@ class RestaurantWorkplaceScreenModel(
     private fun fetchManagedRestaurantDetails(uid: String) {
         screenModelScope.launch(Dispatchers.IO) {
             db.child("users").child(uid).valueEvents.collect { snapshot ->
-                val restaurantName = runCatching { snapshot.child("restaurantName").value<String>() }.getOrDefault("My Restaurant")
+                val restaurantName = runCatching { snapshot.child("sourceName").value<String>() }.getOrDefault("My Restaurant")
                 val imageUrl = runCatching { snapshot.child("restaurantImageUrl").value<String>() }.getOrDefault("")
                 val deliveryFee = runCatching { snapshot.child("deliveryFee").value<Double>() }.getOrDefault(0.0)
                 val estimatedTime = runCatching { snapshot.child("estimatedTimeMinutes").value<Int>() }.getOrDefault(20)
@@ -136,7 +136,7 @@ class RestaurantWorkplaceScreenModel(
 
         screenModelScope.launch(Dispatchers.IO) {
             val updates = mapOf(
-                "restaurantName" to restaurantName,
+                "sourceName" to restaurantName,
                 "restaurantImageUrl" to imageUrl,
                 "deliveryFee" to deliveryFee,
                 "estimatedTimeMinutes" to estimatedTimeMinutes,

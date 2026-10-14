@@ -65,13 +65,12 @@ class MainScreen() : Screen {
     @Composable
     override fun Content() {
         val accountScreen = koinScreenModel<AccountScreenModel>()
-        val shopModel = koinScreenModel<ShopsScreenModel>()
         val profile by accountScreen.profile.collectAsState()
 
-        val tabs = remember(profile?.driveMode, profile?.foodMode, profile?.shopMode) {
+        val tabs = remember(profile?.driverService, profile?.foodMode, profile?.shopMode) {
             listOf(
                 // Dynamically assign the first tab based on the selected mode
-                if (profile?.driveMode == UserMode.DRIVER) {
+                if (profile?.driverService != null && profile?.driverService?.isOnline == true) {
                     MainTab(DriverDashboardScreen(), "Drive", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)
                 } else {
                     MainTab(PassengerScreen(), "Passenger", Icons.Filled.DirectionsCar, Icons.Outlined.DirectionsCar)

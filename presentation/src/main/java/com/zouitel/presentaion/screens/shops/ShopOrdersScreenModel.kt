@@ -2,11 +2,10 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.CartItem
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
-import com.zouitel.presentaion.common.OrderType
-import com.zouitel.presentaion.screens.courier.Courier
+import com.zouitel.presentaion.model.CartItem
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
+import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,24 +33,20 @@ class ShopOrdersScreenModel : ScreenModel {
                     try {
                         val id = child.key ?: return@mapNotNull null
 
-                        val targetShopId: String = runCatching { child.child("shopId").value<String>() }
-                            .getOrElse { runCatching { child.child("restaurantId").value<String>() }.getOrDefault("") }
-
-                        val userId: String = runCatching { child.child("userId").value<String>() }.getOrDefault("")
-
-                        val shopName: String = runCatching { child.child("shopName").value<String>() }
-                            .getOrElse { runCatching { child.child("restaurantName").value<String>() }.getOrDefault("Store") }
+                        val targetShopId: String = runCatching { child.child("sourceId").value<String>() }.getOrDefault("")
+                        val clientId: String = runCatching { child.child("clientId").value<String>() }.getOrDefault("")
+                        val shopName: String = runCatching { child.child("sourceName").value<String>() }.getOrDefault("Store")
                         val subtotal: Double = runCatching { child.child("subtotal").value<Double>() }.getOrDefault(0.0)
-                        val courierFee: Double = runCatching { child.child("courierFee").value<Double>() }.getOrDefault(3.0)
+                        val courierFee: Double = runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(3.0)
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val statusStr: String = runCatching { child.child("status").value<String>() }.getOrDefault("PLACED")
-                        val deliveryAddress: String = runCatching { child.child("deliveryAddress").value<String>() }.getOrDefault("")
+                        val deliveryAddress: String = runCatching { child.child("clientAddress").value<String>() }.getOrDefault("")
                         val createdAtTimestamp: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
                         val paymentMethod: String = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("Cash")
 
-                        val courierId: String = runCatching { child.child("courierId").value<String>() }.getOrDefault("")
-                        val courierName: String = runCatching { child.child("courierName").value<String>() }.getOrDefault("")
-                        val courierPhone: String = runCatching { child.child("courierPhone").value<String>() }.getOrDefault("")
+                        val deliveryId: String = runCatching { child.child("deliveryId").value<String>() }.getOrDefault("")
+                        val deliveryName: String = runCatching { child.child("deliveryName").value<String>() }.getOrDefault("")
+                        val deliveryPhone: String = runCatching { child.child("deliveryPhone").value<String>() }.getOrDefault("")
 
                         val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(OrderStatus.PLACED)
 
@@ -69,23 +64,21 @@ class ShopOrdersScreenModel : ScreenModel {
 
                         Order(
                             id = id,
-                            userId = userId,
+                            clientId = clientId,
                             orderType = OrderType.RETAIL,
-                            shopId = targetShopId,
-                            shopName = shopName,
-                            restaurantId = targetShopId,
-                            restaurantName = shopName,
+                            sourceId = targetShopId,
+                            sourceName = shopName,
                             items = items,
                             subtotal = subtotal,
-                            courierFee = courierFee,
+                            deliveryFee = courierFee,
                             totalPrice = totalPrice,
                             status = status,
-                            deliveryAddress = deliveryAddress,
+                            clientAddress = deliveryAddress,
                             createdAtTimestamp = createdAtTimestamp,
                             paymentMethod = paymentMethod,
-                            courierId = courierId,
-                            courierName = courierName,
-                            courierPhone = courierPhone
+                            deliveryId = deliveryId,
+                            deliveryName = deliveryName,
+                            deliveryPhone = deliveryPhone
                         )
                     } catch (e: Exception) {
                         null
@@ -105,19 +98,18 @@ class ShopOrdersScreenModel : ScreenModel {
             db.child("orders").child(order.id).child("status").setValue(nextStatus.name)
 
             if (nextStatus == OrderStatus.OUT_FOR_DELIVERY) {
-                val courierRecord = Courier(
+                val deliveryRecord = Order(
                     id = order.id,
-                    orderId = order.id,
-                    restaurantId = order.shopId,
-                    restaurantName = order.shopName,
-                    customerAddress = order.deliveryAddress,
+                    clientId = order.id,
+                    sourceId = order.sourceId,
+                    sourceName = order.sourceName,
+                    clientAddress = order.clientAddress,
                     items = order.items,
                     totalPrice = order.totalPrice,
-                    courierFee = order.courierFee,
-                    status = OrderStatus.OUT_FOR_DELIVERY,
-                    dispatchedAtTimestamp = System.currentTimeMillis()
+                    deliveryFee = order.deliveryFee,
+                    createdAtTimestamp = System.currentTimeMillis()
                 )
-                db.child("couriers").child(order.id).setValue(courierRecord)
+                db.child("deliveries").child(order.id).setValue(deliveryRecord)
             }
         }
     }

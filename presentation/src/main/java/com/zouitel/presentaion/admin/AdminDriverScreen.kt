@@ -83,7 +83,7 @@ class AdminDriverScreen : Screen {
 
                 Text(text = "Phone: ${profile.phoneNumber ?: "N/A"}", style = MaterialTheme.typography.bodyMedium)
 
-                profile.vehicleInfo?.let { vehicle ->
+                profile.driverService?.vehicleInfo?.let { vehicle ->
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Vehicle: ${vehicle.color} ${vehicle.make} ${vehicle.model} (${vehicle.licensePlate})",

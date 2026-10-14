@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.model.OrderStatus
 
 data class LiveOrderTrackingScreen(val orderId: String) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -81,7 +82,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                     style = MaterialTheme.typography.titleMedium
                                 )
                                 Text(
-                                    text = "From: ${currentOrder.restaurantName}",
+                                    text = "From: ${currentOrder.sourceName}",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Text(
@@ -106,8 +107,8 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                         }
                     }
 
-                    // Courier Information Section
-                    if (currentOrder.status == OrderStatus.OUT_FOR_DELIVERY || currentOrder.status == OrderStatus.DELIVERED || currentOrder.courierName.isNotBlank()) {
+                    // Delivery Information Section
+                    if (currentOrder.status == OrderStatus.OUT_FOR_DELIVERY || currentOrder.status == OrderStatus.DELIVERED || currentOrder.deliveryName.isNotBlank()) {
                         item {
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
@@ -122,16 +123,16 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                 ) {
                                     Column {
                                         Text(
-                                            text = "Courier Assigned",
+                                            text = "Delivery Assigned",
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
                                         )
                                         Text(
-                                            text = currentOrder.courierName.ifBlank { "Searching for nearby courier..." },
+                                            text = currentOrder.deliveryName.ifBlank { "Searching for nearby courier..." },
                                             style = MaterialTheme.typography.titleMedium,
                                             color = MaterialTheme.colorScheme.onSecondaryContainer
                                         )
-                                        if (currentOrder.courierPhone.isNotBlank()) {
+                                        if (currentOrder.deliveryPhone.isNotBlank()) {
                                             Spacer(modifier = Modifier.height(4.dp))
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(
@@ -142,7 +143,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                                 )
                                                 Spacer(modifier = Modifier.width(4.dp))
                                                 Text(
-                                                    text = currentOrder.courierPhone,
+                                                    text = currentOrder.deliveryPhone,
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSecondaryContainer
                                                 )
@@ -151,7 +152,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                     }
                                     Icon(
                                         imageVector = Icons.Default.DirectionsBike,
-                                        contentDescription = "Courier Icon",
+                                        contentDescription = "Delivery Icon",
                                         tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                         modifier = Modifier.size(36.dp)
                                     )
@@ -167,7 +168,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                 Text("Delivery Address", style = MaterialTheme.typography.titleSmall)
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = currentOrder.deliveryAddress.ifBlank { "Address not provided" },
+                                    text = currentOrder.clientAddress.ifBlank { "Address not provided" },
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -197,8 +198,8 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Courier Fee", style = MaterialTheme.typography.bodyMedium)
-                            Text("$${"%.2f".format(currentOrder.courierFee)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium)
+                            Text("$${"%.2f".format(currentOrder.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
@@ -238,7 +239,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
             OrderStatus.PLACED to "Placed",
             OrderStatus.ACCEPTED to "Confirmed",
             OrderStatus.PREPARING to "Kitchen",
-            OrderStatus.OUT_FOR_DELIVERY to "Out for Courier",
+            OrderStatus.OUT_FOR_DELIVERY to "Out for Delivery",
             OrderStatus.DELIVERED to "Delivered"
         )
 

@@ -2,7 +2,7 @@ package com.zouitel.presentaion.di
 
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.screens.account.LogInScreenModel
-import com.zouitel.presentaion.screens.courier.courierModule
+import com.zouitel.presentaion.screens.delivery.deliveryModule
 import com.zouitel.presentaion.screens.food.foodModule
 import com.zouitel.presentaion.screens.freight.freightModule
 import com.zouitel.presentaion.screens.ride.rideModule
@@ -15,7 +15,7 @@ import org.koin.core.module.dsl.factoryOf
 import org.koin.dsl.module
 
 val presentationModule = module {
-    includes(foodModule, shopsModule, rideModule, freightModule, courierModule)
+    includes(foodModule, shopsModule, rideModule, freightModule, deliveryModule)
 
     factory {
         AccountScreenModel(androidContext(), get(), get())

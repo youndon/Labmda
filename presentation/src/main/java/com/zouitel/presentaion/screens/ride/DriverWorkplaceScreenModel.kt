@@ -3,7 +3,6 @@ package com.zouitel.presentaion.screens.ride
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
-import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleInfo
 import com.zouitel.presentaion.model.VehicleType
@@ -22,6 +21,9 @@ class DriverWorkplaceScreenModel : ScreenModel {
     private val _profile = MutableStateFlow(UserProfile())
     val profile: StateFlow<UserProfile> = _profile.asStateFlow()
 
+    private val _driverAccount = MutableStateFlow<DriverAccountInfo?>(null)
+    val driverAccount: StateFlow<DriverAccountInfo?> = _driverAccount.asStateFlow()
+
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -38,66 +40,77 @@ class DriverWorkplaceScreenModel : ScreenModel {
         screenModelScope.launch {
             db.child("users").child(uid).valueEvents.collect { snapshot ->
                 if (snapshot.exists) {
-                    val fullName = runCatching { snapshot.child("fullName").value<String>() }.getOrDefault("")
+                    val fullName = runCatching { snapshot.child("fullName").value<String>() }
+                        .getOrElse { runCatching { snapshot.child("name").value<String>() }.getOrDefault("") }
                     val phone = runCatching { snapshot.child("phoneNumber").value<String>() }
                         .getOrElse { runCatching { snapshot.child("phone").value<String>() }.getOrDefault("") }
 
-                    val driveModeStr = runCatching { snapshot.child("driveMode").value<String>() }.getOrDefault("PASSENGER")
-                    val driverStatusStr = runCatching { snapshot.child("driverStatus").value<String>() }.getOrDefault("NONE")
+                    val driverChild = snapshot.child("driverService")
+                    val driverAccountInfo = if (driverChild.exists) {
+                        try {
+                            val id = runCatching { driverChild.child("id").value<String>() }.getOrDefault(uid)
+                            val statusStr = runCatching { driverChild.child("status").value<String>() }.getOrDefault("NONE")
+                            val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.NONE)
+                            val isOnline = runCatching { driverChild.child("isOnline").value<Boolean>() }.getOrDefault(false)
 
-                    val driveMode = runCatching { UserMode.valueOf(driveModeStr) }.getOrDefault(UserMode.PASSENGER)
-                    val driverStatus = runCatching { Status.valueOf(driverStatusStr) }.getOrDefault(Status.NONE)
+                            val typeStr = runCatching { driverChild.child("vehicleInfo").child("type").value<String>() }.getOrDefault("CAR")
+                            val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
 
-                    val typeStr = runCatching { snapshot.child("vehicleInfo").child("type").value<String>() }.getOrDefault("CAR")
-                    val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
+                            val make = runCatching { driverChild.child("vehicleInfo").child("make").value<String>() }.getOrDefault("Toyota")
+                            val model = runCatching { driverChild.child("vehicleInfo").child("model").value<String>() }.getOrDefault("Corolla")
+                            val color = runCatching { driverChild.child("vehicleInfo").child("color").value<String>() }.getOrDefault("Silver")
+                            val licensePlate = runCatching { driverChild.child("vehicleInfo").child("licensePlate").value<String>() }.getOrDefault("")
 
-                    val make = runCatching { snapshot.child("vehicleInfo").child("make").value<String>() }.getOrDefault("Toyota")
-                    val model = runCatching { snapshot.child("vehicleInfo").child("model").value<String>() }.getOrDefault("Corolla")
-                    val color = runCatching { snapshot.child("vehicleInfo").child("color").value<String>() }.getOrDefault("Silver")
-                    val licensePlate = runCatching { snapshot.child("vehicleInfo").child("licensePlate").value<String>() }.getOrDefault("")
+                            DriverAccountInfo(
+                                id = id,
+                                vehicleInfo = VehicleInfo(
+                                    type = vehicleType,
+                                    make = make,
+                                    model = model,
+                                    color = color,
+                                    licensePlate = licensePlate,
+                                    serviceType = "Ride"
+                                ),
+                                status = status,
+                                isOnline = isOnline
+                            )
+                        } catch (e: Exception) {
+                            null
+                        }
+                    } else {
+                        null
+                    }
 
                     _profile.value = UserProfile(
                         uid = uid,
                         fullName = fullName,
                         phoneNumber = phone,
-                        driveMode = driveMode,
-                        driverStatus = driverStatus,
-                        vehicleInfo = VehicleInfo(
-                            type = vehicleType,
-                            make = make,
-                            model = model,
-                            color = color,
-                            licensePlate = licensePlate
-                        )
+                        driverService = driverAccountInfo
                     )
+                    _driverAccount.value = driverAccountInfo
                 } else {
-                    _profile.value = UserProfile(uid = uid, driverStatus = Status.NONE)
+                    _profile.value = UserProfile(uid = uid)
+                    _driverAccount.value = null
                 }
                 _isLoading.value = false
             }
         }
     }
 
-    fun updateDriveMode(driveMode: UserMode) {
-        val uid = auth.currentUser?.uid ?: return
-        screenModelScope.launch {
-            db.child("users").child(uid).child("driveMode").setValue(driveMode.name)
-        }
-    }
-
-    fun submitDriverApplication(
-        fullName: String,
-        phone: String,
+    fun saveDriverService(
         vehicleType: VehicleType,
         make: String,
         model: String,
         color: String,
-        licensePlate: String
+        licensePlate: String,
+        keepStatus: Status? = null
     ) {
         val uid = auth.currentUser?.uid ?: return
         _isLoading.value = true
 
         screenModelScope.launch {
+            val statusToSet = keepStatus ?: Status.PENDING
+
             val vehicleMap = mapOf(
                 "type" to vehicleType.name,
                 "make" to make,
@@ -107,16 +120,29 @@ class DriverWorkplaceScreenModel : ScreenModel {
                 "serviceType" to "Ride"
             )
 
-            val updates = mapOf<String, Any>(
-                "fullName" to fullName,
-                "phoneNumber" to phone,
-                "driverStatus" to Status.PENDING.name,
-                "driveMode" to UserMode.DRIVER.name,
-                "vehicleInfo" to vehicleMap
+            val driverMap = mapOf(
+                "id" to uid,
+                "vehicleInfo" to vehicleMap,
+                "status" to statusToSet.name,
+                "isOnline" to false
             )
 
-            db.child("users").child(uid).updateChildren(updates)
+            db.child("users").child(uid).child("driverService").setValue(driverMap)
             _isLoading.value = false
+        }
+    }
+
+    fun updateOnlineStatus(isOnline: Boolean) {
+        val uid = auth.currentUser?.uid ?: return
+        screenModelScope.launch {
+            db.child("users").child(uid).child("driverService").child("isOnline").setValue(isOnline)
+        }
+    }
+
+    fun deleteDriverService() {
+        val uid = auth.currentUser?.uid ?: return
+        screenModelScope.launch {
+            db.child("users").child(uid).child("driverService").removeValue()
         }
     }
 }

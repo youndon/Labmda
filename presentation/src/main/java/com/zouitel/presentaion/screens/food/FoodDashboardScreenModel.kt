@@ -2,9 +2,9 @@ package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.CartItem
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.CartItem
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
@@ -39,24 +39,24 @@ class FoodDashboardScreenModel : ScreenModel {
                             return@mapNotNull null
                         }
 
-                        val userId: String = child.child("userId").value()
-                        val restaurantId: String = child.child("restaurantId").value()
-                        val restaurantName: String = child.child("restaurantName").value()
+                        val userId: String = child.child("clientId").value()
+                        val restaurantId: String = child.child("sourceId").value()
+                        val restaurantName: String = child.child("sourceName").value()
                         val subtotal: Double = child.child("subtotal").value()
 
-                        // Support both new 'courierFee' and fallback 'deliveryFee'
-                        val courierFee: Double = runCatching { child.child("courierFee").value<Double>() }
+                        // Support both new 'deliveryFee' and fallback 'deliveryFee'
+                        val courierFee: Double = runCatching { child.child("deliveryFee").value<Double>() }
                             .getOrElse { runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(0.0) }
 
                         val totalPrice: Double = child.child("totalPrice").value()
                         val statusStr: String = child.child("status").value()
-                        val deliveryAddress: String = child.child("deliveryAddress").value()
+                        val deliveryAddress: String = child.child("clientAddress").value()
                         val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()
                         val paymentMethod: String = child.child("paymentMethod").value()
 
-                        val courierId: String = runCatching { child.child("courierId").value<String>() }.getOrDefault("")
-                        val courierName: String = runCatching { child.child("courierName").value<String>() }.getOrDefault("")
-                        val courierPhone: String = runCatching { child.child("courierPhone").value<String>() }.getOrDefault("")
+                        val courierId: String = runCatching { child.child("deliveryId").value<String>() }.getOrDefault("")
+                        val courierName: String = runCatching { child.child("deliveryName").value<String>() }.getOrDefault("")
+                        val courierPhone: String = runCatching { child.child("deliveryPhone").value<String>() }.getOrDefault("")
 
                         val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(
                             OrderStatus.PLACED)
@@ -73,20 +73,20 @@ class FoodDashboardScreenModel : ScreenModel {
 
                         Order(
                             id = id,
-                            userId = userId,
-                            restaurantId = restaurantId,
-                            restaurantName = restaurantName,
+                            clientId = userId,
+                            sourceId = restaurantId,
+                            sourceName = restaurantName,
                             items = items,
                             subtotal = subtotal,
-                            courierFee = courierFee,
+                            deliveryFee = courierFee,
                             totalPrice = totalPrice,
                             status = status,
-                            deliveryAddress = deliveryAddress,
+                            clientAddress = deliveryAddress,
                             createdAtTimestamp = createdAtTimestamp,
                             paymentMethod = paymentMethod,
-                            courierId = courierId,
-                            courierName = courierName,
-                            courierPhone = courierPhone
+                            deliveryId = courierId,
+                            deliveryName = courierName,
+                            deliveryPhone = courierPhone
                         )
                     } catch (e: Exception) {
                         null
@@ -100,7 +100,7 @@ class FoodDashboardScreenModel : ScreenModel {
     }
 
     fun updateOrderStatus(order: Order, nextStatus:OrderStatus) {
-        // Restaurant Managers cannot trigger DELIVERED; only Couriers can
+        // Restaurant Managers cannot trigger DELIVERED; only DeliveryScreen can
         if (nextStatus == OrderStatus.DELIVERED) {
             return
         }
@@ -111,15 +111,15 @@ class FoodDashboardScreenModel : ScreenModel {
 
             // When order is marked OUT_FOR_DELIVERY, push record to 'couriers' table
 //            if (nextStatus == OrderStatus.OUT_FOR_DELIVERY) {
-//                val courierRecord = Courier(
+//                val courierRecord = Delivery(
 //                    id = order.id,
 //                    orderId = order.id,
-//                    restaurantId = order.restaurantId,
-//                    restaurantName = order.restaurantName,
-//                    customerAddress = order.deliveryAddress,
+//                    sourceId = order.sourceId,
+//                    sourceName = order.sourceName,
+//                    customerAddress = order.clientAddress,
 //                    items = order.items,
 //                    totalPrice = order.totalPrice,
-//                    courierFee = order.courierFee,
+//                    deliveryFee = order.deliveryFee,
 //                    status = OrderStatus.OUT_FOR_DELIVERY,
 //                    dispatchedAtTimestamp = System.currentTimeMillis()
 //                )

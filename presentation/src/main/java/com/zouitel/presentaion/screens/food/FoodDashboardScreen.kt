@@ -15,8 +15,8 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -111,20 +111,20 @@ class FoodDashboardScreen : Screen {
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-                // Client & Courier Info
+                // Client & Delivery Info
                 Text(
                     text = "Client Info & Delivery Address",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-                Text(text = "Client ID: ${order.userId.ifBlank { "Guest Client" }}", style = MaterialTheme.typography.bodyMedium)
-                Text(text = "Address: ${order.deliveryAddress}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Client ID: ${order.clientId.ifBlank { "Guest Client" }}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodyMedium)
 
-                if (order.courierName.isNotBlank()) {
+                if (order.deliveryName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Courier: ${order.courierName} (${order.courierPhone})",
+                        text = "Delivery: ${order.deliveryName} (${order.deliveryPhone})",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.tertiary
                     )
@@ -233,11 +233,11 @@ class FoodDashboardScreen : Screen {
                         onClick = { onStatusChange(OrderStatus.OUT_FOR_DELIVERY) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Send Out for Courier")
+                        Text("Send Out for Delivery")
                     }
                 }
                 OrderStatus.OUT_FOR_DELIVERY -> {
-                    // Managers cannot set DELIVERED; state transition belongs solely to Courier
+                    // Managers cannot set DELIVERED; state transition belongs solely to Delivery
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                         modifier = Modifier.fillMaxWidth()

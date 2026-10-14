@@ -1,14 +1,12 @@
 package com.zouitel.presentaion.screens.ride
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.HourglassEmpty
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,9 +16,7 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
-import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.model.VehicleType
-import com.zouitel.presentaion.screens.account.AccountScreenModel
 
 class DriverWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -30,135 +26,190 @@ class DriverWorkplaceScreen : Screen {
         val screenModel = koinScreenModel<DriverWorkplaceScreenModel>()
 
         val profile by screenModel.profile.collectAsState()
+        val driverAccount by screenModel.driverAccount.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
-        val selectedRoleMode = remember(profile.driveMode) {
-            profile.driveMode
-        }
+        var showAddEditDialog by remember { mutableStateOf(false) }
 
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Ride Portal Mode") },
+                    title = { Text("Driver Workplace") },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        if (driverAccount == null) {
+                            IconButton(onClick = { showAddEditDialog = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "Register Driver Service")
+                            }
                         }
                     }
                 )
             }
         ) { paddingValues ->
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(16.dp)
             ) {
-                Text(
-                    text = "Select Portal Mode",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    SegmentedButton(
-                        selected = selectedRoleMode == UserMode.PASSENGER,
-                        onClick = {
-                            screenModel.updateDriveMode(UserMode.PASSENGER)
-                        },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                        icon = { Icon(Icons.Default.Person, contentDescription = null) }
-                    ) {
-                        Text("Passenger")
+                if (isLoading) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
                     }
-
-                    SegmentedButton(
-                        selected = selectedRoleMode == UserMode.DRIVER,
-                        onClick = {
-                            screenModel.updateDriveMode(UserMode.DRIVER)
-                        },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                        icon = { Icon(Icons.Default.DirectionsCar, contentDescription = null) }
+                } else if (driverAccount == null) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("Driver")
+                        Text("No Driver Service Registered", style = MaterialTheme.typography.titleLarge)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Register your vehicle profile to start accepting ride requests.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(onClick = { showAddEditDialog = true }) {
+                            Text("Apply Now")
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Button(
+                            onClick = { navigator?.push(DriverDashboardScreen()) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Go to Driver Dashboard")
+                        }
+
+                        HorizontalDivider()
+
+                        // User profile info summary
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(text = profile.fullName.ifBlank { "User Profile" }, style = MaterialTheme.typography.titleMedium)
+                                Text(text = "Phone: ${profile.phoneNumber?.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+
+                        Text("Driver Account Info", style = MaterialTheme.typography.titleMedium)
+
+                        DriverServiceCard(
+                            account = driverAccount!!,
+                            onEdit = { showAddEditDialog = true },
+                            onDelete = { screenModel.deleteDriverService() },
+                            onOnlineChanged = { screenModel.updateOnlineStatus(it) }
+                        )
                     }
                 }
 
-                HorizontalDivider()
-
-                when (selectedRoleMode) {
-                    UserMode.PASSENGER -> PassengerModeCard {
-                        navigator?.push(PassengerScreen())
-                    }
-                    UserMode.DRIVER -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isLoading) {
-                                CircularProgressIndicator()
-                            } else {
-                                when (profile.driverStatus) {
-                                    Status.NONE -> DriverRegistrationForm(
-                                        initialName = profile.fullName,
-                                        initialPhone = profile.phoneNumber ?: "",
-                                        initialVehicleType = profile.vehicleInfo?.type ?: VehicleType.CAR,
-                                        onSubmit = { name, phone, type, make, model, color, plate ->
-                                            screenModel.submitDriverApplication(name, phone, type, make, model, color, plate)
-                                        }
-                                    )
-                                    Status.PENDING -> PendingDriverVerificationView()
-                                    Status.REJECTED -> RejectedDriverView()
-                                    Status.APPROVED -> ApprovedDriverView {
-                                        navigator?.push(DriverDashboardScreen())
-                                    }
-                                }
-                            }
+                if (showAddEditDialog) {
+                    AddEditDriverDialog(
+                        account = driverAccount,
+                        onDismiss = { showAddEditDialog = false },
+                        onConfirm = { type, make, model, color, plate ->
+                            screenModel.saveDriverService(
+                                vehicleType = type,
+                                make = make,
+                                model = model,
+                                color = color,
+                                licensePlate = plate,
+                                keepStatus = driverAccount?.status
+                            )
+                            showAddEditDialog = false
                         }
-                    }
-                    else -> {}
+                    )
                 }
             }
         }
     }
 
     @Composable
-    private fun PassengerModeCard(onExploreRides: () -> Unit) {
+    private fun DriverServiceCard(
+        account: DriverAccountInfo,
+        onEdit: () -> Unit,
+        onDelete: () -> Unit,
+        onOnlineChanged: (Boolean) -> Unit
+    ) {
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onExploreRides),
-            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.DirectionsCar,
-                    contentDescription = null,
-                    modifier = Modifier.size(56.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Passenger Mode Active", style = MaterialTheme.typography.titleLarge)
-                Text(
-                    "Request rides, negotiate fares with drivers in real-time, and track your active drivers on the map.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Button(
-                    onClick = onExploreRides,
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Open Passenger Portal")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(text = "Ride Service", style = MaterialTheme.typography.titleMedium)
+                    }
+
+                    Badge(
+                        containerColor = when (account.status) {
+                            Status.APPROVED -> MaterialTheme.colorScheme.primaryContainer
+                            Status.PENDING -> MaterialTheme.colorScheme.tertiaryContainer
+                            else -> MaterialTheme.colorScheme.errorContainer
+                        }
+                    ) {
+                        Text(
+                            text = account.status.name,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+
+                HorizontalDivider()
+
+                val v = account.vehicleInfo
+                Text(text = "Vehicle: ${v?.color ?: ""} ${v?.make ?: ""} ${v?.model ?: ""} (${v?.type?.name ?: ""})", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "License Plate: ${v?.licensePlate ?: "N/A"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+
+                if (account.status == Status.APPROVED) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (account.isOnline) "Ready for rides" else "Offline",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (account.isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                        Switch(checked = account.isOnline, onCheckedChange = onOnlineChanged)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onEdit) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Driver Service")
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Driver Service", tint = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
         }
@@ -166,206 +217,104 @@ class DriverWorkplaceScreen : Screen {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun DriverRegistrationForm(
-        initialName: String,
-        initialPhone: String,
-        initialVehicleType: VehicleType,
-        onSubmit: (String, String, VehicleType, String, String, String, String) -> Unit
+    private fun AddEditDriverDialog(
+        account: DriverAccountInfo?,
+        onDismiss: () -> Unit,
+        onConfirm: (VehicleType, String, String, String, String) -> Unit
     ) {
-        var fullName by remember { mutableStateOf(initialName) }
-        var phone by remember { mutableStateOf(initialPhone) }
-        var selectedVehicleType by remember { mutableStateOf(initialVehicleType) }
-        var make by remember { mutableStateOf("Toyota") }
-        var model by remember { mutableStateOf("Corolla") }
-        var color by remember { mutableStateOf("Silver") }
-        var licensePlate by remember { mutableStateOf("") }
+        var selectedVehicleType by remember { mutableStateOf(account?.vehicleInfo?.type ?: VehicleType.CAR) }
+        var make by remember { mutableStateOf(account?.vehicleInfo?.make ?: "Toyota") }
+        var model by remember { mutableStateOf(account?.vehicleInfo?.model ?: "Corolla") }
+        var color by remember { mutableStateOf(account?.vehicleInfo?.color ?: "Silver") }
+        var licensePlate by remember { mutableStateOf(account?.vehicleInfo?.licensePlate ?: "") }
+        var expandedDropdown by remember { mutableStateOf(false) }
 
-        var expanded by remember { mutableStateOf(false) }
-
-        LazyColumn(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                Text("Register as Driver", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "Submit your vehicle information and type for admin review to get approved.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            item {
-                OutlinedTextField(
-                    value = fullName,
-                    onValueChange = { fullName = it },
-                    label = { Text("Full Name") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            item {
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it },
-                    label = { Text("Phone Number") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // Vehicle Type Dropdown Selector
-            item {
-                ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = !expanded },
-                    modifier = Modifier.fillMaxWidth()
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(if (account == null) "Register Driver Service" else "Edit Driver Service") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
-                        value = selectedVehicleType.name,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Vehicle Type") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                        modifier = Modifier.menuAnchor(
-                            type = ExposedDropdownMenuAnchorType.PrimaryEditable,
-                            enabled = true
-                        ).fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
+                    ExposedDropdownMenuBox(
+                        expanded = expandedDropdown,
+                        onExpandedChange = { expandedDropdown = !expandedDropdown }
                     ) {
-                        VehicleType.entries.forEach { type ->
-                            DropdownMenuItem(
-                                text = { Text(type.name) },
-                                onClick = {
-                                    selectedVehicleType = type
-                                    expanded = false
-                                }
-                            )
+                        OutlinedTextField(
+                            value = selectedVehicleType.name,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Vehicle Type") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
+                            modifier = Modifier
+                                .menuAnchor(
+                                    type = ExposedDropdownMenuAnchorType.PrimaryEditable,
+                                    enabled = true
+                                )
+                                .fillMaxWidth()
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = expandedDropdown,
+                            onDismissRequest = { expandedDropdown = false }
+                        ) {
+                            VehicleType.entries.forEach { type ->
+                                DropdownMenuItem(
+                                    text = { Text(type.name) },
+                                    onClick = {
+                                        selectedVehicleType = type
+                                        expandedDropdown = false
+                                    }
+                                )
+                            }
                         }
                     }
+
+                    OutlinedTextField(
+                        value = make,
+                        onValueChange = { make = it },
+                        label = { Text("Vehicle Make (e.g. Toyota)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = { model = it },
+                        label = { Text("Vehicle Model (e.g. Corolla)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = color,
+                        onValueChange = { color = it },
+                        label = { Text("Vehicle Color") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = licensePlate,
+                        onValueChange = { licensePlate = it },
+                        label = { Text("License Plate Number") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-            }
-
-            item {
-                OutlinedTextField(
-                    value = make,
-                    onValueChange = { make = it },
-                    label = { Text("Vehicle Make (e.g. Toyota)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            item {
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("Vehicle Model (e.g. Corolla)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            item {
-                OutlinedTextField(
-                    value = color,
-                    onValueChange = { color = it },
-                    label = { Text("Vehicle Color") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            item {
-                OutlinedTextField(
-                    value = licensePlate,
-                    onValueChange = { licensePlate = it },
-                    label = { Text("License Plate Number") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            item {
+            },
+            confirmButton = {
                 Button(
-                    onClick = { onSubmit(fullName, phone, selectedVehicleType, make, model, color, licensePlate) },
-                    enabled = fullName.isNotBlank() && phone.isNotBlank() && licensePlate.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth()
+                    onClick = {
+                        onConfirm(selectedVehicleType, make, model, color, licensePlate)
+                    },
+                    enabled = licensePlate.isNotBlank() && make.isNotBlank() && model.isNotBlank()
                 ) {
-                    Text("Submit Application")
+                    Text(if (account == null) "Submit Application" else "Save Changes")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
                 }
             }
-        }
-    }
-
-    @Composable
-    private fun PendingDriverVerificationView() {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.HourglassEmpty,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Text("Driver Application Pending", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "Your driver verification request has been submitted and is awaiting administrator approval.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    @Composable
-    private fun RejectedDriverView() {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.error
-            )
-            Text("Driver Application Declined", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "Unfortunately, your driver application was not approved by the admin team.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    @Composable
-    private fun ApprovedDriverView(onOpenDashboard: () -> Unit) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.DirectionsCar,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Text("Driver Active & Verified", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "Your driver account is active. Open your driver dashboard to start accepting ride requests.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Button(
-                onClick = onOpenDashboard,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.DirectionsCar, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Open Driver Dashboard")
-            }
-        }
+        )
     }
 }

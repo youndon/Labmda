@@ -1,6 +1,6 @@
 package com.zouitel.presentaion.screens.shops
 
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.OrderStatus
 import kotlinx.serialization.Serializable
 
 @Serializable

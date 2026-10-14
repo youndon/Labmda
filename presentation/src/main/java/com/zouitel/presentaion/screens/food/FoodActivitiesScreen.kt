@@ -16,8 +16,8 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -103,7 +103,7 @@ class FoodActivitiesScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = order.restaurantName.ifBlank { "Restaurant" },
+                        text = order.sourceName.ifBlank { "Restaurant" },
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text(text = formattedDate, style = MaterialTheme.typography.bodySmall)
@@ -123,15 +123,15 @@ class FoodActivitiesScreen : Screen {
 
                 // Delivery Info
                 Text(
-                    text = "Delivery & Courier Info",
+                    text = "Delivery & Delivery Info",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-                Text(text = "Address: ${order.deliveryAddress}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
 
-                if (order.courierName.isNotBlank()) {
-                    Text(text = "Courier: ${order.courierName}", style = MaterialTheme.typography.bodyMedium)
+                if (order.deliveryName.isNotBlank()) {
+                    Text(text = "Delivery: ${order.deliveryName}", style = MaterialTheme.typography.bodyMedium)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))

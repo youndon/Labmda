@@ -44,7 +44,7 @@ class ShopsScreenModel : ScreenModel {
                             val shopModeStr = runCatching { snapshot.child("shopMode").value<String>() }.getOrDefault("CLIENT")
                             _userProfile.value = UserProfile(
                                 uid = uid,
-                                shopMode = runCatching { UserMode.valueOf(shopModeStr) }.getOrDefault(UserMode.CLIENT)
+                                shopMode = runCatching { UserMode.valueOf(shopModeStr) }.getOrDefault(UserMode.CLIENT),
                             )
                         }
                     }

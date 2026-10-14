@@ -27,7 +27,7 @@ class DriverDashboardScreenModel : ScreenModel {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Mirrors users/{uid}/isDriverOnline so the switch always shows the real stored value
+    // Mirrors users/{uid}/driverService/isOnline so the switch always shows the real stored value
     private val _isOnline = MutableStateFlow(false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
@@ -39,7 +39,7 @@ class DriverDashboardScreenModel : ScreenModel {
     private fun listenToOnlineState() {
         val uid = currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).child("isDriverOnline").valueEvents.collect { snap ->
+            db.child("users").child(uid).child("driverService").child("isOnline").valueEvents.collect { snap ->
                 _isOnline.value = runCatching { snap.value<Boolean>() }.getOrDefault(false)
             }
         }
@@ -47,7 +47,7 @@ class DriverDashboardScreenModel : ScreenModel {
 
     fun setOnline(online: Boolean) {
         val uid = currentUser?.uid ?: return
-        val onlineRef = db.child("users").child(uid).child("isDriverOnline")
+        val onlineRef = db.child("users").child(uid).child("driverService").child("isOnline")
 
         screenModelScope.launch {
             if (online) {
@@ -125,12 +125,10 @@ class DriverDashboardScreenModel : ScreenModel {
         screenModelScope.launch {
             val tripRef = db.child("trips").child(trip.id)
 
-            // Don't take a trip that another driver already accepted or that was cancelled
             val status = runCatching { tripRef.child("status").valueEvents.first().value<String>() }.getOrDefault("")
             val takenBy = runCatching { tripRef.child("driverId").valueEvents.first().value<String>() }.getOrDefault("")
             if (status != "REQUESTED" || takenBy.isNotBlank()) return@launch
 
-            // Read only THIS driver's profile (once), not the whole users node
             val profile = db.child("users").child(driverUid).valueEvents.first()
 
             val fullName = runCatching { profile.child("fullName").value<String>() }
@@ -141,7 +139,7 @@ class DriverDashboardScreenModel : ScreenModel {
                         .getOrDefault(currentUser.phoneNumber ?: "")
                 }
 
-            val vehicle = profile.child("vehicleInfo")
+            val vehicle = profile.child("driverService").child("vehicleInfo")
             val make = runCatching { vehicle.child("make").value<String>() }.getOrDefault("Toyota")
             val model = runCatching { vehicle.child("model").value<String>() }.getOrDefault("Corolla")
             val color = runCatching { vehicle.child("color").value<String>() }.getOrDefault("Silver")
@@ -168,8 +166,6 @@ class DriverDashboardScreenModel : ScreenModel {
     fun updateDriverLocation(latitude: Double, longitude: Double, heading: Float = 0f) {
         val uid = currentUser?.uid ?: return
         screenModelScope.launch {
-            // Location only. Online/offline is controlled by setOnline(), so a late
-            // location callback can never flip an offline driver back online.
             db.child("users").child(uid).child("currentLocation").setValue(
                 mapOf(
                     "latitude" to latitude,
@@ -182,13 +178,11 @@ class DriverDashboardScreenModel : ScreenModel {
 
     fun setDriverOffline() = setOnline(false)
 
-    // Leaving the dashboard stops location updates, so don't leave a stale "online" marker.
-    // screenModelScope is cancelled on dispose, hence the global scope to finish the write.
     @OptIn(DelicateCoroutinesApi::class)
     override fun onDispose() {
         val uid = currentUser?.uid ?: return
         GlobalScope.launch {
-            runCatching { db.child("users").child(uid).child("isDriverOnline").setValue(false) }
+            runCatching { db.child("users").child(uid).child("driverService").child("isOnline").setValue(false) }
         }
     }
 }

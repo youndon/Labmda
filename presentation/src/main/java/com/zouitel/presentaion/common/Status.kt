@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 enum class Status {
     NONE,
     PENDING,
+    SUSPENDED,
     APPROVED,
     REJECTED;
 }

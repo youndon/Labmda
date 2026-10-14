@@ -1,7 +1,7 @@
 package com.zouitel.presentaion.screens.freight
 
-import com.zouitel.presentaion.common.CartItem
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.CartItem
+import com.zouitel.presentaion.model.OrderStatus
 import kotlinx.serialization.Serializable
 
 @Serializable

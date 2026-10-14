@@ -45,7 +45,7 @@ class FreightWorkplaceScreen : Screen {
                 if (isLoading) {
                     CircularProgressIndicator()
                 } else {
-                    when (profile.freightStatus) {
+                    when (profile.deliveryServices?.status) {
                         Status.NONE -> FreightApplicationForm(
                             onSubmit = { name, phone, vehicle, doc ->
                                 screenModel.submitApplication(name, phone, vehicle, doc)
@@ -54,6 +54,10 @@ class FreightWorkplaceScreen : Screen {
                         Status.PENDING -> PendingStatusView()
                         Status.REJECTED -> RejectedStatusView()
                         Status.APPROVED -> ApprovedWorkplaceView(navigator)
+                        else -> {
+                            // Handle other statuses if needed
+                            Text("Unknown status: ${profile.deliveryServices?.status}")
+                        }
                     }
                 }
             }

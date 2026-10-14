@@ -2,8 +2,8 @@ package com.zouitel.presentaion.screens.freight
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.CartItem
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.CartItem
+import com.zouitel.presentaion.model.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -48,16 +48,16 @@ class FreightScreenModel : ScreenModel {
                         }
 
                         val businessId: String = runCatching { child.child("shopId").value<String>() }
-                            .getOrElse { runCatching { child.child("restaurantId").value<String>() }.getOrDefault("") }
+                            .getOrElse { runCatching { child.child("sourceId").value<String>() }.getOrDefault("") }
 
                         val businessName: String = runCatching { child.child("shopName").value<String>() }
-                            .getOrElse { runCatching { child.child("restaurantName").value<String>() }.getOrDefault("Store") }
+                            .getOrElse { runCatching { child.child("sourceName").value<String>() }.getOrDefault("Store") }
 
                         val freightId: String = runCatching { child.child("freightId").value<String>() }.getOrDefault("")
                         val freightName: String = runCatching { child.child("freightName").value<String>() }.getOrDefault("")
                         val freightPhone: String = runCatching { child.child("freightPhone").value<String>() }.getOrDefault("")
 
-                        val customerAddress: String = runCatching { child.child("deliveryAddress").value<String>() }.getOrDefault("")
+                        val customerAddress: String = runCatching { child.child("clientAddress").value<String>() }.getOrDefault("")
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val freightFee: Double = runCatching { child.child("freightFee").value<Double>() }.getOrDefault(10.0)
                         val dispatchedAt: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)

@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.common.CartItem
+import com.zouitel.presentaion.model.CartItem
 
 data class MealScreen(
     val meal: Meal,

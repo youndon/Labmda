@@ -18,18 +18,18 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
 
-class Couriers : Screen {
+class DeliveryScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = rememberScreenModel { AdminCouriersModel() }
+        val screenModel = rememberScreenModel { AdminDeliveryModel() }
         val applications by screenModel.applications.collectAsState()
 
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Courier Applications") },
+                    title = { Text("Delivery Applications") },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -40,7 +40,7 @@ class Couriers : Screen {
         ) { paddingValues ->
             if (applications.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                    Text("No pending courier applications.")
+                    Text("No pending delivery applications.")
                 }
             } else {
                 LazyColumn(
@@ -49,7 +49,7 @@ class Couriers : Screen {
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(applications, key = { it.uid }) { profile ->
-                        CourierApplicationCard(
+                        DeliveryApplicationCard(
                             profile = profile,
                             onApprove = { screenModel.updateCourierStatus(profile.uid, Status.APPROVED) },
                             onReject = { screenModel.updateCourierStatus(profile.uid, Status.REJECTED) }
@@ -61,7 +61,7 @@ class Couriers : Screen {
     }
 
     @Composable
-    private fun CourierApplicationCard(
+    private fun DeliveryApplicationCard(
         profile: UserProfile,
         onApprove: () -> Unit,
         onReject: () -> Unit
@@ -72,7 +72,7 @@ class Couriers : Screen {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(text = "Phone: ${profile.phoneNumber}", style = MaterialTheme.typography.bodyMedium)
-                Text(text = "Vehicle: ${profile.vehicleInfo}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Vehicle: ${profile.deliveryServices?.vehicleInfo}", style = MaterialTheme.typography.bodyMedium)
                 Text(
                     text = "Docs: ${profile.uid}",
                     style = MaterialTheme.typography.bodySmall,

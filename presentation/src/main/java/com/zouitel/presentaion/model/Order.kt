@@ -1,4 +1,4 @@
-package com.zouitel.presentaion.common
+package com.zouitel.presentaion.model
 
 import kotlinx.serialization.Serializable
 
@@ -42,29 +42,20 @@ data class SelectedOption(
 @Serializable
 data class Order(
     val id: String = "",
-    val userId: String = "",
+    val clientId: String = "",
     val orderType: OrderType = OrderType.FOOD,
-    val soldBy: String = "",
-    val soldId: String = "",
-    //----------------------------
-    val restaurantId: String = "",
-    val restaurantName: String = "",
-    val shopId: String = "",
-    val shopName: String = "",
-    //-*-------------------------------
+    val sourceId: String = "",
+    val sourceName: String = "",
     val items: List<CartItem> = emptyList(),
     val subtotal: Double = 0.0,
-    val courierFee: Double = 0.0,
+    val deliveryFee: Double = 0.0,
     val totalPrice: Double = 0.0,
     val status: OrderStatus = OrderStatus.PLACED,
-    val deliveryAddress: String = "",
+    val clientAddress: String = "",
     val createdAtTimestamp: Long = 0L,
     val paymentMethod: String = "",
-    val courierId: String = "",
-    val courierName: String = "",
-    val courierPhone: String = ""
+    val deliveryId: String = "",
+    val deliveryName: String = "",
+    val deliveryPhone: String = ""
 ) {
-    // Helper to extract the business fullName regardless of whether it's a restaurant or store
-    val businessName: String get() = if (orderType == OrderType.RETAIL) shopName.ifBlank { restaurantName } else restaurantName
-    val businessId: String get() = if (orderType == OrderType.RETAIL) shopId.ifBlank { restaurantId } else restaurantId
 }

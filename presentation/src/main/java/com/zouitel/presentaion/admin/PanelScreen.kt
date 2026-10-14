@@ -31,13 +31,13 @@ class PanelScreen : Screen {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Button(
-                    onClick = { navigator?.push(Couriers()) },
+                    onClick = { navigator?.push(DeliveryScreen()) },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)
                 ) {
                     Icon(Icons.Default.DirectionsBike, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Manage Courier Applications")
+                    Text("Manage Delivery Applications")
                 }
 
                 Button(

@@ -2,10 +2,10 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.CartItem
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
-import com.zouitel.presentaion.common.OrderType
+import com.zouitel.presentaion.model.CartItem
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
+import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -35,23 +35,23 @@ class ShopActivitiesScreenModel : ScreenModel {
                     try {
                         val id = child.key ?: return@mapNotNull null
 
-                        val userId: String = runCatching { child.child("userId").value<String>() }.getOrDefault("")
+                        val userId: String = runCatching { child.child("clientId").value<String>() }.getOrDefault("")
 
-                        // If user is authenticated, filter by their userId (allow guest if currentUserId is null)
+                        // If user is authenticated, filter by their clientId (allow guest if currentUserId is null)
                         if (currentUserId != null && userId.isNotBlank() && userId != currentUserId) {
                             return@mapNotNull null
                         }
 
                         val shopId = runCatching { child.child("shopId").value<String>() }
-                            .getOrElse { runCatching { child.child("restaurantId").value<String>() }.getOrDefault("") }
+                            .getOrElse { runCatching { child.child("sourceId").value<String>() }.getOrDefault("") }
                         val shopName: String = runCatching { child.child("shopName").value<String>() }
-                            .getOrElse { runCatching { child.child("restaurantName").value<String>() }.getOrDefault("Store / Restaurant") }
+                            .getOrElse { runCatching { child.child("sourceName").value<String>() }.getOrDefault("Store / Restaurant") }
 
                         val subtotal: Double = runCatching { child.child("subtotal").value<Double>() }.getOrDefault(0.0)
-                        val courierFee: Double = runCatching { child.child("courierFee").value<Double>() }.getOrDefault(3.0)
+                        val courierFee: Double = runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(3.0)
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val statusStr: String = runCatching { child.child("status").value<String>() }.getOrDefault("PLACED")
-                        val deliveryAddress: String = runCatching { child.child("deliveryAddress").value<String>() }.getOrDefault("")
+                        val deliveryAddress: String = runCatching { child.child("clientAddress").value<String>() }.getOrDefault("")
                         val createdAtTimestamp: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
                         val paymentMethod: String = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("Cash")
 
@@ -76,18 +76,16 @@ class ShopActivitiesScreenModel : ScreenModel {
 
                         Order(
                             id = id,
-                            userId = userId,
+                            clientId = userId,
                             orderType = OrderType.RETAIL,
-                            shopId = shopId,
-                            shopName = shopName,
-                            restaurantId = shopId,
-                            restaurantName = shopName,
+                            sourceId = shopId,
+                            sourceName = shopName,
                             items = items,
                             subtotal = subtotal,
-                            courierFee = courierFee,
+                            deliveryFee = courierFee,
                             totalPrice = totalPrice,
                             status = status,
-                            deliveryAddress = deliveryAddress,
+                            clientAddress = deliveryAddress,
                             createdAtTimestamp = createdAtTimestamp,
                             paymentMethod = paymentMethod
                         )

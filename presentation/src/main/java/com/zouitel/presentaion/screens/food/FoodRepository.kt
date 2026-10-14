@@ -56,7 +56,7 @@ class FoodRepository {
             "estimatedTimeMinutes" to estimatedTimeMinutes,
             "isOpen" to true,
             "managers" to managers,
-            "paymentMethods" to listOf("Cash on Courier", "Card on Courier")
+            "paymentMethods" to listOf("Cash on Delivery", "Card on Delivery")
         )
         newRef.setValue(restaurantMap)
     }
@@ -107,7 +107,7 @@ class FoodRepository {
         val id = mealRef.key ?: return
         val mealMap = mapOf(
             "id" to id,
-            "restaurantId" to restaurantId,
+            "sourceId" to restaurantId,
             "name" to name,
             "description" to description,
             "basePrice" to basePrice,

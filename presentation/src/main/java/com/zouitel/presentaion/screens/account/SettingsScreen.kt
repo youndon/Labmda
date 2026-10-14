@@ -8,9 +8,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,9 +20,6 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import com.zouitel.presentaion.screens.MainScreen
-import com.zouitel.presentaion.screens.courier.CourierWorkplaceScreen
-import com.zouitel.presentaion.screens.freight.FreightWorkplaceScreen
-import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
 
 class SettingsScreen() : Screen {
 

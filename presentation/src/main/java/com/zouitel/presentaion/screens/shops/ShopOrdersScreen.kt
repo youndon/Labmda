@@ -15,8 +15,8 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -90,12 +90,12 @@ class ShopOrdersScreen() : Screen {
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
                 Text("Client Delivery Address", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Text("Address: ${order.deliveryAddress}", style = MaterialTheme.typography.bodyMedium)
+                Text("Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
                 Text("Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodyMedium)
 
-                if (order.courierName.isNotBlank()) {
+                if (order.deliveryName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Assigned Courier: ${order.courierName} (${order.courierPhone})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                    Text("Assigned Delivery: ${order.deliveryName} (${order.deliveryPhone})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -146,7 +146,7 @@ class ShopOrdersScreen() : Screen {
                         }
                         OrderStatus.PREPARING -> {
                             Button(onClick = { onStatusChange(OrderStatus.OUT_FOR_DELIVERY) }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Dispatch to Courier")
+                                Text("Dispatch to Delivery")
                             }
                         }
                         OrderStatus.OUT_FOR_DELIVERY -> {

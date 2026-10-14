@@ -38,7 +38,7 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
-import com.zouitel.presentaion.screens.courier.CourierWorkplaceScreen
+import com.zouitel.presentaion.screens.delivery.DeliveryWorkplaceScreen
 import com.zouitel.presentaion.screens.food.RestaurantWorkplaceScreen
 import com.zouitel.presentaion.screens.freight.FreightWorkplaceScreen
 import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
@@ -58,6 +58,13 @@ class AccountScreen : Screen {
         val screenModel = koinScreenModel<AccountScreenModel>()
         val user by screenModel.currentUser.collectAsState()
         val profile by screenModel.profile.collectAsState()
+
+        val courierStatus = remember(profile?.deliveryServices?.status) {
+            profile?.deliveryServices?.status ?: Status.NONE
+        }
+        val driverStatus = remember(profile?.driverService?.status) {
+            profile?.driverService?.status ?: Status.NONE
+        }
         val restaurantStatus = remember(profile?.foodStatus) { profile?.foodStatus ?: Status.NONE }
         val shopStatus = remember(profile?.shopStatus) { profile?.shopStatus ?: Status.NONE }
 
@@ -79,7 +86,7 @@ class AccountScreen : Screen {
                     .padding(innerPadding)
                     .padding(horizontal = 20.dp)
             ) {
-                // --- Profile header ---[cite: 34]
+                // --- Profile header --- 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val photoUrl = user?.photoURL
                     if (!photoUrl.isNullOrEmpty()) {
@@ -125,20 +132,9 @@ class AccountScreen : Screen {
                 }
 
                 Spacer(Modifier.height(20.dp))
-
-                // --- Mode Switching Card ---[cite: 34]
-                Switch(
-                    checked = profile?.driveMode == UserMode.DRIVER,
-                    onCheckedChange = {
-                        coroutineScope.launch {
-                            screenModel.updateUserMode(user?.uid ?: "", if (it) UserMode.DRIVER else UserMode.PASSENGER)
-                        }
-                    }
-                )
-                Spacer(Modifier.height(20.dp))
                 HorizontalDivider()
 
-                // --- Businesses ---[cite: 34]
+                // --- Businesses --- 
                 Text(
                     text = "Businesses",
                     style = MaterialTheme.typography.labelMedium,
@@ -146,17 +142,52 @@ class AccountScreen : Screen {
                 )
                 Spacer(Modifier.height(4.dp))
 
-                AccountRow(Icons.Filled.Work, "Courier Workplace") {
-                    navigator.push(CourierWorkplaceScreen())
-                }
-                AccountRow(Icons.Filled.LocalShipping, "Freight Workplace") {
-                    navigator.push(FreightWorkplaceScreen())
-                }
-                AccountRow(Icons.Filled.DirectionsCar, "Driver Workplace") {
-                    navigator.push(DriverWorkplaceScreen())
+                // --- Delivery Workplace ---
+                AccountStatusRow(
+                    icon = Icons.Filled.Work,
+                    label = "Delivery Workplace",
+                    statusText = when (courierStatus) {
+                        Status.APPROVED -> "Active"
+                        Status.PENDING -> "Pending Review"
+                        Status.REJECTED -> "Declined"
+                        else -> "Apply"
+                    },
+                    statusColor = when (courierStatus) {
+                        Status.APPROVED -> MaterialTheme.colorScheme.primary
+                        Status.PENDING -> MaterialTheme.colorScheme.tertiary
+                        Status.REJECTED -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.outline
+                    }
+                ) {
+                    navigator.push(DeliveryWorkplaceScreen()) 
                 }
 
-                // --- Smart Move for Food Workplace ---[cite: 34]
+                // --- Freight Workplace ---
+                AccountRow(Icons.Filled.LocalShipping, "Freight Workplace") {
+                    navigator.push(FreightWorkplaceScreen()) 
+                }
+
+                // --- Driver Workplace ---
+                AccountStatusRow(
+                    icon = Icons.Filled.DirectionsCar,
+                    label = "Driver Workplace",
+                    statusText = when (driverStatus) {
+                        Status.APPROVED -> "Active"
+                        Status.PENDING -> "Pending Review"
+                        Status.REJECTED -> "Declined"
+                        else -> "Apply"
+                    },
+                    statusColor = when (driverStatus) {
+                        Status.APPROVED -> MaterialTheme.colorScheme.primary
+                        Status.PENDING -> MaterialTheme.colorScheme.tertiary
+                        Status.REJECTED -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.outline
+                    }
+                ) {
+                    navigator.push(DriverWorkplaceScreen()) 
+                }
+
+                // --- Food Workplace --- 
                 AccountStatusRow(
                     icon = Icons.Filled.Fastfood,
                     label = "Food Workplace",
@@ -164,19 +195,19 @@ class AccountScreen : Screen {
                         Status.APPROVED -> "Active"
                         Status.PENDING -> "Pending Review"
                         Status.REJECTED -> "Declined"
-                        Status.NONE -> "Apply"
+                        else -> "Apply"
                     },
                     statusColor = when (restaurantStatus) {
                         Status.APPROVED -> MaterialTheme.colorScheme.primary
                         Status.PENDING -> MaterialTheme.colorScheme.tertiary
                         Status.REJECTED -> MaterialTheme.colorScheme.error
-                        Status.NONE -> MaterialTheme.colorScheme.outline
+                        else -> MaterialTheme.colorScheme.outline
                     }
                 ) {
-                    navigator.push(RestaurantWorkplaceScreen())
+                    navigator.push(RestaurantWorkplaceScreen()) 
                 }
 
-                // --- Smart Move for Shop Workplace ---
+                // --- Shop Workplace --- 
                 AccountStatusRow(
                     icon = Icons.Filled.Storefront,
                     label = "Shop Workplace",
@@ -184,22 +215,22 @@ class AccountScreen : Screen {
                         Status.APPROVED -> "Active"
                         Status.PENDING -> "Pending Review"
                         Status.REJECTED -> "Declined"
-                        Status.NONE -> "Apply"
+                        else -> "Apply"
                     },
                     statusColor = when (shopStatus) {
                         Status.APPROVED -> MaterialTheme.colorScheme.primary
                         Status.PENDING -> MaterialTheme.colorScheme.tertiary
                         Status.REJECTED -> MaterialTheme.colorScheme.error
-                        Status.NONE -> MaterialTheme.colorScheme.outline
+                        else -> MaterialTheme.colorScheme.outline
                     }
                 ) {
-                    navigator.push(ShopWorkplaceScreen())
+                    navigator.push(ShopWorkplaceScreen()) 
                 }
 
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
 
-                // --- Account actions ---[cite: 34]
+                // --- Account actions --- 
                 AccountRow(Icons.Filled.History, "Ride history") { /* TODO */ }
                 AccountRow(Icons.Filled.CreditCard, "Payment methods") { /* TODO */ }
                 AccountRow(Icons.Filled.NotificationsNone, "Notifications") { /* TODO */ }
@@ -208,7 +239,7 @@ class AccountScreen : Screen {
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
 
-                AccountRow(Icons.Filled.Settings, "Settings") { navigator.push(SettingsScreen()) }
+                AccountRow(Icons.Filled.Settings, "Settings") { navigator.push(SettingsScreen()) } 
                 AccountRow(
                     icon = Icons.Filled.Logout,
                     label = "Sign out",

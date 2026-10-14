@@ -1,4 +1,4 @@
-package com.zouitel.presentaion.screens.courier
+package com.zouitel.presentaion.screens.delivery
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,15 +20,16 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.model.Order
 
-class CourierDashboardScreen : Screen {
+class DeliveryDashboardScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = rememberScreenModel { CourierDashboardScreenModel() }
-        val activeCouriers by screenModel.activeCouriers.collectAsState()
-        val completedCouriers by screenModel.completedCouriers.collectAsState()
+        val screenModel = rememberScreenModel { DeliveryDashboardScreenModel() }
+        val activeDeliveries by screenModel.activeDeliveries.collectAsState()
+        val completedDeliveries by screenModel.completedDeliveries.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
         var selectedTab by remember { mutableIntStateOf(0) }
@@ -36,7 +37,7 @@ class CourierDashboardScreen : Screen {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Courier Delivery Portal") },
+                    title = { Text("Delivery Portal Dashboard") },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -54,12 +55,12 @@ class CourierDashboardScreen : Screen {
                     Tab(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
-                        text = { Text("Available (${activeCouriers.size})") }
+                        text = { Text("Available (${activeDeliveries.size})") }
                     )
                     Tab(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        text = { Text("Delivered (${completedCouriers.size})") }
+                        text = { Text("Delivered (${completedDeliveries.size})") }
                     )
                 }
 
@@ -68,13 +69,13 @@ class CourierDashboardScreen : Screen {
                         CircularProgressIndicator()
                     }
                 } else {
-                    val currentList = if (selectedTab == 0) activeCouriers else completedCouriers
+                    val currentList = if (selectedTab == 0) activeDeliveries else completedDeliveries
 
                     if (currentList.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
                                 if (selectedTab == 0) "No orders currently out for delivery."
-                                else "No completed courier deliveries."
+                                else "No completed deliveries."
                             )
                         }
                     } else {
@@ -82,13 +83,13 @@ class CourierDashboardScreen : Screen {
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            items(currentList, key = { it.id }) { courierItem ->
-                                CourierCardItem(
-                                    courier = courierItem,
+                            items(currentList, key = { it.id }) { orderItem ->
+                                DeliveryCardItem(
+                                    order = orderItem,
                                     isCompleted = selectedTab == 1,
-                                    onAccept = { screenModel.claimCourierTask(courierItem) },
-                                    onReject = { screenModel.rejectCourierTask(courierItem) },
-                                    onMarkDelivered = { screenModel.markCourierOrderDelivered(courierItem) }
+                                    onAccept = { screenModel.claimCourierTask(orderItem) },
+                                    onReject = { screenModel.rejectCourierTask(orderItem) },
+                                    onMarkDelivered = { screenModel.markCourierOrderDelivered(orderItem) }
                                 )
                             }
                         }
@@ -99,8 +100,8 @@ class CourierDashboardScreen : Screen {
     }
 
     @Composable
-    private fun CourierCardItem(
-        courier: Courier,
+    private fun DeliveryCardItem(
+        order: Order,
         isCompleted: Boolean,
         onAccept: () -> Unit,
         onReject: () -> Unit,
@@ -111,7 +112,6 @@ class CourierDashboardScreen : Screen {
             elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                // Header: Restaurant/Store Name & Courier Fee
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -125,14 +125,14 @@ class CourierDashboardScreen : Screen {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = courier.restaurantName.ifBlank { "Store / Restaurant" },
+                            text = order.sourceName.ifBlank { "Store / Restaurant" },
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
 
                     Badge(containerColor = MaterialTheme.colorScheme.primaryContainer) {
                         Text(
-                            "Earn $${"%.2f".format(courier.courierFee)}",
+                            "Earn $${"%.2f".format(order.deliveryFee)}",
                             modifier = Modifier.padding(4.dp),
                             style = MaterialTheme.typography.labelLarge
                         )
@@ -141,14 +141,13 @@ class CourierDashboardScreen : Screen {
 
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Order #${courier.orderId.takeLast(6).uppercase()}",
+                    text = "Order #${order.id.takeLast(6).uppercase()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-                // Delivery Destination
                 Row(verticalAlignment = Alignment.Top) {
                     Icon(
                         Icons.Default.LocationOn,
@@ -160,7 +159,7 @@ class CourierDashboardScreen : Screen {
                     Column {
                         Text("Destination Address", style = MaterialTheme.typography.labelLarge)
                         Text(
-                            text = courier.customerAddress.ifBlank { "Address not specified" },
+                            text = order.clientAddress.ifBlank { "Address not specified" },
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -168,7 +167,6 @@ class CourierDashboardScreen : Screen {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Buyer's Store Products List Section
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(8.dp),
@@ -184,7 +182,7 @@ class CourierDashboardScreen : Screen {
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Products in Demand Card (${courier.items.sumOf { it.quantity }} items):",
+                                text = "Products (${order.items.sumOf { it.quantity }} items):",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -192,14 +190,14 @@ class CourierDashboardScreen : Screen {
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        if (courier.items.isEmpty()) {
+                        if (order.items.isEmpty()) {
                             Text(
                                 "No item details available for this package.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
                         } else {
-                            courier.items.forEach { item ->
+                            order.items.forEach { item ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -223,14 +221,13 @@ class CourierDashboardScreen : Screen {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Total Price to collect
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text("Total Price to Collect:", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "$${"%.2f".format(courier.totalPrice)}",
+                        "$${"%.2f".format(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -238,9 +235,8 @@ class CourierDashboardScreen : Screen {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Courier Action Buttons
                 if (!isCompleted) {
-                    if (courier.courierId.isBlank()) {
+                    if (order.deliveryId.isBlank()) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -251,7 +247,7 @@ class CourierDashboardScreen : Screen {
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Accept")
+                                Text("Accept Task")
                             }
 
                             OutlinedButton(
@@ -283,7 +279,7 @@ class CourierDashboardScreen : Screen {
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = null)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Decline Assignment")
+                                Text("Release Task")
                             }
                         }
                     }

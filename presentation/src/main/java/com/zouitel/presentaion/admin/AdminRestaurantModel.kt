@@ -69,23 +69,22 @@ class AdminRestaurantModel : ScreenModel {
                 }
 
                 userSnapshot?.let { snap ->
-                    val restaurantName = runCatching { snap.child("restaurantName").value<String>() }.getOrDefault("My Restaurant")
+                    val restaurantName = runCatching { snap.child("sourceName").value<String>() }.getOrDefault("My Restaurant")
                     val imageUrl = runCatching { snap.child("restaurantImageUrl").value<String>() }.getOrDefault("")
                     val deliveryFee = runCatching { snap.child("deliveryFee").value<Double>() }.getOrDefault(0.0)
                     val estimatedTimeMinutes = runCatching { snap.child("estimatedTimeMinutes").value<Int>() }.getOrDefault(20)
                     val managerPhone = runCatching { snap.child("managerPhone").value<String>() }.getOrDefault("")
 
-                    // Maps directly to the Restaurant model fields     
                     val restaurantMap = mapOf(
                         "id" to uid,
-                        "name" to restaurantName,     
-                    "imageUrl" to imageUrl,     
-                    "rating" to 5.0,     
-                    "deliveryFee" to deliveryFee,     
-                    "estimatedTimeMinutes" to estimatedTimeMinutes,     
-                    "isOpen" to true,     
-                    "managers" to listOf(managerPhone),     
-                    "paymentMethods" to listOf("Cash on Courier", "Card on Courier")     
+                        "name" to restaurantName,
+                        "imageUrl" to imageUrl,
+                        "rating" to 5.0,
+                        "deliveryFee" to deliveryFee,
+                        "estimatedTimeMinutes" to estimatedTimeMinutes,
+                        "isOpen" to true,
+                        "managers" to listOf(managerPhone),
+                        "paymentMethods" to listOf("Cash on Delivery", "Card on Delivery")
                     )
                     db.child("restaurants").child(uid).setValue(restaurantMap)
                 }

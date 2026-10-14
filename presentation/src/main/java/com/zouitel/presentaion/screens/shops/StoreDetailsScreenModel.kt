@@ -2,10 +2,9 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.CartItem
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
-import com.zouitel.presentaion.common.OrderType
+import com.zouitel.presentaion.model.CartItem
+import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -92,18 +91,15 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
 
             val universalOrder = Order(
                 id = orderId,
-                userId = uid,
+                clientId = uid,
                 orderType = OrderType.RETAIL,
-                shopId = shop.id,
-                shopName = shop.name,
-                restaurantId = shop.id,
-                restaurantName = shop.name,
+                sourceId = shop.id,
+                sourceName = shop.name,
                 items = mappedItems,
                 subtotal = subtotal,
-                courierFee = courierFee,
+                deliveryFee = courierFee,
                 totalPrice = totalPrice,
-                status = OrderStatus.PLACED,
-                deliveryAddress = deliveryAddress,
+                clientAddress = deliveryAddress,
                 createdAtTimestamp = System.currentTimeMillis(),
                 paymentMethod = paymentMethod
             )

@@ -5,6 +5,8 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleInfo
+import com.zouitel.presentaion.model.VehicleType
+import com.zouitel.presentaion.screens.ride.DriverAccountInfo
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
@@ -29,33 +31,54 @@ class AdminDriverModel : ScreenModel {
                 val profiles = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
-                        val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("")
+                        val fullName = runCatching { child.child("fullName").value<String>() }
+                            .getOrElse { runCatching { child.child("name").value<String>() }.getOrDefault("") }
                         val phoneNumber = runCatching { child.child("phoneNumber").value<String>() }
                             .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
-                        val driverStatusStr = runCatching { child.child("driverStatus").value<String>() }.getOrDefault("NONE")
-                        val driverStatus = runCatching { Status.valueOf(driverStatusStr) }.getOrDefault(Status.NONE)
 
-                        val make = runCatching { child.child("vehicleInfo").child("make").value<String>() }.getOrDefault("Toyota")
-                        val model = runCatching { child.child("vehicleInfo").child("model").value<String>() }.getOrDefault("Corolla")
-                        val color = runCatching { child.child("vehicleInfo").child("color").value<String>() }.getOrDefault("Silver")
-                        val licensePlate = runCatching { child.child("vehicleInfo").child("licensePlate").value<String>() }.getOrDefault("")
+                        val driverChild = child.child("driverService")
+                        val driverAccount = if (driverChild.exists) {
+                            val statusStr = runCatching { driverChild.child("status").value<String>() }.getOrDefault("NONE")
+                            val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.NONE)
 
-                        UserProfile(
-                            uid = uid,
-                            fullName = fullName,
-                            phoneNumber = phoneNumber,
-                            driverStatus = driverStatus,
-                            vehicleInfo = VehicleInfo(
-                                make = make,
-                                model = model,
-                                color = color,
-                                licensePlate = licensePlate
+                            val vehicleChild = driverChild.child("vehicleInfo")
+                            val typeStr = runCatching { vehicleChild.child("type").value<String>() }.getOrDefault("CAR")
+                            val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
+
+                            val make = runCatching { vehicleChild.child("make").value<String>() }.getOrDefault("Toyota")
+                            val model = runCatching { vehicleChild.child("model").value<String>() }.getOrDefault("Corolla")
+                            val color = runCatching { vehicleChild.child("color").value<String>() }.getOrDefault("Silver")
+                            val licensePlate = runCatching { vehicleChild.child("licensePlate").value<String>() }.getOrDefault("")
+
+                            DriverAccountInfo(
+                                status = status,
+                                vehicleInfo = VehicleInfo(
+                                    type = vehicleType,
+                                    make = make,
+                                    model = model,
+                                    color = color,
+                                    licensePlate = licensePlate,
+                                    serviceType = "Ride"
+                                )
                             )
-                        )
+                        } else {
+                            null
+                        }
+
+                        if (driverAccount?.status == Status.PENDING) {
+                            UserProfile(
+                                uid = uid,
+                                fullName = fullName,
+                                phoneNumber = phoneNumber,
+                                driverService = driverAccount
+                            )
+                        } else {
+                            null
+                        }
                     } catch (e: Exception) {
                         null
                     }
-                }.filter { it.driverStatus == Status.PENDING }
+                }
 
                 _applications.value = profiles
             }
@@ -64,7 +87,7 @@ class AdminDriverModel : ScreenModel {
 
     fun updateDriverStatus(uid: String, newStatus: Status) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("driverStatus").setValue(newStatus.name)
+            db.child("users").child(uid).child("driverService").child("status").setValue(newStatus.name)
         }
     }
 }

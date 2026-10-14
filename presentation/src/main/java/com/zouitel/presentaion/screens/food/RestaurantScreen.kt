@@ -20,10 +20,9 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.common.CartItem
+import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
-import com.zouitel.presentaion.common.Order
-import com.zouitel.presentaion.common.OrderStatus
+import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -49,7 +48,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var showOrderBottomSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember { mutableStateOf("Cash on Courier") }
+        var paymentMethod by remember { mutableStateOf("Cash on Delivery") }
         var isSubmittingOrder by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
@@ -130,8 +129,8 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text(text = "Rating: ⭐ ${restaurant.rating}", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Courier Fee: $${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Est. Courier: ${restaurant.estimatedTimeMinutes} mins", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Delivery Fee: $${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Est. Delivery: ${restaurant.estimatedTimeMinutes} mins", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
 
@@ -293,7 +292,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     OutlinedTextField(
                         value = deliveryAddress,
                         onValueChange = { deliveryAddress = it },
-                        label = { Text("Courier Address") },
+                        label = { Text("Delivery Address") },
                         placeholder = { Text("Enter building, street, floor #") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true
@@ -320,7 +319,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("Courier Fee:", style = MaterialTheme.typography.bodyMedium)
+                            Text("Delivery Fee:", style = MaterialTheme.typography.bodyMedium)
                             Text("$${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
@@ -464,15 +463,14 @@ private suspend fun sendOrderCardToManager(
 
     val order = Order(
         id = orderId,
-        userId = currentUserId,
-        restaurantId = restaurant.id,
-        restaurantName = restaurant.name,
+        clientId = currentUserId,
+        sourceId = restaurant.id,
+        sourceName = restaurant.name,
         items = cartItems,
         subtotal = subtotal,
-        courierFee = restaurant.deliveryFee,
+        deliveryFee = restaurant.deliveryFee,
         totalPrice = totalPrice,
-        status = OrderStatus.PLACED,
-        deliveryAddress = deliveryAddress,
+        clientAddress = deliveryAddress,
         createdAtTimestamp = System.currentTimeMillis(),
         paymentMethod = paymentMethod
     )
