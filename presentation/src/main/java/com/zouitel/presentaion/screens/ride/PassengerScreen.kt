@@ -125,11 +125,11 @@ class PassengerScreen : Screen {
                             }
                         }
                     } else {
-                        scope.launch { snackbarHostState.showSnackbar("Couldn't get your location. Is GPS turned on?") }
+                        scope.launch { snackbarHostState.showSnackbar("Couldn't get your fromLocation. Is GPS turned on?") }
                     }
                 }
                 .addOnFailureListener {
-                    scope.launch { snackbarHostState.showSnackbar("Couldn't get your location.") }
+                    scope.launch { snackbarHostState.showSnackbar("Couldn't get your fromLocation.") }
                 }
         }
 
@@ -242,7 +242,7 @@ class PassengerScreen : Screen {
                         Marker(
                             state = rememberUpdatedMarkerState(position = it),
                             title = "Pickup",
-                            snippet = if (activeTrip == null) "Your location" else activeTrip.pickupLocation,
+                            snippet = if (activeTrip == null) "Your fromLocation" else activeTrip.pickupLocation,
                             icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
                         )
                     }
@@ -318,7 +318,7 @@ class PassengerScreen : Screen {
                         horizontalArrangement = Arrangement.End
                     ) {
                         SmallFloatingActionButton(onClick = { locateMe() }) {
-                            Icon(Icons.Default.MyLocation, contentDescription = "My location")
+                            Icon(Icons.Default.MyLocation, contentDescription = "My fromLocation")
                         }
                     }
 
@@ -487,7 +487,7 @@ class PassengerScreen : Screen {
                 Icon(Icons.Default.MyLocation, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("Pickup (your location)", style = MaterialTheme.typography.labelMedium)
+                    Text("Pickup (your fromLocation)", style = MaterialTheme.typography.labelMedium)
                     Text(
                         if (hasPickup) pickupAddress.ifBlank { "Resolving address…" } else "Locating you…",
                         style = MaterialTheme.typography.bodyMedium

@@ -5,6 +5,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
+import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
@@ -37,50 +38,46 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
 
                 try {
                     val id = snapshot.key ?: orderId
-                    val userId: String = snapshot.child("clientId").value()
-                    val restaurantId: String = snapshot.child("sourceId").value()
-                    val restaurantName: String = snapshot.child("sourceName").value()
-                    val subtotal: Double = snapshot.child("subtotal").value()
-                    val courierFee: Double = snapshot.child("deliveryFee").value()
-                    val totalPrice: Double = snapshot.child("totalPrice").value()
-                    val statusStr: String = snapshot.child("status").value()
-                    val deliveryAddress: String = snapshot.child("clientAddress").value()
-                    val createdAtTimestamp: Long = snapshot.child("createdAtTimestamp").value()
-                    val paymentMethod: String = snapshot.child("paymentMethod").value()
 
-                    val courierId: String = runCatching { snapshot.child("deliveryId").value<String>() }.getOrDefault("")
-                    val courierName: String = runCatching { snapshot.child("deliveryName").value<String>() }.getOrDefault("")
-                    val courierPhone: String = runCatching { snapshot.child("deliveryPhone").value<String>() }.getOrDefault("")
+                    fun str(key: String) = runCatching { snapshot.child(key).value<String>() }.getOrDefault("")
+                    fun dbl(key: String) = runCatching { snapshot.child(key).value<Double>() }.getOrDefault(0.0)
 
-                    val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(
-                        OrderStatus.PLACED)
+                    val statusStr = str("status")
+                    val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(OrderStatus.PLACED)
+                    val orderType = runCatching { OrderType.valueOf(str("orderType")) }.getOrDefault(OrderType.RETAIL)
 
                     val items = snapshot.child("items").children.map { itemChild ->
                         CartItem(
-                            id = itemChild.child("id").value(),
-                            name = itemChild.child("name").value(),
-                            basePrice = itemChild.child("basePrice").value(),
-                            quantity = itemChild.child("quantity").value(),
-                            selectedOptions = emptyList()
+                            id = runCatching { itemChild.child("id").value<String>() }.getOrDefault(""),
+                            name = runCatching { itemChild.child("name").value<String>() }.getOrDefault("Item"),
+                            basePrice = runCatching { itemChild.child("basePrice").value<Double>() }.getOrDefault(0.0),
+                            quantity = runCatching { itemChild.child("quantity").value<Int>() }.getOrDefault(1),
+                            specialInstructions = runCatching { itemChild.child("specialInstructions").value<String>() }.getOrDefault("")
                         )
                     }
 
                     _order.value = Order(
                         id = id,
-                        clientId = userId,
-                        sourceId = restaurantId,
-                        sourceName = restaurantName,
+                        clientId = str("clientId"),
+                        orderType = orderType,
+                        sourceId = str("sourceId"),
+                        sourceName = str("sourceName"),
                         items = items,
-                        subtotal = subtotal,
-                        deliveryFee = courierFee,
-                        totalPrice = totalPrice,
+                        subtotal = dbl("subtotal"),
+                        deliveryFee = dbl("deliveryFee"),
+                        totalPrice = dbl("totalPrice"),
                         status = status,
-                        clientAddress = deliveryAddress,
-                        createdAtTimestamp = createdAtTimestamp,
-                        paymentMethod = paymentMethod,
-                        deliveryId = courierId,
-                        deliveryName = courierName,
-                        deliveryPhone = courierPhone
+                        pickupLocation = str("pickupLocation"),
+                        pickupLat = dbl("pickupLat"),
+                        pickupLng = dbl("pickupLng"),
+                        dropoffLocation = str("dropoffLocation"),
+                        dropoffLat = dbl("dropoffLat"),
+                        dropoffLng = dbl("dropoffLng"),
+                        createdAtTimestamp = runCatching { snapshot.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L),
+                        paymentMethod = str("paymentMethod"),
+                        deliveryId = str("deliveryId"),
+                        deliveryName = str("deliveryName"),
+                        deliveryPhone = str("deliveryPhone")
                     )
                 } catch (e: Exception) {
                     _order.value = null

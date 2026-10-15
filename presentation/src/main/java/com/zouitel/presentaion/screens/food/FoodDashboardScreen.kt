@@ -118,7 +118,8 @@ class FoodDashboardScreen : Screen {
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(text = "Client ID: ${order.clientId.ifBlank { "Guest Client" }}", style = MaterialTheme.typography.bodyMedium)
-                Text(text = "Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Pickup (restaurant): ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Drop-off (client): ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodyMedium)
 
                 if (order.deliveryName.isNotBlank()) {

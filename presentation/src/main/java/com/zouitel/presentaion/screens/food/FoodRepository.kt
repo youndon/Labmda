@@ -23,6 +23,11 @@ class FoodRepository {
                 val managers: List<String> = child.child("managers").value<List<String>?>() ?: emptyList()
                 val paymentMethods: List<String> = child.child("paymentMethods").value<List<String>?>() ?: emptyList()
 
+                // Location saved by the manager on the map
+                val address: String = child.child("address").value<String?>() ?: ""
+                val latitude: Double = child.child("latitude").value<Double?>() ?: 0.0
+                val longitude: Double = child.child("longitude").value<Double?>() ?: 0.0
+
                 Restaurant(
                     id = id,
                     name = name,
@@ -32,7 +37,10 @@ class FoodRepository {
                     estimatedTimeMinutes = estimatedTimeMinutes,
                     isOpen = isOpen,
                     managers = managers,
-                    paymentMethods = paymentMethods
+                    paymentMethods = paymentMethods,
+                    address = address,
+                    latitude = latitude,
+                    longitude = longitude
                 )
             }
         }
@@ -43,7 +51,10 @@ class FoodRepository {
         imageUrl: String,
         deliveryFee: Double,
         estimatedTimeMinutes: Int,
-        managers: List<String>
+        managers: List<String>,
+        address: String = "",
+        latitude: Double = 0.0,
+        longitude: Double = 0.0
     ) {
         val newRef = db.child("restaurants").push()
         val id = newRef.key ?: return
@@ -56,7 +67,10 @@ class FoodRepository {
             "estimatedTimeMinutes" to estimatedTimeMinutes,
             "isOpen" to true,
             "managers" to managers,
-            "paymentMethods" to listOf("Cash on Delivery", "Card on Delivery")
+            "paymentMethods" to listOf("Cash on Delivery", "Card on Delivery"),
+            "address" to address,
+            "latitude" to latitude,
+            "longitude" to longitude
         )
         newRef.setValue(restaurantMap)
     }

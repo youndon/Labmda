@@ -57,7 +57,7 @@ class FreightScreenModel : ScreenModel {
                         val freightName: String = runCatching { child.child("freightName").value<String>() }.getOrDefault("")
                         val freightPhone: String = runCatching { child.child("freightPhone").value<String>() }.getOrDefault("")
 
-                        val customerAddress: String = runCatching { child.child("clientAddress").value<String>() }.getOrDefault("")
+                        val customerAddress: String = runCatching { child.child("fromLocation").value<String>() }.getOrDefault("")
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val freightFee: Double = runCatching { child.child("freightFee").value<Double>() }.getOrDefault(10.0)
                         val dispatchedAt: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)

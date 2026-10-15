@@ -11,7 +11,10 @@ data class Restaurant(
     val isOpen: Boolean = true,
     val menu: List<Meal> = emptyList(),
     val managers: List<String> = emptyList(), // suppose to be manager phones number
-    val paymentMethods: List<String> = emptyList() // e.g., ["Cash on Delivery", "Card on Delivery"]
+    val paymentMethods: List<String> = emptyList(),
+    val address: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0
 )
 
 enum class MealCategory {

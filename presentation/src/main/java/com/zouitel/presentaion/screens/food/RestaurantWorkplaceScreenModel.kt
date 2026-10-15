@@ -9,6 +9,7 @@ import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,7 +21,10 @@ data class ManagedRestaurantInfo(
     val imageUrl: String = "",
     val deliveryFee: Double = 0.0,
     val estimatedTimeMinutes: Int = 20,
-    val managerPhone: String = ""
+    val managerPhone: String = "",
+    val address: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0
 )
 
 class RestaurantWorkplaceScreenModel(
@@ -44,6 +48,7 @@ class RestaurantWorkplaceScreenModel(
     init {
         checkRestaurantStatus()
     }
+    private var mealsJob: Job? = null
 
     private fun checkRestaurantStatus() {
         val uid = auth.currentUser?.uid ?: run {
@@ -77,14 +82,30 @@ class RestaurantWorkplaceScreenModel(
                     )
 
                     if (foodStatus == Status.APPROVED) {
-                        fetchManagedRestaurantDetails(uid)
-                        observeMeals(uid)
+                        _restaurantInfo.value = ManagedRestaurantInfo(
+                            id = uid,
+                            name = runCatching { snapshot.child("sourceName").value<String>() }.getOrDefault("My Restaurant"),
+                            imageUrl = runCatching { snapshot.child("restaurantImageUrl").value<String>() }.getOrDefault(""),
+                            deliveryFee = runCatching { snapshot.child("deliveryFee").value<Double>() }.getOrDefault(0.0),
+                            estimatedTimeMinutes = runCatching { snapshot.child("estimatedTimeMinutes").value<Int>() }.getOrDefault(20),
+                            managerPhone = runCatching { snapshot.child("managerPhone").value<String>() }.getOrDefault(""),
+                            address = runCatching { snapshot.child("restaurantAddress").value<String>() }.getOrDefault(""),
+                            latitude = runCatching { snapshot.child("restaurantLatitude").value<Double>() }.getOrDefault(0.0),
+                            longitude = runCatching { snapshot.child("restaurantLongitude").value<Double>() }.getOrDefault(0.0)
+                        )
+                        if (mealsJob == null) observeMeals(uid)
                     }
                 } else {
                     _profile.value = UserProfile(uid = uid)
                 }
                 _isLoading.value = false
             }
+        }
+    }
+
+    private fun observeMeals(restaurantId: String) {
+        mealsJob = screenModelScope.launch(Dispatchers.IO) {
+            repository.getMealsForRestaurant(restaurantId).collect { _meals.value = it }
         }
     }
 
@@ -109,14 +130,6 @@ class RestaurantWorkplaceScreenModel(
         }
     }
 
-    private fun observeMeals(restaurantId: String) {
-        screenModelScope.launch(Dispatchers.IO) {
-            repository.getMealsForRestaurant(restaurantId).collect { mealList ->
-                _meals.value = mealList
-            }
-        }
-    }
-
     fun updateFoodMode(foodMode: UserMode) {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch(Dispatchers.IO) {
@@ -129,7 +142,10 @@ class RestaurantWorkplaceScreenModel(
         imageUrl: String,
         deliveryFee: Double,
         estimatedTimeMinutes: Int,
-        managerPhone: String
+        managerPhone: String,
+        address: String,
+        latitude: Double,
+        longitude: Double
     ) {
         val uid = auth.currentUser?.uid ?: return
         _isLoading.value = true
@@ -141,6 +157,9 @@ class RestaurantWorkplaceScreenModel(
                 "deliveryFee" to deliveryFee,
                 "estimatedTimeMinutes" to estimatedTimeMinutes,
                 "managerPhone" to managerPhone,
+                "restaurantAddress" to address,
+                "restaurantLatitude" to latitude,
+                "restaurantLongitude" to longitude,
                 "foodStatus" to Status.APPROVED.name,
                 "foodMode" to UserMode.MANAGER.name
             )
@@ -152,7 +171,10 @@ class RestaurantWorkplaceScreenModel(
                 "imageUrl" to imageUrl,
                 "deliveryFee" to deliveryFee,
                 "estimatedTimeMinutes" to estimatedTimeMinutes,
-                "managers" to listOf(managerPhone)
+                "managers" to listOf(managerPhone),
+                "address" to address,
+                "latitude" to latitude,
+                "longitude" to longitude
             )
             db.child("restaurants").child(uid).updateChildren(publicMap)
 

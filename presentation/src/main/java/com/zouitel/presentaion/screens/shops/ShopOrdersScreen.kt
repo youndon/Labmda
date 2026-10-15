@@ -89,10 +89,23 @@ class ShopOrdersScreen() : Screen {
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-                Text("Client Delivery Address", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Text("Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
-                Text("Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodyMedium)
+                Text("Courier Pickup (Store)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    order.pickupLocation.ifBlank { order.sourceName },
+                    style = MaterialTheme.typography.bodyMedium
+                )
 
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Client Drop-off Address", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    order.dropoffLocation.ifBlank { "Address not provided" },
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text("Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodyMedium)
                 if (order.deliveryName.isNotBlank()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Assigned Delivery: ${order.deliveryName} (${order.deliveryPhone})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)

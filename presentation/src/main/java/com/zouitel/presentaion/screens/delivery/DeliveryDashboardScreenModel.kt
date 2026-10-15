@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+/** Lightweight lat/lng so the model stays free of map types. */
+data class OrderPoint(val lat: Double, val lng: Double)
+
 class DeliveryDashboardScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUid: String? get() = Firebase.auth.currentUser?.uid
@@ -28,6 +31,9 @@ class DeliveryDashboardScreenModel : ScreenModel {
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+//
+//    private val _orderPoints = MutableStateFlow<Map<String, OrderPoint>>(emptyMap())
+//    val orderPoints: StateFlow<Map<String, OrderPoint>> = _orderPoints.asStateFlow()
 
     init {
         listenToOrdersTable()
@@ -62,12 +68,19 @@ class DeliveryDashboardScreenModel : ScreenModel {
                         val deliveryName: String = runCatching { child.child("deliveryName").value<String>() }.getOrDefault("")
                         val deliveryPhone: String = runCatching { child.child("deliveryPhone").value<String>() }.getOrDefault("")
 
-                        val clientAddress: String = runCatching { child.child("clientAddress").value<String>() }.getOrDefault("")
+                        val clientAddress: String = runCatching { child.child("fromLocation").value<String>() }.getOrDefault("")
                         val subtotal: Double = runCatching { child.child("subtotal").value<Double>() }.getOrDefault(0.0)
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val deliveryFee: Double = runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(3.0)
                         val createdAt: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
                         val paymentMethod: String = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("")
+
+                        val pickupLocation: String = runCatching { child.child("pickupLocation").value<String>() }.getOrDefault("")
+                        val pickupLat: Double = runCatching { child.child("pickupLat").value<Double>() }.getOrDefault(0.0)
+                        val pickupLng: Double = runCatching { child.child("pickupLng").value<Double>() }.getOrDefault(0.0)
+                        val dropoffLocation: String = runCatching { child.child("dropoffLocation").value<String>() }.getOrDefault("")
+                        val dropoffLat: Double = runCatching { child.child("dropoffLat").value<Double>() }.getOrDefault(0.0)
+                        val dropoffLng: Double = runCatching { child.child("dropoffLng").value<Double>() }.getOrDefault(0.0)
 
                         val items = child.child("items").children.map { itemChild ->
                             CartItem(
@@ -92,17 +105,29 @@ class DeliveryDashboardScreenModel : ScreenModel {
                             deliveryFee = deliveryFee,
                             totalPrice = totalPrice,
                             status = status,
-                            clientAddress = clientAddress,
                             createdAtTimestamp = createdAt,
                             paymentMethod = paymentMethod,
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
-                            deliveryPhone = deliveryPhone
+                            deliveryPhone = deliveryPhone,
+                            pickupLocation = pickupLocation, pickupLat = pickupLat, pickupLng = pickupLng,
+                            dropoffLocation = dropoffLocation, dropoffLat = dropoffLat, dropoffLng = dropoffLng,
                         )
                     } catch (e: Exception) {
                         null
                     }
                 }
+
+                val points = mutableMapOf<String, OrderPoint>()
+                snapshot.children.forEach { child ->
+                    val id = child.key ?: return@forEach
+                    val lat = runCatching { child.child("clientLat").value<Double>() }.getOrNull()
+                    val lng = runCatching { child.child("clientLng").value<Double>() }.getOrNull()
+                    if (lat != null && lng != null && (lat != 0.0 || lng != 0.0)) {
+                        points[id] = OrderPoint(lat, lng)
+                    }
+                }
+//                _orderPoints.value = points
 
                 val uid = currentUid
 

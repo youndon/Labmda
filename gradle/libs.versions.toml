@@ -27,6 +27,7 @@ datastore = "1.2.1"
 #Coil
 coil = "3.6.3"
 coilNetworkKtor3 = "3.6.3"
+ktor = "3.6.0"
 
 #Voyager.
 materialIconsCore = "1.7.8"
@@ -85,6 +86,11 @@ koin-startup = { module = "io.insert-koin:koin-androidx-startup", version.ref = 
 #Coil.
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-ktor3 = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coilNetworkKtor3" }
+
+#Native only.
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+#IOS only.
+ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
 
 #Navigation.
 voyager-navigator = { module = "cafe.adriel.voyager:voyager-navigator", version.ref = "voyager" }

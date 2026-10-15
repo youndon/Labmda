@@ -11,7 +11,10 @@ import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+data class MapPoint(val lat: Double, val lng: Double)
 
 class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
     private val db = Firebase.database.reference()
@@ -22,11 +25,24 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    private val _shopLocation = MutableStateFlow<MapPoint?>(null)
+    val shopLocation: StateFlow<MapPoint?> = _shopLocation.asStateFlow()
 
     init {
         listenToStoreProducts()
+        loadShopLocation()
     }
 
+    private fun loadShopLocation() {
+        screenModelScope.launch {
+            val shopRef = db.child("shops").child(shop.id)
+            val lat = runCatching { shopRef.child("latitude").valueEvents.first().value<Double>() }.getOrNull()
+            val lng = runCatching { shopRef.child("longitude").valueEvents.first().value<Double>() }.getOrNull()
+            if (lat != null && lng != null && (lat != 0.0 || lng != 0.0)) {
+                _shopLocation.value = MapPoint(lat, lng)
+            }
+        }
+    }
     private fun listenToStoreProducts() {
         screenModelScope.launch {
             db.child("shops").child(shop.id).child("products").valueEvents.collect { snapshot ->
@@ -64,13 +80,16 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         }
     }
 
-    // Pushes the store order directly into the universal 'orders' node
     fun placeShopOrder(
         cartItems: List<ShopCartItem>,
         subtotal: Double,
         courierFee: Double,
         totalPrice: Double,
-        deliveryAddress: String,
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffAddress: String,
+        dropoffLat: Double,
+        dropoffLng: Double,
         paymentMethod: String,
         onSuccess: (String) -> Unit
     ) {
@@ -99,7 +118,12 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
                 subtotal = subtotal,
                 deliveryFee = courierFee,
                 totalPrice = totalPrice,
-                clientAddress = deliveryAddress,
+                pickupLocation = shop.address,
+                pickupLat = pickupLat,
+                pickupLng = pickupLng,
+                dropoffLocation = dropoffAddress,
+                dropoffLat = dropoffLat,
+                dropoffLng = dropoffLng,
                 createdAtTimestamp = System.currentTimeMillis(),
                 paymentMethod = paymentMethod
             )

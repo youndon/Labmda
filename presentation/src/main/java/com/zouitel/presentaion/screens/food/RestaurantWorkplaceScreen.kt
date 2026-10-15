@@ -25,6 +25,9 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
+import androidx.compose.material.icons.filled.LocationOn
+import com.google.android.gms.maps.model.LatLng
+import com.zouitel.presentaion.common.LocationPickerDialog
 
 class RestaurantWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -121,30 +124,29 @@ class RestaurantWorkplaceScreen : Screen {
                     HorizontalDivider()
                 }
 
-                when {
-                    isEditing -> {
-                        RestaurantApplicationForm(
-                            initialName = restaurantInfo.name,
-                            initialImage = restaurantInfo.imageUrl,
-                            initialFee = restaurantInfo.deliveryFee.toString(),
-                            initialTime = restaurantInfo.estimatedTimeMinutes.toString(),
-                            initialPhone = restaurantInfo.managerPhone.ifBlank { profile.phoneNumber ?: "" },
-                            submitButtonText = "Save Changes",
-                            onSubmit = { name, img, fee, time, phone ->
-                                screenModel.submitApplication(name, img, fee, time, phone)
-                                isEditing = false
-                            }
-                        )
-                    }
-                    selectedRoleMode == UserMode.CLIENT -> ClientModeCard {
-                        navigator?.push(RestaurantsScreen())
-                    }
-                    else -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .weight(1f)
-                        ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    when {
+                        isEditing -> {
+                            RestaurantApplicationForm(
+                                initialName = restaurantInfo.name,
+                                initialImage = restaurantInfo.imageUrl,
+                                initialFee = restaurantInfo.deliveryFee.toString(),
+                                initialTime = restaurantInfo.estimatedTimeMinutes.toString(),
+                                initialPhone = restaurantInfo.managerPhone.ifBlank { profile.phoneNumber ?: "" },
+                                initialAddress = restaurantInfo.address,
+                                initialLat = restaurantInfo.latitude,
+                                initialLng = restaurantInfo.longitude,
+                                submitButtonText = "Save Changes",
+                                onSubmit = { name, img, fee, time, phone, address, lat, lng ->
+                                    screenModel.submitApplication(name, img, fee, time, phone, address, lat, lng)
+                                    isEditing = false
+                                }
+                            )
+                        }
+                        selectedRoleMode == UserMode.CLIENT -> ClientModeCard {
+                            navigator?.push(RestaurantsScreen())
+                        }
+                        else -> {
                             if (isLoading) {
                                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     CircularProgressIndicator()
@@ -153,8 +155,8 @@ class RestaurantWorkplaceScreen : Screen {
                                 when (profile.foodStatus) {
                                     Status.NONE -> RestaurantApplicationForm(
                                         initialPhone = profile.phoneNumber ?: "",
-                                        onSubmit = { name, img, fee, time, phone ->
-                                            screenModel.submitApplication(name, img, fee, time, phone)
+                                        onSubmit = { name, img, fee, time, phone, address, lat, lng ->
+                                            screenModel.submitApplication(name, img, fee, time, phone, address, lat, lng)
                                         }
                                     )
                                     Status.PENDING -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { PendingStatusView() }
@@ -221,71 +223,123 @@ class RestaurantWorkplaceScreen : Screen {
         initialFee: String = "",
         initialTime: String = "",
         initialPhone: String,
+        initialAddress: String = "",
+        initialLat: Double = 0.0,
+        initialLng: Double = 0.0,
         submitButtonText: String = "Submit Application",
-        onSubmit: (String, String, Double, Int, String) -> Unit
+        onSubmit: (String, String, Double, Int, String, String, Double, Double) -> Unit
     ) {
         var restaurantName by remember { mutableStateOf(initialName) }
         var imageUrl by remember { mutableStateOf(initialImage) }
         var deliveryFee by remember { mutableStateOf(initialFee) }
         var estimatedTime by remember { mutableStateOf(initialTime) }
         var managerPhone by remember { mutableStateOf(initialPhone) }
+        var address by remember { mutableStateOf(initialAddress) }
+        var location by remember {
+            mutableStateOf(if (initialLat != 0.0 || initialLng != 0.0) LatLng(initialLat, initialLng) else null)
+        }
+        var showPicker by remember { mutableStateOf(false) }
 
-        Column(
+        LazyColumn(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            Text("Restaurant Details", style = MaterialTheme.typography.headlineSmall)
-            Text("Provide your restaurant information for management and review.", style = MaterialTheme.typography.bodyMedium)
-
-            OutlinedTextField(
-                value = restaurantName,
-                onValueChange = { restaurantName = it },
-                label = { Text("Restaurant Name") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = imageUrl,
-                onValueChange = { imageUrl = it },
-                label = { Text("Image URL") },
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = managerPhone,
-                onValueChange = { managerPhone = it },
-                label = { Text("Manager Phone Number") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = deliveryFee,
-                onValueChange = { deliveryFee = it },
-                label = { Text("Delivery Fee ($)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = estimatedTime,
-                onValueChange = { estimatedTime = it },
-                label = { Text("Estimated Time (Minutes)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Button(
-                onClick = {
-                    onSubmit(
-                        restaurantName,
-                        imageUrl,
-                        deliveryFee.toDoubleOrNull() ?: 0.0,
-                        estimatedTime.toIntOrNull() ?: 20,
-                        managerPhone
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = restaurantName.isNotBlank() && managerPhone.isNotBlank()
-            ) {
-                Text(submitButtonText)
+            item {
+                Text("Restaurant Details", style = MaterialTheme.typography.headlineSmall)
+                Text("Provide your restaurant information for management and review.", style = MaterialTheme.typography.bodyMedium)
             }
+            item {
+                OutlinedTextField(
+                    value = restaurantName, onValueChange = { restaurantName = it },
+                    label = { Text("Restaurant Name") }, modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = imageUrl, onValueChange = { imageUrl = it },
+                    label = { Text("Image URL") }, modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = managerPhone, onValueChange = { managerPhone = it },
+                    label = { Text("Manager Phone Number") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = deliveryFee, onValueChange = { deliveryFee = it },
+                    label = { Text("Delivery Fee ($)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = estimatedTime, onValueChange = { estimatedTime = it },
+                    label = { Text("Estimated Time (Minutes)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            item {
+                OutlinedButton(onClick = { showPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (location == null) "Set restaurant location on map" else "Change restaurant location")
+                }
+            }
+
+            if (location != null) {
+                item {
+                    OutlinedTextField(
+                        value = address, onValueChange = { address = it },
+                        label = { Text("Restaurant address (couriers pick up here)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            item {
+                Button(
+                    onClick = {
+                        val loc = location ?: return@Button
+                        onSubmit(
+                            restaurantName,
+                            imageUrl,
+                            deliveryFee.toDoubleOrNull() ?: 0.0,
+                            estimatedTime.toIntOrNull() ?: 20,
+                            managerPhone,
+                            address,
+                            loc.latitude,
+                            loc.longitude
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = restaurantName.isNotBlank() && managerPhone.isNotBlank() &&
+                            location != null && address.isNotBlank()
+                ) {
+                    Text(submitButtonText)
+                }
+            }
+        }
+
+        if (showPicker) {
+            LocationPickerDialog(
+                title = "Set restaurant location",
+                confirmLabel = "Confirm location",
+                initial = location,
+                onConfirm = { point, resolved ->
+                    location = point
+                    address = resolved
+                    showPicker = false
+                },
+                onDismiss = { showPicker = false }
+            )
         }
     }
 
@@ -373,6 +427,13 @@ class RestaurantWorkplaceScreen : Screen {
                         Text(
                             text = "Prep / Estimated Time: ${restaurantInfo.estimatedTimeMinutes} minutes",
                             style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            text = if (restaurantInfo.address.isNotBlank()) "Address: ${restaurantInfo.address}"
+                            else "Location not set. Tap the edit icon to set it on the map.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (restaurantInfo.address.isNotBlank()) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.error
                         )
                         if (restaurantInfo.managerPhone.isNotBlank()) {
                             Text(

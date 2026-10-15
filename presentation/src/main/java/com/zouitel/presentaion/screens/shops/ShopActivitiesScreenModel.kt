@@ -51,7 +51,7 @@ class ShopActivitiesScreenModel : ScreenModel {
                         val courierFee: Double = runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(3.0)
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val statusStr: String = runCatching { child.child("status").value<String>() }.getOrDefault("PLACED")
-                        val deliveryAddress: String = runCatching { child.child("clientAddress").value<String>() }.getOrDefault("")
+                        val deliveryAddress: String = runCatching { child.child("fromLocation").value<String>() }.getOrDefault("")
                         val createdAtTimestamp: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
                         val paymentMethod: String = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("Cash")
 
@@ -85,7 +85,6 @@ class ShopActivitiesScreenModel : ScreenModel {
                             deliveryFee = courierFee,
                             totalPrice = totalPrice,
                             status = status,
-                            clientAddress = deliveryAddress,
                             createdAtTimestamp = createdAtTimestamp,
                             paymentMethod = paymentMethod
                         )

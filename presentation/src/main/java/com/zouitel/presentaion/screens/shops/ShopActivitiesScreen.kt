@@ -92,7 +92,7 @@ class ShopActivitiesScreen : Screen {
                 StatusChip(order.status)
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-                Text("Delivery Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
+                Text("Delivery Address: ${order.pickupLocation}", style = MaterialTheme.typography.bodyMedium)
                 Text("Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
 
                 Spacer(modifier = Modifier.height(12.dp))

@@ -127,7 +127,8 @@ class FoodActivitiesScreen : Screen {
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-                Text(text = "Address: ${order.clientAddress}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Pickup: ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
 
                 if (order.deliveryName.isNotBlank()) {

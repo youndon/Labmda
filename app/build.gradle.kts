@@ -70,6 +70,7 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.ktor3)
+    implementation(libs.ktor.client.okhttp)
 
     // KMP Firebase Auth
     api(libs.firebase.auth)

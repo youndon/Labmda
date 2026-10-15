@@ -40,10 +40,13 @@ class ShopOrdersScreenModel : ScreenModel {
                         val courierFee: Double = runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(3.0)
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val statusStr: String = runCatching { child.child("status").value<String>() }.getOrDefault("PLACED")
-                        val deliveryAddress: String = runCatching { child.child("clientAddress").value<String>() }.getOrDefault("")
-                        val createdAtTimestamp: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
+                        val pickupLocation: String = runCatching { child.child("pickupLocation").value<String>() }.getOrDefault("")
+                        val pickupLat: Double = runCatching { child.child("pickupLat").value<Double>() }.getOrDefault(0.0)
+                        val pickupLng: Double = runCatching { child.child("pickupLng").value<Double>() }.getOrDefault(0.0)
+                        val dropoffLocation: String = runCatching { child.child("dropoffLocation").value<String>() }.getOrDefault("")
+                        val dropoffLat: Double = runCatching { child.child("dropoffLat").value<Double>() }.getOrDefault(0.0)
+                        val dropoffLng: Double = runCatching { child.child("dropoffLng").value<Double>() }.getOrDefault(0.0)
                         val paymentMethod: String = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("Cash")
-
                         val deliveryId: String = runCatching { child.child("deliveryId").value<String>() }.getOrDefault("")
                         val deliveryName: String = runCatching { child.child("deliveryName").value<String>() }.getOrDefault("")
                         val deliveryPhone: String = runCatching { child.child("deliveryPhone").value<String>() }.getOrDefault("")
@@ -73,12 +76,17 @@ class ShopOrdersScreenModel : ScreenModel {
                             deliveryFee = courierFee,
                             totalPrice = totalPrice,
                             status = status,
-                            clientAddress = deliveryAddress,
-                            createdAtTimestamp = createdAtTimestamp,
                             paymentMethod = paymentMethod,
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
-                            deliveryPhone = deliveryPhone
+                            deliveryPhone = deliveryPhone,
+                            pickupLocation = pickupLocation,
+                            pickupLat = pickupLat,
+                            pickupLng = pickupLng,
+                            dropoffLocation = dropoffLocation,
+                            dropoffLat = dropoffLat,
+                            dropoffLng = dropoffLng,
+//                            createdAtTimestamp = createdAtTimestamp,
                         )
                     } catch (e: Exception) {
                         null
@@ -98,15 +106,8 @@ class ShopOrdersScreenModel : ScreenModel {
             db.child("orders").child(order.id).child("status").setValue(nextStatus.name)
 
             if (nextStatus == OrderStatus.OUT_FOR_DELIVERY) {
-                val deliveryRecord = Order(
-                    id = order.id,
-                    clientId = order.id,
-                    sourceId = order.sourceId,
-                    sourceName = order.sourceName,
-                    clientAddress = order.clientAddress,
-                    items = order.items,
-                    totalPrice = order.totalPrice,
-                    deliveryFee = order.deliveryFee,
+                val deliveryRecord = order.copy(
+                    status = OrderStatus.OUT_FOR_DELIVERY,
                     createdAtTimestamp = System.currentTimeMillis()
                 )
                 db.child("deliveries").child(order.id).setValue(deliveryRecord)

@@ -71,6 +71,29 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // Pickup & drop-off
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Column {
+                                    Text("Pickup (store)", style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        text = currentOrder.pickupLocation.ifBlank { currentOrder.sourceName },
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                HorizontalDivider()
+                                Column {
+                                    Text("Drop-off (delivery address)", style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        text = currentOrder.dropoffLocation.ifBlank { "Address not provided" },
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -168,7 +191,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                 Text("Delivery Address", style = MaterialTheme.typography.titleSmall)
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = currentOrder.clientAddress.ifBlank { "Address not provided" },
+                                    text = currentOrder.pickupLocation.ifBlank { "Address not provided" },
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }

@@ -119,7 +119,7 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
 //                    "orderId" to order.id,
 //                    "sourceId" to order.shopId,
 //                    "sourceName" to order.shopName,
-//                    "customerAddress" to order.clientAddress,
+//                    "customerAddress" to order.fromLocation,
 //                    "totalPrice" to order.totalPrice,
 //                    "deliveryFee" to order.deliveryFee,
 //                    "status" to OrderStatus.OUT_FOR_DELIVERY.name,

@@ -57,7 +57,7 @@ class DriverDashboardScreen : Screen {
         val cameraPositionState = rememberCameraPositionState()
         val routeColor = MaterialTheme.colorScheme.primary
 
-        // --- Online status + live location ---
+        // --- Online status + live fromLocation ---
         val context = LocalContext.current
         val isOnline by screenModel.isOnline.collectAsState()
         val hasActiveTrip = activeTrips.isNotEmpty()
@@ -218,7 +218,7 @@ class DriverDashboardScreen : Screen {
                             Text(
                                 when {
                                     isOnline && hasActiveTrip -> "Finish your trip to go offline"
-                                    isOnline -> "Sharing your location and receiving requests"
+                                    isOnline -> "Sharing your fromLocation and receiving requests"
                                     else -> "Go online to receive ride requests"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
