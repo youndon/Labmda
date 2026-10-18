@@ -16,9 +16,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
+import coil3.compose.AsyncImage
 import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.screens.delivery.DeliveryDashboardScreen
@@ -29,60 +34,60 @@ class RestaurantsScreen : Screen {
     override fun Content() {
         val navigator = LocalNavigator.current
         val screenModel = koinScreenModel<RestaurantsScreenModel>()
-        val accountModel = koinScreenModel<AccountScreenModel>() 
+        val accountModel = koinScreenModel<AccountScreenModel>()
         val restaurants by screenModel.restaurants.collectAsState()
-        val profile by accountModel.profile.collectAsState() 
+        val profile by accountModel.profile.collectAsState()
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("Restaurants") }, 
-                actions = {
-                    if (profile?.foodMode == UserMode.MANAGER || profile?.foodMode == UserMode.COURIER) { 
-                        if (profile?.foodMode == UserMode.MANAGER) { 
-                            IconButton(onClick = { navigator?.push(FoodDashboardScreen()) }) { 
+                CenterAlignedTopAppBar(
+                    title = { Text("Explore Restaurants", fontWeight = FontWeight.Bold) },
+                    actions = {
+                        if (profile?.foodMode == UserMode.MANAGER || profile?.foodMode == UserMode.COURIER) {
+                            if (profile?.foodMode == UserMode.MANAGER) {
+                                IconButton(onClick = { navigator?.push(FoodOrdersScreen()) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Dashboard,
+                                        contentDescription = "Dashboard"
+                                    )
+                                }
+                            }
+
+                            if (profile?.foodMode == UserMode.COURIER) {
+                                IconButton(onClick = { navigator?.push(DeliveryDashboardScreen()) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsBike,
+                                        contentDescription = "Delivery Dashboard"
+                                    )
+                                }
+                            }
+                        } else {
+                            IconButton(onClick = { navigator?.push(FoodActivitiesScreen()) }) {
                                 Icon(
-                                    imageVector = Icons.Default.Dashboard,
-                                    contentDescription = "Dashboard"
+                                    imageVector = Icons.Default.ReceiptLong,
+                                    contentDescription = "Orders"
                                 )
                             }
                         }
 
-                        if (profile?.foodMode == UserMode.COURIER) { 
-                            IconButton(onClick = { navigator?.push(DeliveryDashboardScreen()) }) {
-                                Icon(
-                                    imageVector = Icons.Default.DirectionsBike,
-                                    contentDescription = "Delivery Dashboard"
-                                )
-                            }
-                        }
-                    } else {
-                        IconButton(onClick = { navigator?.push(FoodActivitiesScreen()) }) { 
+                        IconButton(onClick = { navigator?.push(FoodSettingsScreen()) }) {
                             Icon(
-                                imageVector = Icons.Default.ReceiptLong,
-                                contentDescription = "Orders"
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Food Settings"
                             )
                         }
                     }
-
-                    IconButton(onClick = { navigator?.push(FoodSettingsScreen()) }) { 
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Food Settings"
-                        )
-                    }
-                }
                 )
             }
         ) { paddingValues ->
-            if (restaurants.isEmpty()) { 
+            if (restaurants.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No restaurants available right now.") 
+                    Text("No restaurants available right now.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 LazyColumn(
@@ -90,12 +95,12 @@ class RestaurantsScreen : Screen {
                         .fillMaxSize()
                         .padding(paddingValues),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(restaurants, key = { it.id }) { restaurant -> 
+                    items(restaurants, key = { it.id }) { restaurant ->
                         RestaurantCardItem(
                             restaurant = restaurant,
-                            onClick = { navigator?.push(RestaurantScreen(restaurant)) } 
+                            onClick = { navigator?.push(RestaurantScreen(restaurant)) }
                         )
                     }
                 }
@@ -112,47 +117,58 @@ private fun RestaurantCardItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick), 
-    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) { 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = restaurant.name, style = MaterialTheme.typography.titleLarge) 
+        Column {
+            AsyncImage(
+                model = restaurant.imageUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+                contentScale = ContentScale.Crop
+            )
 
-                // Online / Offline Status Badge
-                Badge(
-                    containerColor = if (restaurant.isOpen) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.errorContainer
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = restaurant.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+
+                    Surface(
+                        color = if (restaurant.isOpen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (restaurant.isOpen) "Online" else "Offline",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = if (restaurant.isOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
                     }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = if (restaurant.isOpen) "Online" else "Offline",
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall
+                        text = "Delivery Fee: $${"%.2f".format(restaurant.deliveryFee)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Est. ${restaurant.estimatedTimeMinutes} mins",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp)) 
-
-            Row(
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth() 
-            ) {
-                Text(
-                    text = "Delivery: $${"%.2f".format(restaurant.deliveryFee)}",
-                style = MaterialTheme.typography.bodyMedium
-                )
-                Text(
-                    text = "${restaurant.estimatedTimeMinutes} mins", 
-                style = MaterialTheme.typography.bodyMedium
-                )
             }
         }
     }

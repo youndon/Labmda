@@ -6,19 +6,24 @@ import android.content.pm.PackageManager
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -57,7 +62,6 @@ class DriverDashboardScreen : Screen {
         val cameraPositionState = rememberCameraPositionState()
         val routeColor = MaterialTheme.colorScheme.primary
 
-        // --- Online status + live fromLocation ---
         val context = LocalContext.current
         val isOnline by screenModel.isOnline.collectAsState()
         val hasActiveTrip = activeTrips.isNotEmpty()
@@ -75,12 +79,10 @@ class DriverDashboardScreen : Screen {
             ActivityResultContracts.RequestMultiplePermissions()
         ) { result ->
             hasLocationPermission = result.values.any { it }
-            // The driver tapped "online", so continue once permission is granted
             if (hasLocationPermission) screenModel.setOnline(true)
         }
         val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
 
-        // While online (and permitted), push the driver's position to Firebase
         DisposableEffect(isOnline, hasLocationPermission) {
             if (!isOnline || !hasLocationPermission) {
                 return@DisposableEffect onDispose { }
@@ -104,19 +106,16 @@ class DriverDashboardScreen : Screen {
             onDispose { fusedClient.removeLocationUpdates(callback) }
         }
 
-        // Center on the driver the first time a fix arrives
         LaunchedEffect(myLocation == null) {
             myLocation?.let {
                 runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(it, 15f), 600) }
             }
         }
 
-        // Offline drivers don't see requests
         val requests = if (isOnline) availableTrips else emptyList()
         val currentList = if (selectedTab == 0) requests else activeTrips
         val focusedTrip = currentList.firstOrNull { it.id == focusedTripId }
 
-        // Frame the pickup and the destination of the trip the driver tapped
         LaunchedEffect(focusedTrip?.id) {
             val trip = focusedTrip ?: return@LaunchedEffect
             val p = trip.pickupPoint()
@@ -132,15 +131,14 @@ class DriverDashboardScreen : Screen {
             }
         }
 
-        // When a new active trip appears, focus it automatically
         LaunchedEffect(activeTrips.firstOrNull()?.id) {
             if (selectedTab == 1) focusedTripId = activeTrips.firstOrNull()?.id
         }
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("Driver Dashboard") },
+                CenterAlignedTopAppBar(
+                    title = { Text("Driver Dashboard", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -202,24 +200,27 @@ class DriverDashboardScreen : Screen {
                     }
                 }
 
+                // Online Status Banner Card
                 Card(
-                    modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+                    modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 if (isOnline) "You're online" else "You're offline",
-                                style = MaterialTheme.typography.titleMedium
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
                                 when {
-                                    isOnline && hasActiveTrip -> "Finish your trip to go offline"
-                                    isOnline -> "Sharing your fromLocation and receiving requests"
-                                    else -> "Go online to receive ride requests"
+                                    isOnline && hasActiveTrip -> "Finish trip to go offline"
+                                    isOnline -> "Receiving ride requests"
+                                    else -> "Go online to receive requests"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -227,7 +228,6 @@ class DriverDashboardScreen : Screen {
                         }
                         Switch(
                             checked = isOnline,
-                            // Can't go offline in the middle of a trip
                             enabled = !(isOnline && hasActiveTrip),
                             onCheckedChange = { wantOnline ->
                                 if (wantOnline && !hasLocationPermission) {
@@ -251,22 +251,29 @@ class DriverDashboardScreen : Screen {
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxWidth().fillMaxHeight(0.5f),
-                        shape = MaterialTheme.shapes.large,
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                         tonalElevation = 8.dp,
                         shadowElevation = 8.dp
                     ) {
                         Column(modifier = Modifier.fillMaxSize()) {
-                            TabRow(selectedTabIndex = selectedTab) {
-                                Tab(
+                            // Modern Segmented Pill Tabs
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                            ) {
+                                SegmentedButton(
                                     selected = selectedTab == 0,
                                     onClick = { selectedTab = 0; focusedTripId = null },
-                                    text = { Text("Requests (${requests.size})") }
-                                )
-                                Tab(
+                                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                                ) {
+                                    Text("Requests (${requests.size})")
+                                }
+                                SegmentedButton(
                                     selected = selectedTab == 1,
                                     onClick = { selectedTab = 1; focusedTripId = activeTrips.firstOrNull()?.id },
-                                    text = { Text("Active Trip (${activeTrips.size})") }
-                                )
+                                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                                ) {
+                                    Text("Active Trip (${activeTrips.size})")
+                                }
                             }
 
                             if (isLoading) {
@@ -274,19 +281,22 @@ class DriverDashboardScreen : Screen {
                                     CircularProgressIndicator()
                                 }
                             } else if (currentList.isEmpty()) {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                                     Text(
                                         if (selectedTab == 0) {
-                                            if (isOnline) "No ride requests available."
-                                            else "You're offline. Switch to online to receive ride requests."
+                                            if (isOnline) "No ride requests available right now."
+                                            else "You're offline. Switch online to receive requests."
                                         }
-                                        else "You have no active trips right now."
+                                        else "You have no active trips right now.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                     )
                                 }
                             } else {
                                 LazyColumn(
-                                    contentPadding = PaddingValues(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     items(currentList, key = { it.id }) { trip ->
                                         DashboardTripCard(
@@ -324,7 +334,9 @@ class DriverDashboardScreen : Screen {
         Card(
             onClick = onFocus,
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = if (isFocused) 8.dp else 3.dp)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = if (isFocused) 4.dp else 1.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
@@ -332,23 +344,35 @@ class DriverDashboardScreen : Screen {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(trip.passengerName, style = MaterialTheme.typography.titleMedium)
-                    Badge(containerColor = MaterialTheme.colorScheme.primaryContainer) {
-                        Text("$${"%.2f".format(trip.fare)}", modifier = Modifier.padding(4.dp))
+                    Text(trip.passengerName, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            "$${"%.2f".format(trip.fare)}",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Pickup: ${trip.pickupLocation}", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Pickup: ${trip.pickupLocation}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Destination: ${trip.dropoffLocation}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    }
                 }
-                Row(verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Destination: ${trip.dropoffLocation}", style = MaterialTheme.typography.bodyMedium)
-                }
+
+                Spacer(Modifier.height(6.dp))
                 Text(
                     "Phone: ${trip.passengerPhone.ifBlank { "N/A" }}",
                     style = MaterialTheme.typography.bodySmall,
@@ -358,24 +382,30 @@ class DriverDashboardScreen : Screen {
                 Spacer(Modifier.height(16.dp))
 
                 if (!isActiveTab) {
-                    Button(onClick = onAccept, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.Check, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Accept Trip")
+                    Button(
+                        onClick = onAccept,
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Accept Trip", fontWeight = FontWeight.Bold)
                     }
                 } else {
                     when (trip.status) {
                         "ACCEPTED" -> Button(
                             onClick = { onUpdateStatus("IN_PROGRESS") },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("Start Trip") }
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("Start Trip", fontWeight = FontWeight.Bold) }
 
                         "IN_PROGRESS" -> Button(
                             onClick = { onUpdateStatus("COMPLETED") },
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text("Complete Trip") }
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("Complete Trip", fontWeight = FontWeight.Bold) }
 
-                        else -> Text("Trip Status: ${trip.status}", style = MaterialTheme.typography.bodyMedium)
+                        else -> Text("Trip Status: ${trip.status}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

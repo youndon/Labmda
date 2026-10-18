@@ -6,9 +6,8 @@ import org.koin.core.module.dsl.factoryOf
 val foodModule = module {
     factoryOf(::RestaurantsScreenModel)
     factoryOf(::MealWorkplaceScreenModel)
-    factory { (restaurantId: String) -> RestaurantDetailScreenModel(restaurantId) }
     factoryOf(::RestaurantWorkplaceScreenModel)
-    factoryOf(::FoodDashboardScreenModel)
+    factoryOf(::FoodOrdersScreenModel)
 
     single {
         FoodRepository()

@@ -2,15 +2,21 @@ package com.zouitel.presentaion.screens.account
 
 import android.app.Activity
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cafe.adriel.voyager.core.screen.Screen
@@ -44,7 +50,6 @@ class LogInScreen : Screen {
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
 
-        // Check if user is already signed in before showing login UI
         LaunchedEffect(Unit) {
             if (Firebase.auth.currentUser != null) {
                 navigator.replaceAll(MainScreen())
@@ -54,6 +59,7 @@ class LogInScreen : Screen {
         LogIn(onSignedIn = { navigator.replaceAll(MainScreen()) })
     }
 
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun LogIn(onSignedIn: () -> Unit) {
         val context = LocalContext.current
@@ -69,7 +75,6 @@ class LogInScreen : Screen {
         var verificationId by remember { mutableStateOf<String?>(null) }
         var resendToken by remember { mutableStateOf<PhoneAuthProvider.ForceResendingToken?>(null) }
 
-        // --- Google sign-in ---
         val googleSignInState = rememberGoogleSignInState(
             false,
             isAutoSelectEnabled = true
@@ -82,12 +87,11 @@ class LogInScreen : Screen {
                             idToken = googleUser.idToken,
                             accessToken = null
                         )
-                        // 2. ONLY CALL THIS ONCE. Remove the duplicate Firebase.auth.signInWithCredential(credential)
                         val authResult = Firebase.auth.signInWithCredential(credential)
                         val firebaseUser = authResult.user
 
                         if (firebaseUser != null && firebaseUser.uid.isNotBlank()) {
-                            val cc = screenModel.saveUserProfile(
+                            screenModel.saveUserProfile(
                                 UserProfile().copy(
                                     uid = firebaseUser.uid,
                                     fullName = firebaseUser.displayName ?: "",
@@ -110,10 +114,8 @@ class LogInScreen : Screen {
             }
         }
 
-        // --- Phone verification callbacks ---
         val phoneCallbacks = remember {
             object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-                // Auto-verification returns a native credential, so we must use the native sign-in method
                 override fun onVerificationCompleted(credential: PhoneAuthCredential) {
                     signInWithNativeCredential(
                         credential,
@@ -165,140 +167,202 @@ class LogInScreen : Screen {
             PhoneAuthProvider.verifyPhoneNumber(builder.build())
         }
 
-        Surface(modifier = Modifier.fillMaxSize()) {
-            Column(
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("") } // Clean minimal bar
+                )
+            }
+        ) { innerPadding ->
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(innerPadding)
                     .padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
+                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Welcome to RideGo",
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(Modifier.height(32.dp))
-
-                OutlinedButton(
-                    onClick = { googleSignInState.launch() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    enabled = !isLoading
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Text("Sign in with Google")
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    HorizontalDivider(modifier = Modifier.weight(1f))
-                    Text("  OR  ", fontSize = 12.sp)
-                    HorizontalDivider(modifier = Modifier.weight(1f))
-                }
-
-                Spacer(Modifier.height(20.dp))
-
-                if (!codeWasSent) {
-                    OutlinedTextField(
-                        value = phoneNumber,
-                        onValueChange = { input -> phoneNumber = input.filter { it.isDigit() || it == '+' } },
-                        label = { Text("Phone number") },
-                        placeholder = { Text("+15551234567") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isLoading
-                    )
-
-                    Spacer(Modifier.height(16.dp))
-
-                    Button(
-                        onClick = { startPhoneVerification(forceResend = false) },
+                    // App Brand Header Icon
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        enabled = !isLoading
+                            .size(72.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("Send OTP")
-                    }
-                } else {
-                    Text("Enter the 6-digit code sent to $phoneNumber", fontSize = 13.sp)
-
-                    Spacer(Modifier.height(12.dp))
-
-                    OutlinedTextField(
-                        value = otpCode,
-                        onValueChange = { input -> if (input.length <= 6) otpCode = input.filter { it.isDigit() } },
-                        label = { Text("OTP code") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isLoading
-                    )
-
-                    Spacer(Modifier.height(16.dp))
-
-                    Button(
-                        onClick = {
-                            val id = verificationId
-                            if (id == null) {
-                                Toast.makeText(context, "Code expired, request a new one", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-                            if (otpCode.length != 6) {
-                                Toast.makeText(context, "Enter the 6-digit code", Toast.LENGTH_SHORT).show()
-                                return@Button
-                            }
-
-                            // Updated to use GitLive's PhoneAuthProvider and Credential
-                            val gitLiveCredential = dev.gitlive.firebase.auth.PhoneAuthProvider().credential(id, otpCode)
-                            signInWithGitLiveCredential(gitLiveCredential, coroutineScope, context,
-                                onSignedIn) { isLoading = it }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        enabled = !isLoading
-                    ) {
-                        Text("Verify")
+                        Icon(
+                            imageVector = Icons.Filled.LocalShipping,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(36.dp)
+                        )
                     }
 
+                    Spacer(Modifier.height(24.dp))
+
+                    Text(
+                        text = "Get started with RideGo",
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        textAlign = TextAlign.Center
+                    )
                     Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Your ultimate ride, food & shopping experience",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
 
-                    TextButton(
-                        onClick = { startPhoneVerification(forceResend = true) },
+                    Spacer(Modifier.height(36.dp))
+
+                    // Google Sign-In Elevated Button
+                    OutlinedButton(
+                        onClick = { googleSignInState.launch() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                        shape = RoundedCornerShape(16.dp),
                         enabled = !isLoading
                     ) {
-                        Text("Resend code")
+                        Text(
+                            "Continue with Google",
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold)
+                        )
                     }
 
-                    TextButton(
-                        onClick = {
-                            codeWasSent = false
-                            otpCode = ""
-                            verificationId = null
-                        },
-                        enabled = !isLoading
+                    Spacer(Modifier.height(24.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Change phone number")
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+                        Text(
+                            "  or sign in with phone  ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
                     }
-                }
 
-                if (isLoading) {
-                    Spacer(Modifier.height(20.dp))
-                    CircularProgressIndicator()
+                    Spacer(Modifier.height(24.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            if (!codeWasSent) {
+                                OutlinedTextField(
+                                    value = phoneNumber,
+                                    onValueChange = { input -> phoneNumber = input.filter { it.isDigit() || it == '+' } },
+                                    label = { Text("Phone number") },
+                                    placeholder = { Text("+1 555 123 4567") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !isLoading
+                                )
+
+                                Button(
+                                    onClick = { startPhoneVerification(forceResend = false) },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(50.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    enabled = !isLoading
+                                ) {
+                                    Text("Send Verification Code")
+                                }
+                            } else {
+                                Text(
+                                    text = "Enter the 6-digit code sent to $phoneNumber",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                OutlinedTextField(
+                                    value = otpCode,
+                                    onValueChange = { input -> if (input.length <= 6) otpCode = input.filter { it.isDigit() } },
+                                    label = { Text("OTP code") },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !isLoading
+                                )
+
+                                Button(
+                                    onClick = {
+                                        val id = verificationId
+                                        if (id == null) {
+                                            Toast.makeText(context, "Code expired, request a new one", Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+                                        if (otpCode.length != 6) {
+                                            Toast.makeText(context, "Enter the 6-digit code", Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+
+                                        val gitLiveCredential = dev.gitlive.firebase.auth.PhoneAuthProvider().credential(id, otpCode)
+                                        signInWithGitLiveCredential(gitLiveCredential, coroutineScope, context,
+                                            onSignedIn) { isLoading = it }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(50.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    enabled = !isLoading
+                                ) {
+                                    Text("Verify & Sign In")
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    TextButton(
+                                        onClick = { startPhoneVerification(forceResend = true) },
+                                        enabled = !isLoading
+                                    ) {
+                                        Text("Resend code")
+                                    }
+
+                                    TextButton(
+                                        onClick = {
+                                            codeWasSent = false
+                                            otpCode = ""
+                                            verificationId = null
+                                        },
+                                        enabled = !isLoading
+                                    ) {
+                                        Text("Change number")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (isLoading) {
+                        Spacer(Modifier.height(20.dp))
+                        CircularProgressIndicator()
+                    }
                 }
             }
         }
     }
 
-    // New: Executes sign-in using pure GitLive KMP Firebase Auth
     private fun signInWithGitLiveCredential(
         credential: AuthCredential,
         scope: CoroutineScope,
@@ -310,24 +374,6 @@ class LogInScreen : Screen {
             setLoading(true)
             try {
                 Firebase.auth.signInWithCredential(credential)
-
-//                Firebase.auth.currentUser?.let { firebaseUser ->
-//                    val profileResult = userRepo.ensureUserProfileExists(
-//                        uid = firebaseUser.uid,
-//                        displayName = firebaseUser.displayName,
-//                        email = firebaseUser.email,
-//                        phoneNumber = firebaseUser.phoneNumber,
-//                        photoUrl = firebaseUser.photoURL
-//                    )
-//                    profileResult.e?.let { profileError ->
-//                        Toast.makeText(
-//                            context,
-//                            "Signed in, but couldn't save your profile: ${profileError.message}",
-//                            Toast.LENGTH_LONG
-//                        ).show()
-//                    }
-//                }
-
                 onSignedIn()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Invalid code, try again", Toast.LENGTH_SHORT).show()
@@ -337,7 +383,6 @@ class LogInScreen : Screen {
         }
     }
 
-    // Existing: Kept exclusively for native auto-verification (onVerificationCompleted)
     private fun signInWithNativeCredential(
         credential: PhoneAuthCredential,
         scope: CoroutineScope,
@@ -349,25 +394,7 @@ class LogInScreen : Screen {
         scope.launch {
             setLoading(true)
             try {
-                val result = FirebaseAuth.getInstance().signInWithCredential(credential).await()
-
-//                result.user?.let { firebaseUser ->
-//                    val profileResult = userRepo.ensureUserProfileExists(
-//                        uid = firebaseUser.uid,
-//                        displayName = firebaseUser.displayName,
-//                        email = firebaseUser.email,
-//                        phoneNumber = firebaseUser.phoneNumber,
-//                        photoUrl = firebaseUser.photoUrl?.toString()
-//                    )
-//                    profileResult.e?.let { profileError ->
-//                        Toast.makeText(
-//                            context,
-//                            "Signed in, but couldn't save your profile: ${profileError.message}",
-//                            Toast.LENGTH_LONG
-//                        ).show()
-//                    }
-//                }
-
+                FirebaseAuth.getInstance().signInWithCredential(credential).await()
                 onSignedIn()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Invalid code, try again", Toast.LENGTH_SHORT).show()

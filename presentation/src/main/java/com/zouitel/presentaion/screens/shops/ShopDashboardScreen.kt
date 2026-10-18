@@ -3,7 +3,10 @@ package com.zouitel.presentaion.screens.shops
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -11,13 +14,21 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
+import coil3.compose.AsyncImage
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.PickedImage
+import com.zouitel.presentaion.common.ImagePicker
+import com.zouitel.presentaion.screens.food.ImageUploadState
 
 data class ShopDashboardScreen(val shopId: String) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -27,14 +38,15 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
         val screenModel = rememberScreenModel { ShopDashboardScreenModel(shopId) }
         val products by screenModel.products.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val imageUpload by screenModel.imageUpload.collectAsState()
 
         var showAddEditDialog by remember { mutableStateOf(false) }
         var selectedProductToEdit by remember { mutableStateOf<Product?>(null) }
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("Store Manager Dashboard") },
+                CenterAlignedTopAppBar(
+                    title = { Text("Store Manager Dashboard", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -47,7 +59,8 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                     onClick = {
                         selectedProductToEdit = null
                         showAddEditDialog = true
-                    }
+                    },
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Add Product")
                 }
@@ -58,37 +71,77 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                     CircularProgressIndicator()
                 }
             } else if (products.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                    Text("No products added to your store yet. Tap + to add one.")
+                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No products added to your store yet. Tap + to add items.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(paddingValues),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(products, key = { it.id }) { product ->
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(16.dp)) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (product.imageUrl.isNotEmpty()) {
+                                    AsyncImage(
+                                        model = product.imageUrl,
+                                        contentDescription = product.name,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(160.dp)
+                                            .clip(RoundedCornerShape(12.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(text = product.name, style = MaterialTheme.typography.titleMedium)
+                                    Text(text = product.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                     Text(
                                         text = "$${"%.2f".format(product.price)}",
-                                        style = MaterialTheme.typography.titleMedium,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(text = product.description, style = MaterialTheme.typography.bodySmall)
-                                Text(text = "Category: ${product.category}", style = MaterialTheme.typography.labelMedium)
-                                Text(text = "In Stock: ${product.stockQuantity} units", style = MaterialTheme.typography.labelSmall)
+                                if (product.description.isNotBlank()) {
+                                    Text(text = product.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
 
-                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = product.category,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                    Text(text = "In Stock: ${product.stockQuantity} units", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
 
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -101,7 +154,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                             onCheckedChange = { screenModel.toggleProductAvailability(product) }
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text(if (product.isAvailable) "Available" else "Out of Stock")
+                                        Text(if (product.isAvailable) "Available" else "Out of Stock", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                                     }
 
                                     Row {
@@ -109,7 +162,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                             selectedProductToEdit = product
                                             showAddEditDialog = true
                                         }) {
-                                            Icon(Icons.Default.Edit, contentDescription = "Edit")
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                         IconButton(onClick = { screenModel.deleteProduct(product.id) }) {
                                             Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
@@ -125,6 +178,9 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
             if (showAddEditDialog) {
                 AddEditProductDialog(
                     product = selectedProductToEdit,
+                    uploadState = imageUpload,
+                    onUploadImage = { image, token -> screenModel.uploadProductImage(image, token) },
+                    onUploadHandled = { screenModel.resetImageUpload() },
                     onDismiss = { showAddEditDialog = false },
                     onConfirm = { name, desc, price, cat, img, stock ->
                         screenModel.addOrUpdateProduct(
@@ -146,6 +202,9 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
     @Composable
     private fun AddEditProductDialog(
         product: Product?,
+        uploadState: ImageUploadState,
+        onUploadImage: (PickedImage, DriveTokenProvider) -> Unit,
+        onUploadHandled: () -> Unit,
         onDismiss: () -> Unit,
         onConfirm: (String, String, Double, String, String, Int) -> Unit
     ) {
@@ -156,29 +215,55 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
         var imageUrl by remember { mutableStateOf(product?.imageUrl ?: "") }
         var stockQuantity by remember { mutableStateOf(product?.stockQuantity?.toString() ?: "10") }
 
+        val isUploading = uploadState is ImageUploadState.Uploading
+
+        LaunchedEffect(uploadState) {
+            if (uploadState is ImageUploadState.Success) {
+                imageUrl = uploadState.url
+                onUploadHandled()
+            }
+        }
+
+        DisposableEffect(Unit) {
+            onDispose { onUploadHandled() }
+        }
+
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(if (product == null) "Add New Product" else "Edit Product") },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(if (product == null) "Add New Product" else "Edit Product", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Product Name") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth())
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    ImagePicker(
+                        imageUrl = imageUrl,
+                        uploadState = uploadState,
+                        onImagePicked = onUploadImage,
+                        height = 140.dp,
+                        emptyLabel = "Add a product photo",
+                        contentDescription = "Product photo"
+                    )
+                    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Product Name") }, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(
                         value = price,
                         onValueChange = { price = it },
                         label = { Text("Price ($)") },
+                        shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") }, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(
                         value = stockQuantity,
                         onValueChange = { stockQuantity = it },
                         label = { Text("Stock Quantity") },
+                        shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    OutlinedTextField(value = imageUrl, onValueChange = { imageUrl = it }, label = { Text("Image URL") }, modifier = Modifier.fillMaxWidth())
                 }
             },
             confirmButton = {
@@ -193,9 +278,10 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                             stockQuantity.toIntOrNull() ?: 0
                         )
                     },
-                    enabled = name.isNotBlank() && price.isNotBlank()
+                    enabled = name.isNotBlank() && price.isNotBlank() && !isUploading,
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Save Product")
+                    Text(if (isUploading) "Uploading photo…" else "Save Product", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

@@ -1,8 +1,10 @@
 package com.zouitel.presentaion.screens.shops
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
@@ -15,6 +17,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -22,8 +27,13 @@ import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
+import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.screens.account.AccountScreenModel
+import com.zouitel.presentaion.common.ImagePicker
+import com.zouitel.presentaion.screens.food.ImageUploadState
 import androidx.compose.runtime.collectAsState
+import coil3.compose.AsyncImage
 
 class ShopWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -36,6 +46,7 @@ class ShopWorkplaceScreen : Screen {
         val userShop by screenModel.userShop.collectAsState()
         val isOnline by screenModel.isOnline.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val imageUpload by screenModel.imageUpload.collectAsState()
 
         var selectedRoleMode by remember(profile?.shopMode) {
             mutableStateOf(accountModel.profile.value?.shopMode ?: UserMode.CLIENT)
@@ -43,8 +54,8 @@ class ShopWorkplaceScreen : Screen {
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("Shop Portal Choice") },
+                CenterAlignedTopAppBar(
+                    title = { Text("Shop Portal Choice", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -69,10 +80,9 @@ class ShopWorkplaceScreen : Screen {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Role Selection Choice Row
                 Text(
                     text = "Select Portal Mode",
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary
                 )
 
@@ -104,7 +114,7 @@ class ShopWorkplaceScreen : Screen {
                     }
                 }
 
-                HorizontalDivider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                 when (selectedRoleMode) {
                     UserMode.CLIENT -> ClientRoleChoiceCard {
@@ -122,6 +132,9 @@ class ShopWorkplaceScreen : Screen {
                             } else {
                                 when (val shop = userShop) {
                                     null -> ShopRegistrationForm(
+                                        uploadState = imageUpload,
+                                        onUploadImage = { image, token -> screenModel.uploadShopImage(image, token) },
+                                        onUploadHandled = { screenModel.resetImageUpload() },
                                         onSubmit = { name, desc, cat, phone, addr, img ->
                                             screenModel.submitShopApplication(
                                                 name,
@@ -161,32 +174,44 @@ class ShopWorkplaceScreen : Screen {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onExploreShops),
-            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Storefront,
-                    contentDescription = null,
-                    modifier = Modifier.size(56.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Browse Stores as Client", style = MaterialTheme.typography.titleLarge)
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Storefront,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+                Text("Browse Stores as Client", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
                 Text(
                     "Discover nearby verified retail stores, inspect product catalogs, add products to your demand card, and trigger home delivery.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
                 Button(
                     onClick = onExploreShops,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Explore Verified Stores")
+                    Text("Explore Verified Stores", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -194,6 +219,9 @@ class ShopWorkplaceScreen : Screen {
 
     @Composable
     private fun ShopRegistrationForm(
+        uploadState: ImageUploadState,
+        onUploadImage: (PickedImage, DriveTokenProvider) -> Unit,
+        onUploadHandled: () -> Unit,
         onSubmit: (String, String, String, String, String, String) -> Unit
     ) {
         var name by remember { mutableStateOf("") }
@@ -203,14 +231,28 @@ class ShopWorkplaceScreen : Screen {
         var address by remember { mutableStateOf("") }
         var imageUrl by remember { mutableStateOf("") }
 
+        val isUploading = uploadState is ImageUploadState.Uploading
+
+        LaunchedEffect(uploadState) {
+            if (uploadState is ImageUploadState.Success) {
+                imageUrl = uploadState.url
+                onUploadHandled()
+            }
+        }
+
+        DisposableEffect(Unit) {
+            onDispose { onUploadHandled() }
+        }
+
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(bottom = 24.dp)
         ) {
             item {
-                Text("Register Store Business", style = MaterialTheme.typography.headlineSmall)
+                Text("Register Store Business", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
                 Text(
-                    "Submit your store details for admin verification. This will update your profile in Firebase.",
+                    "Submit your store details for admin verification.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -221,6 +263,7 @@ class ShopWorkplaceScreen : Screen {
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Store Name") },
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -230,6 +273,7 @@ class ShopWorkplaceScreen : Screen {
                     value = description,
                     onValueChange = { description = it },
                     label = { Text("Store Description") },
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -239,6 +283,7 @@ class ShopWorkplaceScreen : Screen {
                     value = category,
                     onValueChange = { category = it },
                     label = { Text("Store Category") },
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -248,6 +293,7 @@ class ShopWorkplaceScreen : Screen {
                     value = phone,
                     onValueChange = { phone = it },
                     label = { Text("Business Phone Number") },
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -257,26 +303,29 @@ class ShopWorkplaceScreen : Screen {
                     value = address,
                     onValueChange = { address = it },
                     label = { Text("Physical Store Address") },
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
             item {
-                OutlinedTextField(
-                    value = imageUrl,
-                    onValueChange = { imageUrl = it },
-                    label = { Text("Store Image / Logo URL (Optional)") },
-                    modifier = Modifier.fillMaxWidth()
+                ImagePicker(
+                    imageUrl = imageUrl,
+                    uploadState = uploadState,
+                    onImagePicked = onUploadImage,
+                    emptyLabel = "Add a store photo or logo",
+                    contentDescription = "Store photo"
                 )
             }
 
             item {
                 Button(
                     onClick = { onSubmit(name, description, category, phone, address, imageUrl) },
-                    enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth()
+                    enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank() && !isUploading,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) {
-                    Text("Submit & Update Profile")
+                    Text(if (isUploading) "Uploading photo…" else "Submit & Update Profile", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -286,7 +335,7 @@ class ShopWorkplaceScreen : Screen {
     private fun PendingVerificationView(shop: Shop) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.HourglassEmpty,
@@ -294,11 +343,13 @@ class ShopWorkplaceScreen : Screen {
                 modifier = Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
-            Text("Verification Pending", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Verification Pending", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
             Text(
                 "Your application for '${shop.name}' is under review by the administrator.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
     }
@@ -307,7 +358,7 @@ class ShopWorkplaceScreen : Screen {
     private fun RejectedApplicationView(shop: Shop) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Warning,
@@ -315,11 +366,13 @@ class ShopWorkplaceScreen : Screen {
                 modifier = Modifier.size(64.dp),
                 tint = MaterialTheme.colorScheme.error
             )
-            Text("Application Rejected", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Application Rejected", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
             Text(
                 "Your shop application for '${shop.name}' was declined.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
     }
@@ -337,8 +390,11 @@ class ShopWorkplaceScreen : Screen {
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
             item {
-                // Online/Offline Availability Switch Card
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -347,10 +403,10 @@ class ShopWorkplaceScreen : Screen {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Store, contentDescription = null)
+                            Icon(Icons.Default.Store, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Store Status", style = MaterialTheme.typography.titleMedium)
+                                Text("Store Status", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                 Text(
                                     text = if (isOnline) "Online & Accepting Orders" else "Offline",
                                     style = MaterialTheme.typography.bodySmall,
@@ -364,23 +420,36 @@ class ShopWorkplaceScreen : Screen {
             }
 
             item {
-                // Store Details Summary Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Text(text = shop.name, style = MaterialTheme.typography.headlineSmall)
-                        HorizontalDivider()
+                        if (shop.imageUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = shop.imageUrl,
+                                contentDescription = "Store photo",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+
+                        Text(text = shop.name, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Text(text = "Category: ${shop.category}", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Description: ${shop.description.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Description: ${shop.description.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(text = "Address: ${shop.address}", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "Phone: ${shop.phone}", style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Phone: ${shop.phone}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                     }
                 }
             }
@@ -388,11 +457,12 @@ class ShopWorkplaceScreen : Screen {
             item {
                 Button(
                     onClick = onOpenDashboard,
-                    modifier = Modifier.fillMaxWidth()
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) {
-                    Icon(Icons.Default.Store, contentDescription = null)
+                    Icon(Icons.Default.Store, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Open Store Manager Dashboard")
+                    Text("Open Store Manager Dashboard", fontWeight = FontWeight.Bold)
                 }
             }
         }

@@ -4,15 +4,20 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
+import com.zouitel.presentaion.common.DriveImageUploader
+import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class ManagedRestaurantInfo(
@@ -26,6 +31,13 @@ data class ManagedRestaurantInfo(
     val latitude: Double = 0.0,
     val longitude: Double = 0.0
 )
+
+sealed interface ImageUploadState {
+    data object Idle : ImageUploadState
+    data object Uploading : ImageUploadState
+    data class Success(val url: String) : ImageUploadState
+    data class Error(val message: String) : ImageUploadState
+}
 
 class RestaurantWorkplaceScreenModel(
     private val repository: FoodRepository = FoodRepository()
@@ -188,5 +200,52 @@ class RestaurantWorkplaceScreenModel(
             db.child("users").child(uid).child("isFoodServiceOnline").setValue(isOnline)
             db.child("restaurants").child(uid).child("isOpen").setValue(isOnline)
         }
+    }
+
+    private val _imageUpload = MutableStateFlow<ImageUploadState>(ImageUploadState.Idle)
+    val imageUpload: StateFlow<ImageUploadState> = _imageUpload.asStateFlow()
+    private var uploadJob: Job? = null
+
+    /**
+     * Uploads the picked image to the signed-in user's Google Drive and exposes the link to
+     * store/display via [imageUpload].
+     */
+    fun uploadRestaurantImage(image: PickedImage, accessToken: DriveTokenProvider) {
+        if (_imageUpload.value is ImageUploadState.Uploading) return
+        _imageUpload.value = ImageUploadState.Uploading
+
+        uploadJob = screenModelScope.launch {
+            try {
+                val url = DriveImageUploader.upload(
+                    bytes = image.readBytes(),
+                    accessToken = accessToken(),
+                    label = "restaurant-cover"
+                )
+                _imageUpload.value = ImageUploadState.Success(url)
+            } catch (e: CancellationException) {
+                // Reset only when abandoned from outside (e.g. the consent screen closed);
+                // resetImageUpload() has already reset the state when it cancelled us.
+                if (isActive) _imageUpload.value = ImageUploadState.Idle
+                throw e
+            } catch (e: Exception) {
+                _imageUpload.value = ImageUploadState.Error(e.message ?: "Upload failed")
+            }
+        }
+    }
+
+    /** For an already-approved manager changing their photo later. */
+    fun saveRestaurantImageUrl(url: String) {
+        val uid = auth.currentUser?.uid ?: return
+        screenModelScope.launch(Dispatchers.IO) {
+            db.child("users").child(uid).child("restaurantImageUrl").setValue(url)
+            db.child("restaurants").child(uid).child("imageUrl").setValue(url)
+        }
+    }
+
+    /** Clears the upload state and cancels an upload still in flight, so its result can't leak into the next form. */
+    fun resetImageUpload() {
+        uploadJob?.cancel()
+        uploadJob = null
+        _imageUpload.value = ImageUploadState.Idle
     }
 }

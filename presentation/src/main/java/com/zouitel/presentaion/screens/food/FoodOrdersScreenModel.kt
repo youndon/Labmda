@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class FoodDashboardScreenModel : ScreenModel {
+class FoodOrdersScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUid = Firebase.auth.currentUser?.uid
 

@@ -1,17 +1,22 @@
 package com.zouitel.presentaion.screens.food
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.common.ImagePicker
 
 data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -19,6 +24,8 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
     override fun Content() {
         val navigator = LocalNavigator.current
         val screenModel = koinScreenModel<MealWorkplaceScreenModel>()
+        val imageUpload by screenModel.imageUpload.collectAsState()
+        val isUploading = imageUpload is ImageUploadState.Uploading
 
         var name by remember { mutableStateOf(meal?.name ?: "") }
         var description by remember { mutableStateOf(meal?.description ?: "") }
@@ -27,10 +34,18 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
         var selectedCategory by remember { mutableStateOf(meal?.category ?: MealCategory.BREAKFAST) }
         var expandedCategoryDropdown by remember { mutableStateOf(false) }
 
+        LaunchedEffect(imageUpload) {
+            val state = imageUpload
+            if (state is ImageUploadState.Success) {
+                imageUrl = state.url
+                screenModel.resetImageUpload()
+            }
+        }
+
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text(if (meal == null) "Add Meal Unit" else "Edit Meal Unit") },
+                CenterAlignedTopAppBar(
+                    title = { Text(if (meal == null) "Add Meal Unit" else "Edit Meal Unit", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -46,70 +61,82 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Meal Name") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Description") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = basePrice,
-                    onValueChange = { basePrice = it },
-                    label = { Text("Price ($)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = imageUrl,
-                    onValueChange = { imageUrl = it },
-                    label = { Text("Image URL") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                ExposedDropdownMenuBox(
-                    expanded = expandedCategoryDropdown,
-                    onExpandedChange = { expandedCategoryDropdown = !expandedCategoryDropdown }
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     OutlinedTextField(
-                        value = selectedCategory.name,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Category") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategoryDropdown) },
-                        modifier = Modifier
-                            .menuAnchor(
-                                type = ExposedDropdownMenuAnchorType.PrimaryEditable,
-                                enabled = true
-                            )
-                            .fillMaxWidth()
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Meal Name") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
                     )
 
-                    ExposedDropdownMenu(
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Description") },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = basePrice,
+                        onValueChange = { basePrice = it },
+                        label = { Text("Price ($)") },
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    ImagePicker(
+                        imageUrl = imageUrl,
+                        uploadState = imageUpload,
+                        onImagePicked = { image, token ->
+                            screenModel.uploadMealImage(image, token)
+                        },
+                        emptyLabel = "Add a meal photo",
+                        contentDescription = "Meal photo"
+                    )
+
+                    ExposedDropdownMenuBox(
                         expanded = expandedCategoryDropdown,
-                        onDismissRequest = { expandedCategoryDropdown = false }
+                        onExpandedChange = { expandedCategoryDropdown = !expandedCategoryDropdown }
                     ) {
-                        MealCategory.entries.filter { it != MealCategory.UNKNOWN }.forEach { category ->
-                            DropdownMenuItem(
-                                text = { Text(category.name) },
-                                onClick = {
-                                    selectedCategory = category
-                                    expandedCategoryDropdown = false
-                                }
-                            )
+                        OutlinedTextField(
+                            value = selectedCategory.name,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Category") },
+                            shape = RoundedCornerShape(12.dp),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCategoryDropdown) },
+                            modifier = Modifier
+                                .menuAnchor(
+                                    type = ExposedDropdownMenuAnchorType.PrimaryEditable,
+                                    enabled = true
+                                )
+                                .fillMaxWidth()
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = expandedCategoryDropdown,
+                            onDismissRequest = { expandedCategoryDropdown = false }
+                        ) {
+                            MealCategory.entries.filter { it != MealCategory.UNKNOWN }.forEach { category ->
+                                DropdownMenuItem(
+                                    text = { Text(category.name) },
+                                    onClick = {
+                                        selectedCategory = category
+                                        expandedCategoryDropdown = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.weight(1f))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -125,7 +152,8 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
                                 )
                             },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f).height(50.dp),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
                             Text("Delete Meal")
                         }
@@ -144,10 +172,18 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
                                 onSuccess = { navigator?.pop() }
                             )
                         },
-                        enabled = name.isNotBlank() && basePrice.isNotBlank(),
-                        modifier = Modifier.weight(1f)
+                        enabled = name.isNotBlank() && basePrice.isNotBlank() && !isUploading,
+                        modifier = Modifier.weight(1f).height(50.dp),
+                        shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text(if (meal == null) "Save Meal" else "Update Meal")
+                        Text(
+                            when {
+                                isUploading -> "Uploading photo…"
+                                meal == null -> "Save Meal"
+                                else -> "Update Meal"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }

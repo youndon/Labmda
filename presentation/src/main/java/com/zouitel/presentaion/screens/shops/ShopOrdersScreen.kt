@@ -3,6 +3,7 @@ package com.zouitel.presentaion.screens.shops
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -11,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -31,8 +33,8 @@ class ShopOrdersScreen() : Screen {
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("Store Incoming Demand Cards") },
+                CenterAlignedTopAppBar(
+                    title = { Text("Store Incoming Demand Cards", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -46,8 +48,13 @@ class ShopOrdersScreen() : Screen {
                     CircularProgressIndicator()
                 }
             } else if (orders.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                    Text("No customer demand cards received yet.")
+                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        "No customer demand cards received yet.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
                 }
             } else {
                 LazyColumn(
@@ -73,98 +80,118 @@ class ShopOrdersScreen() : Screen {
             sdf.format(Date(order.createdAtTimestamp))
         }
 
-        Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Demand #${order.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.titleMedium)
-                    Text(formattedDate, style = MaterialTheme.typography.bodySmall)
+                    Text("Demand #${order.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    Text(formattedDate, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
                 StatusChip(order.status)
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Text("Courier Pickup (Store)", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text("Courier Pickup (Store)", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 Text(
                     order.pickupLocation.ifBlank { order.sourceName },
                     style = MaterialTheme.typography.bodyMedium
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text("Client Drop-off Address", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text("Client Drop-off Address", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 Text(
                     order.dropoffLocation.ifBlank { "Address not provided" },
                     style = MaterialTheme.typography.bodyMedium
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text("Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodyMedium)
+                Text("Payment Method: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (order.deliveryName.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Assigned Delivery: ${order.deliveryName} (${order.deliveryPhone})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                    Text("Assigned Delivery: ${order.deliveryName} (${order.deliveryPhone})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Medium)
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Text("Ordered Products (${order.items.sumOf { it.quantity }})", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text("Ordered Products (${order.items.sumOf { it.quantity }})", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 order.items.forEach { item ->
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                        Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall)
+                        Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                     }
                 }
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Total Price:", style = MaterialTheme.typography.titleSmall)
-                    Text("$${"%.2f".format(order.totalPrice)}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Total Price", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                    Text("$${"%.2f".format(order.totalPrice)}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Manager Action Buttons
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     when (order.status) {
                         OrderStatus.PLACED -> {
-                            Button(onClick = { onStatusChange(OrderStatus.ACCEPTED) }, modifier = Modifier.weight(1f)) {
-                                Icon(Icons.Default.Check, contentDescription = null)
+                            Button(
+                                onClick = { onStatusChange(OrderStatus.ACCEPTED) },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).height(48.dp)
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Accept")
+                                Text("Accept", fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(
                                 onClick = { onStatusChange(OrderStatus.CANCELLED) },
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier.weight(1f)
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f).height(48.dp)
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null)
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Reject")
+                                Text("Reject", fontWeight = FontWeight.Bold)
                             }
                         }
                         OrderStatus.ACCEPTED -> {
-                            Button(onClick = { onStatusChange(OrderStatus.PREPARING) }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Start Preparing Order")
+                            Button(
+                                onClick = { onStatusChange(OrderStatus.PREPARING) },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            ) {
+                                Text("Start Preparing Order", fontWeight = FontWeight.Bold)
                             }
                         }
                         OrderStatus.PREPARING -> {
-                            Button(onClick = { onStatusChange(OrderStatus.OUT_FOR_DELIVERY) }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Dispatch to Delivery")
+                            Button(
+                                onClick = { onStatusChange(OrderStatus.OUT_FOR_DELIVERY) },
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            ) {
+                                Text("Dispatch to Delivery", fontWeight = FontWeight.Bold)
                             }
                         }
                         OrderStatus.OUT_FOR_DELIVERY -> {
-                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
-                                Text("Handed to courier network. Awaiting courier delivery confirmation.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp))
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "Handed to courier network. Awaiting courier delivery confirmation.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(12.dp)
+                                )
                             }
                         }
                         OrderStatus.DELIVERED, OrderStatus.CANCELLED -> {}
@@ -184,6 +211,16 @@ class ShopOrdersScreen() : Screen {
             OrderStatus.DELIVERED -> MaterialTheme.colorScheme.outline to "DELIVERED"
             OrderStatus.CANCELLED -> MaterialTheme.colorScheme.error to "CANCELLED"
         }
-        SuggestionChip(onClick = {}, label = { Text(text) }, colors = SuggestionChipDefaults.suggestionChipColors(labelColor = color))
+        Surface(
+            color = color.copy(alpha = 0.15f),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text(
+                text = text,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = color
+            )
+        }
     }
 }

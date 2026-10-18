@@ -4,15 +4,16 @@ import android.content.Context
 import android.location.Geocoder
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -27,8 +28,9 @@ import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
+import com.zouitel.presentaion.common.ImagePicker
+import com.zouitel.presentaion.screens.food.ImageUploadState
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -49,15 +51,25 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
         var imageUrl by remember { mutableStateOf(existingShop?.imageUrl ?: "") }
         var isOnline by remember { mutableStateOf(existingShop?.isOnline ?: false) }
 
-        // Store coordinates state
         var storeLat by remember { mutableStateOf<Double?>(null) }
         var storeLng by remember { mutableStateOf<Double?>(null) }
         var showMapPicker by remember { mutableStateOf(false) }
 
+        val imageUpload by screenModel.imageUpload.collectAsState()
+        val isUploading = imageUpload is ImageUploadState.Uploading
+
+        LaunchedEffect(imageUpload) {
+            val state = imageUpload
+            if (state is ImageUploadState.Success) {
+                imageUrl = state.url
+                screenModel.resetImageUpload()
+            }
+        }
+
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text(if (existingShop == null) "Register Store Business" else "Edit Store Details") },
+                CenterAlignedTopAppBar(
+                    title = { Text(if (existingShop == null) "Register Store Business" else "Edit Store Details", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -71,7 +83,7 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                     .fillMaxSize()
                     .padding(paddingValues)
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
                     Text(
@@ -86,6 +98,7 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                         value = name,
                         onValueChange = { name = it },
                         label = { Text("Store Name") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -95,6 +108,7 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                         value = description,
                         onValueChange = { description = it },
                         label = { Text("Store Description") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -104,6 +118,7 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                         value = category,
                         onValueChange = { category = it },
                         label = { Text("Store Category") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -113,36 +128,40 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                         value = phone,
                         onValueChange = { phone = it },
                         label = { Text("Business Phone Number") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
 
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = address,
                             onValueChange = { address = it },
                             label = { Text("Physical Store Address") },
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
 
                         OutlinedButton(
                             onClick = { showMapPicker = true },
-                            modifier = Modifier.fillMaxWidth()
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(50.dp)
                         ) {
-                            Icon(Icons.Default.LocationOn, contentDescription = null)
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Mark Store Location on Map")
+                            Text("Mark Store Location on Map", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
 
                 item {
-                    OutlinedTextField(
-                        value = imageUrl,
-                        onValueChange = { imageUrl = it },
-                        label = { Text("Store Image / Logo URL (Optional)") },
-                        modifier = Modifier.fillMaxWidth()
+                    ImagePicker(
+                        imageUrl = imageUrl,
+                        uploadState = imageUpload,
+                        onImagePicked = { image, token -> screenModel.uploadShopImage(image, token) },
+                        emptyLabel = "Add a store photo or logo",
+                        contentDescription = "Store photo"
                     )
                 }
 
@@ -172,15 +191,22 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                             }
                             navigator?.pop()
                         },
-                        enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth()
+                        enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank() && !isUploading,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().height(52.dp)
                     ) {
-                        Text(if (existingShop == null) "Submit Application" else "Save Changes")
+                        Text(
+                            when {
+                                isUploading -> "Uploading photo…"
+                                existingShop == null -> "Submit Application"
+                                else -> "Save Changes"
+                            },
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
 
-            // Map Picker Dialog for Store Location
             if (showMapPicker) {
                 StoreLocationMapPicker(
                     initialPosition = if (storeLat != null && storeLng != null) LatLng(storeLat!!, storeLng!!) else null,
@@ -224,8 +250,8 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
             Surface(modifier = Modifier.fillMaxSize()) {
                 Scaffold(
                     topBar = {
-                        TopAppBar(
-                            title = { Text("Select Store Location") },
+                        CenterAlignedTopAppBar(
+                            title = { Text("Select Store Location", fontWeight = FontWeight.Bold) },
                             navigationIcon = {
                                 IconButton(onClick = onDismiss) {
                                     Icon(Icons.Default.Close, contentDescription = "Close")
@@ -234,10 +260,14 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                         )
                     },
                     bottomBar = {
-                        Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
+                        Surface(
+                            tonalElevation = 8.dp,
+                            shadowElevation = 8.dp,
+                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                        ) {
                             Column(
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Text(
                                     text = when {
@@ -245,14 +275,16 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                                         resolvedAddress.isBlank() -> "Resolving address..."
                                         else -> resolvedAddress
                                     },
-                                    style = MaterialTheme.typography.bodyMedium
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
                                 )
                                 Button(
                                     onClick = { pickedLocation?.let { onConfirm(it, resolvedAddress) } },
                                     enabled = pickedLocation != null && resolvedAddress.isNotBlank(),
-                                    modifier = Modifier.fillMaxWidth()
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth().height(50.dp)
                                 ) {
-                                    Text("Confirm Location")
+                                    Text("Confirm Location", fontWeight = FontWeight.Bold)
                                 }
                             }
                         }

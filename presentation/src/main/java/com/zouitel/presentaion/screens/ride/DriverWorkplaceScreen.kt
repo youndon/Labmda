@@ -1,6 +1,9 @@
 package com.zouitel.presentaion.screens.ride
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -11,7 +14,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -33,8 +39,8 @@ class DriverWorkplaceScreen : Screen {
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("Driver Workplace") },
+                CenterAlignedTopAppBar(
+                    title = { Text("Driver Workplace", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -66,48 +72,78 @@ class DriverWorkplaceScreen : Screen {
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("No Driver Service Registered", style = MaterialTheme.typography.titleLarge)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.DirectionsCar,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text("No Driver Profile Registered", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Register your vehicle profile to start accepting ride requests.",
+                            "Register your vehicle profile to start accepting ride requests and earning.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { showAddEditDialog = true }) {
-                            Text("Apply Now")
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = { showAddEditDialog = true },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("Apply for Driver Service", fontWeight = FontWeight.Bold)
                         }
                     }
                 } else {
-                    Column(
+                    LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Button(
-                            onClick = { navigator?.push(DriverDashboardScreen()) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Go to Driver Dashboard")
-                        }
-
-                        HorizontalDivider()
-
-                        // User profile info summary
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(text = profile.fullName.ifBlank { "User Profile" }, style = MaterialTheme.typography.titleMedium)
-                                Text(text = "Phone: ${profile.phoneNumber?.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        item {
+                            Button(
+                                onClick = { navigator?.push(DriverDashboardScreen()) },
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("Open Driver Dashboard", fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        Text("Driver Account Info", style = MaterialTheme.typography.titleMedium)
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(text = profile.fullName.ifBlank { "User Profile" }, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                    Text(text = "Phone: ${profile.phoneNumber?.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
 
-                        DriverServiceCard(
-                            account = driverAccount!!,
-                            onEdit = { showAddEditDialog = true },
-                            onDelete = { screenModel.deleteDriverService() },
-                            onOnlineChanged = { screenModel.updateOnlineStatus(it) }
-                        )
+                        item {
+                            Text("Driver Account Info", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        }
+
+                        item {
+                            DriverServiceCard(
+                                account = driverAccount!!,
+                                onEdit = { showAddEditDialog = true },
+                                onDelete = { screenModel.deleteDriverService() },
+                                onOnlineChanged = { screenModel.updateOnlineStatus(it) }
+                            )
+                        }
                     }
                 }
 
@@ -141,13 +177,15 @@ class DriverWorkplaceScreen : Screen {
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -155,30 +193,42 @@ class DriverWorkplaceScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "Ride Service", style = MaterialTheme.typography.titleMedium)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(text = "Ride Service", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                     }
 
-                    Badge(
-                        containerColor = when (account.status) {
-                            Status.APPROVED -> MaterialTheme.colorScheme.primaryContainer
-                            Status.PENDING -> MaterialTheme.colorScheme.tertiaryContainer
-                            else -> MaterialTheme.colorScheme.errorContainer
-                        }
+                    val (statusColor, containerColor) = when (account.status) {
+                        Status.APPROVED -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primaryContainer
+                        Status.PENDING -> MaterialTheme.colorScheme.tertiary to MaterialTheme.colorScheme.tertiaryContainer
+                        else -> MaterialTheme.colorScheme.error to MaterialTheme.colorScheme.errorContainer
+                    }
+
+                    Surface(
+                        color = containerColor,
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = account.status.name,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = statusColor
                         )
                     }
                 }
 
-                HorizontalDivider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                 val v = account.vehicleInfo
-                Text(text = "Vehicle: ${v?.color ?: ""} ${v?.make ?: ""} ${v?.model ?: ""} (${v?.type?.name ?: ""})", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Vehicle: ${v?.color ?: ""} ${v?.make ?: ""} ${v?.model ?: ""} (${v?.type?.name ?: ""})", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text(text = "License Plate: ${v?.licensePlate ?: "N/A"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
 
                 if (account.status == Status.APPROVED) {
@@ -189,15 +239,15 @@ class DriverWorkplaceScreen : Screen {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (account.isOnline) "Ready for rides" else "Offline",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = if (account.isOnline) "Online & Ready for Rides" else "Offline",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                             color = if (account.isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                         )
                         Switch(checked = account.isOnline, onCheckedChange = onOnlineChanged)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -205,7 +255,7 @@ class DriverWorkplaceScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit Driver Service")
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Driver Service", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick = onDelete) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete Driver Service", tint = MaterialTheme.colorScheme.error)
@@ -231,11 +281,12 @@ class DriverWorkplaceScreen : Screen {
 
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(if (account == null) "Register Driver Service" else "Edit Driver Service") },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(if (account == null) "Register Driver Service" else "Edit Driver Service", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     ExposedDropdownMenuBox(
                         expanded = expandedDropdown,
@@ -246,6 +297,7 @@ class DriverWorkplaceScreen : Screen {
                             onValueChange = {},
                             readOnly = true,
                             label = { Text("Vehicle Type") },
+                            shape = RoundedCornerShape(12.dp),
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
                             modifier = Modifier
                                 .menuAnchor(
@@ -275,6 +327,7 @@ class DriverWorkplaceScreen : Screen {
                         value = make,
                         onValueChange = { make = it },
                         label = { Text("Vehicle Make (e.g. Toyota)") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -282,6 +335,7 @@ class DriverWorkplaceScreen : Screen {
                         value = model,
                         onValueChange = { model = it },
                         label = { Text("Vehicle Model (e.g. Corolla)") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -289,6 +343,7 @@ class DriverWorkplaceScreen : Screen {
                         value = color,
                         onValueChange = { color = it },
                         label = { Text("Vehicle Color") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -296,6 +351,7 @@ class DriverWorkplaceScreen : Screen {
                         value = licensePlate,
                         onValueChange = { licensePlate = it },
                         label = { Text("License Plate Number") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -305,9 +361,10 @@ class DriverWorkplaceScreen : Screen {
                     onClick = {
                         onConfirm(selectedVehicleType, make, model, color, licensePlate)
                     },
-                    enabled = licensePlate.isNotBlank() && make.isNotBlank() && model.isNotBlank()
+                    enabled = licensePlate.isNotBlank() && make.isNotBlank() && model.isNotBlank(),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text(if (account == null) "Submit Application" else "Save Changes")
+                    Text(if (account == null) "Submit Application" else "Save Changes", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

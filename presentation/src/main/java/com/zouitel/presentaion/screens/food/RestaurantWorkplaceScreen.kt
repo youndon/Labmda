@@ -1,13 +1,14 @@
 package com.zouitel.presentaion.screens.food
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.HourglassEmpty
@@ -18,6 +19,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -28,6 +32,10 @@ import com.zouitel.presentaion.common.UserMode
 import androidx.compose.material.icons.filled.LocationOn
 import com.google.android.gms.maps.model.LatLng
 import com.zouitel.presentaion.common.LocationPickerDialog
+import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.ImagePicker
+import com.zouitel.presentaion.common.PickedImage
+import coil3.compose.AsyncImage
 
 class RestaurantWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -39,18 +47,18 @@ class RestaurantWorkplaceScreen : Screen {
         val restaurantInfo by screenModel.restaurantInfo.collectAsState()
         val meals by screenModel.meals.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val imageUpload by screenModel.imageUpload.collectAsState()
 
         var selectedRoleMode by remember(profile.foodMode) {
             mutableStateOf(profile.foodMode)
         }
 
         var isEditing by remember { mutableStateOf(false) }
-        val showFab = selectedRoleMode != UserMode.CLIENT && profile.foodStatus == Status.APPROVED && !isEditing
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text(if (isEditing) "Edit Restaurant Info" else "Food Portal Mode") },
+                CenterAlignedTopAppBar(
+                    title = { Text(if (isEditing) "Edit Restaurant Info" else "Food Portal Mode", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = {
                             if (isEditing) isEditing = false else navigator?.pop()
@@ -66,17 +74,6 @@ class RestaurantWorkplaceScreen : Screen {
                         }
                     }
                 )
-            },
-            floatingActionButton = {
-                if (showFab) {
-                    FloatingActionButton(
-                        onClick = {
-                            navigator?.push(MealWorkplaceScreen(restaurantId = restaurantInfo.id.ifBlank { profile.uid }))
-                        }
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Meal")
-                    }
-                }
             }
         ) { paddingValues ->
             Column(
@@ -89,7 +86,7 @@ class RestaurantWorkplaceScreen : Screen {
                 if (!isEditing) {
                     Text(
                         text = "Select Portal Mode",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
 
@@ -121,7 +118,7 @@ class RestaurantWorkplaceScreen : Screen {
                         }
                     }
 
-                    HorizontalDivider()
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 }
 
                 Box(modifier = Modifier.weight(1f)) {
@@ -137,6 +134,9 @@ class RestaurantWorkplaceScreen : Screen {
                                 initialLat = restaurantInfo.latitude,
                                 initialLng = restaurantInfo.longitude,
                                 submitButtonText = "Save Changes",
+                                uploadState = imageUpload,
+                                onUploadImage = { image, token -> screenModel.uploadRestaurantImage(image, token) },
+                                onUploadHandled = { screenModel.resetImageUpload() },
                                 onSubmit = { name, img, fee, time, phone, address, lat, lng ->
                                     screenModel.submitApplication(name, img, fee, time, phone, address, lat, lng)
                                     isEditing = false
@@ -155,6 +155,9 @@ class RestaurantWorkplaceScreen : Screen {
                                 when (profile.foodStatus) {
                                     Status.NONE -> RestaurantApplicationForm(
                                         initialPhone = profile.phoneNumber ?: "",
+                                        uploadState = imageUpload,
+                                        onUploadImage = { image, token -> screenModel.uploadRestaurantImage(image, token) },
+                                        onUploadHandled = { screenModel.resetImageUpload() },
                                         onSubmit = { name, img, fee, time, phone, address, lat, lng ->
                                             screenModel.submitApplication(name, img, fee, time, phone, address, lat, lng)
                                         }
@@ -163,9 +166,14 @@ class RestaurantWorkplaceScreen : Screen {
                                     Status.REJECTED -> Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { RejectedStatusView() }
                                     Status.APPROVED -> ApprovedWorkplaceView(
                                         restaurantInfo = restaurantInfo,
-                                        meals = meals,
+                                        mealCount = meals.size,
                                         isOnline = profile.isFoodServiceOnline,
-                                        onOnlineChanged = { screenModel.updateOnlineStatus(it) }
+                                        onOnlineChanged = { screenModel.updateOnlineStatus(it) },
+                                        onManageMenu = {
+                                            navigator?.push(
+                                                RestaurantDashboardScreen(restaurantInfo.id.ifBlank { profile.uid })
+                                            )
+                                        }
                                     )
                                     else -> {
                                         Text("Unknown Status")
@@ -185,32 +193,44 @@ class RestaurantWorkplaceScreen : Screen {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onExploreFood),
-            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Fastfood,
-                    contentDescription = null,
-                    modifier = Modifier.size(56.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Client Mode Active", style = MaterialTheme.typography.titleLarge)
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Fastfood,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                Text("Client Mode Active", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
                 Text(
                     "Browse restaurants, manage your food cart, and place orders in real-time.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
                 Button(
                     onClick = onExploreFood,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Explore Food Catalog")
+                    Text("Explore Food Catalog", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -227,6 +247,9 @@ class RestaurantWorkplaceScreen : Screen {
         initialLat: Double = 0.0,
         initialLng: Double = 0.0,
         submitButtonText: String = "Submit Application",
+        uploadState: ImageUploadState,
+        onUploadImage: (PickedImage, DriveTokenProvider) -> Unit,
+        onUploadHandled: () -> Unit,
         onSubmit: (String, String, Double, Int, String, String, Double, Double) -> Unit
     ) {
         var restaurantName by remember { mutableStateOf(initialName) }
@@ -239,32 +262,50 @@ class RestaurantWorkplaceScreen : Screen {
             mutableStateOf(if (initialLat != 0.0 || initialLng != 0.0) LatLng(initialLat, initialLng) else null)
         }
         var showPicker by remember { mutableStateOf(false) }
+        val isUploading = uploadState is ImageUploadState.Uploading
+
+        LaunchedEffect(uploadState) {
+            if (uploadState is ImageUploadState.Success) {
+                imageUrl = uploadState.url
+                onUploadHandled()
+            }
+        }
+
+        DisposableEffect(Unit) {
+            onDispose { onUploadHandled() }
+        }
 
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
             item {
-                Text("Restaurant Details", style = MaterialTheme.typography.headlineSmall)
-                Text("Provide your restaurant information for management and review.", style = MaterialTheme.typography.bodyMedium)
+                Text("Restaurant Details", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+                Text("Provide your restaurant information for management and review.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             item {
                 OutlinedTextField(
                     value = restaurantName, onValueChange = { restaurantName = it },
-                    label = { Text("Restaurant Name") }, modifier = Modifier.fillMaxWidth()
+                    label = { Text("Restaurant Name") },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
             item {
-                OutlinedTextField(
-                    value = imageUrl, onValueChange = { imageUrl = it },
-                    label = { Text("Image URL") }, modifier = Modifier.fillMaxWidth()
+                ImagePicker(
+                    imageUrl = imageUrl,
+                    uploadState = uploadState,
+                    onImagePicked = onUploadImage,
+                    emptyLabel = "Add a restaurant photo",
+                    contentDescription = "Restaurant photo"
                 )
             }
             item {
                 OutlinedTextField(
                     value = managerPhone, onValueChange = { managerPhone = it },
                     label = { Text("Manager Phone Number") },
+                    shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -273,6 +314,7 @@ class RestaurantWorkplaceScreen : Screen {
                 OutlinedTextField(
                     value = deliveryFee, onValueChange = { deliveryFee = it },
                     label = { Text("Delivery Fee ($)") },
+                    shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -281,13 +323,18 @@ class RestaurantWorkplaceScreen : Screen {
                 OutlinedTextField(
                     value = estimatedTime, onValueChange = { estimatedTime = it },
                     label = { Text("Estimated Time (Minutes)") },
+                    shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
 
             item {
-                OutlinedButton(onClick = { showPicker = true }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { showPicker = true },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Icon(Icons.Default.LocationOn, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(if (location == null) "Set restaurant location on map" else "Change restaurant location")
@@ -299,6 +346,7 @@ class RestaurantWorkplaceScreen : Screen {
                     OutlinedTextField(
                         value = address, onValueChange = { address = it },
                         label = { Text("Restaurant address (couriers pick up here)") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -319,11 +367,12 @@ class RestaurantWorkplaceScreen : Screen {
                             loc.longitude
                         )
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
                     enabled = restaurantName.isNotBlank() && managerPhone.isNotBlank() &&
-                            location != null && address.isNotBlank()
+                            location != null && address.isNotBlank() && !isUploading
                 ) {
-                    Text(submitButtonText)
+                    Text(if (isUploading) "Uploading photo…" else submitButtonText, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -345,42 +394,43 @@ class RestaurantWorkplaceScreen : Screen {
 
     @Composable
     private fun PendingStatusView() {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Default.HourglassEmpty, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Application Pending", style = MaterialTheme.typography.titleLarge)
-            Text("An admin is reviewing your restaurant application. Please check back later.", style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Application Pending", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+            Text("An admin is reviewing your restaurant application. Please check back later.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 
     @Composable
     private fun RejectedStatusView() {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.error)
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("Application Rejected", style = MaterialTheme.typography.titleLarge)
-            Text("Unfortunately, your restaurant application was not approved.", style = MaterialTheme.typography.bodyMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Application Rejected", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+            Text("Unfortunately, your restaurant application was not approved.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 
     @Composable
     private fun ApprovedWorkplaceView(
         restaurantInfo: ManagedRestaurantInfo,
-        meals: List<Meal>,
+        mealCount: Int,
         isOnline: Boolean,
-        onOnlineChanged: (Boolean) -> Unit
+        onOnlineChanged: (Boolean) -> Unit,
+        onManageMenu: () -> Unit
     ) {
-        val navigator = LocalNavigator.current
-        val profile by rememberScreenModel { RestaurantWorkplaceScreenModel() }.profile.collectAsState()
-
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 80.dp)
+            contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             item {
-                // Restaurant Online Availability Switch Card
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -389,10 +439,10 @@ class RestaurantWorkplaceScreen : Screen {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Restaurant, contentDescription = null)
+                            Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Restaurant Status", style = MaterialTheme.typography.titleMedium)
+                                Text("Restaurant Status", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                 Text(
                                     text = if (isOnline) "Accepting Orders" else "Offline / Closed",
                                     style = MaterialTheme.typography.bodySmall,
@@ -406,20 +456,33 @@ class RestaurantWorkplaceScreen : Screen {
             }
 
             item {
-                // Restaurant Information Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        if (restaurantInfo.imageUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = restaurantInfo.imageUrl,
+                                contentDescription = "Restaurant photo",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+
                         Text(
                             text = restaurantInfo.name.ifBlank { "My Restaurant" },
-                            style = MaterialTheme.typography.headlineSmall
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                         )
-                        HorizontalDivider()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Text(
                             text = "Delivery Fee: $${"%.2f".format(restaurantInfo.deliveryFee)}",
                             style = MaterialTheme.typography.bodyMedium
@@ -430,7 +493,7 @@ class RestaurantWorkplaceScreen : Screen {
                         )
                         Text(
                             text = if (restaurantInfo.address.isNotBlank()) "Address: ${restaurantInfo.address}"
-                            else "Location not set. Tap the edit icon to set it on the map.",
+                            else "Location not set. Tap edit to set it on the map.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (restaurantInfo.address.isNotBlank()) MaterialTheme.colorScheme.onSurface
                             else MaterialTheme.colorScheme.error
@@ -447,66 +510,52 @@ class RestaurantWorkplaceScreen : Screen {
             }
 
             item {
-                Text(
-                    text = "Restaurant Menu (${meals.size})",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-            if (meals.isEmpty()) {
-                item {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text("No meals added yet. Tap + to add items to your menu.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            } else {
-                items(meals, key = { it.id }) { meal ->
-                    MealItemCard(
-                        meal = meal,
-                        onClick = {
-                            navigator?.push(
-                                MealWorkplaceScreen(
-                                    restaurantId = restaurantInfo.id.ifBlank { profile.uid },
-                                    meal = meal
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onManageMenu),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Fastfood, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text("Manage Menu", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                Text(
+                                    text = if (mealCount == 0) "No meals yet. Tap to add your first meal."
+                                    else "$mealCount meals on your menu. Tap to view or edit.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                            )
+                            }
                         }
-                    )
-                }
-            }
-        }
-    }
-
-    @Composable
-    private fun MealItemCard(meal: Meal, onClick: () -> Unit) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = meal.name, style = MaterialTheme.typography.titleMedium)
-                    if (meal.description.isNotBlank()) {
-                        Text(text = meal.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Badge {
-                        Text(text = meal.category.name, style = MaterialTheme.typography.labelSmall)
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
-                Text(
-                    text = "$${"%.2f".format(meal.basePrice)}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
             }
         }
     }

@@ -29,10 +29,13 @@ import android.location.Geocoder
 import android.location.Location
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -63,13 +66,10 @@ class DeliveryDashboardScreen : Screen {
 
         val activeDeliveries by screenModel.activeDeliveries.collectAsState()
         val completedDeliveries by screenModel.completedDeliveries.collectAsState()
-//        val orderPoints by screenModel.orderPoints.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
-
 
         val cameraPositionState = rememberCameraPositionState()
 
-        // --- Courier fromLocation ---
         var courier by remember { mutableStateOf<LatLng?>(null) }
         var hasCentered by remember { mutableStateOf(false) }
         var hasLocationPermission by remember {
@@ -111,24 +111,11 @@ class DeliveryDashboardScreen : Screen {
             )
         }
 
-        // --- Order positions: stored coordinates first, geocoded address as fallback ---
-//        val geocoded = remember { mutableStateMapOf<String, LatLng>() }
-//        val triedGeocoding = remember { mutableSetOf<String>() }
-//        LaunchedEffect(activeDeliveries, orderPoints) {
-//            activeDeliveries.forEach { o ->
-//                if (o.id in orderPoints || o.fromLocation.isBlank() || !triedGeocoding.add(o.id)) return@forEach
-//                forwardGeocode(context, o.fromLocation)?.let { geocoded[o.id] = it }
-//            }
-//        }
-//        fun pointOf(orderId: String): LatLng? =
-//            orderPoints[orderId]?.let { LatLng(it.lat, it.lng) } ?: geocoded[orderId]
-
         fun pointOf(o: Order): LatLng? =
             if (o.dropoffLat != 0.0 || o.dropoffLng != 0.0) LatLng(o.dropoffLat, o.dropoffLng) else null
         fun pickupOf(o: Order): LatLng? =
             if (o.pickupLat != 0.0 || o.pickupLng != 0.0) LatLng(o.pickupLat, o.pickupLng) else null
 
-        // If we never get the courier's fromLocation, frame the orders instead
         val mappedCount = activeDeliveries.count { pointOf(it) != null }
         LaunchedEffect(mappedCount, courier) {
             if (hasCentered || courier != null || mappedCount == 0) return@LaunchedEffect
@@ -149,15 +136,16 @@ class DeliveryDashboardScreen : Screen {
         val selectedOrder = activeDeliveries.firstOrNull { it.id == selectedOrderId }
 
         val sheetScaffoldState = rememberBottomSheetScaffoldState()
-        val peekHeight = 110.dp
+        val peekHeight = 120.dp
         val currentList = if (selectedTab == 0) activeDeliveries else completedDeliveries
 
         BottomSheetScaffold(
             scaffoldState = sheetScaffoldState,
             sheetPeekHeight = peekHeight,
+            sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             topBar = {
-                TopAppBar(
-                    title = { Text("Delivery Portal Dashboard") },
+                CenterAlignedTopAppBar(
+                    title = { Text("Delivery Dashboard", style = MaterialTheme.typography.titleMedium) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -166,54 +154,69 @@ class DeliveryDashboardScreen : Screen {
                 )
             },
             sheetContent = {
-                TabRow(selectedTabIndex = selectedTab) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = {
-                            selectedTab = 0
-                            scope.launch { sheetScaffoldState.bottomSheetState.expand() }
-                        },
-                        text = { Text("Available (${activeDeliveries.size})") }
-                    )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = {
-                            selectedTab = 1
-                            scope.launch { sheetScaffoldState.bottomSheetState.expand() }
-                        },
-                        text = { Text("Delivered (${completedDeliveries.size})") }
-                    )
-                }
-
-                when {
-                    isLoading -> Box(
-                        modifier = Modifier.fillMaxWidth().height(160.dp),
-                        contentAlignment = Alignment.Center
-                    ) { CircularProgressIndicator() }
-
-                    currentList.isEmpty() -> Box(
-                        modifier = Modifier.fillMaxWidth().height(160.dp),
-                        contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Modern Segmented Pill Tabs
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            if (selectedTab == 0) "No orders currently out for delivery."
-                            else "No completed deliveries."
-                        )
+                        SegmentedButton(
+                            selected = selectedTab == 0,
+                            onClick = {
+                                selectedTab = 0
+                                scope.launch { sheetScaffoldState.bottomSheetState.expand() }
+                            },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                        ) {
+                            Text("Available Tasks (${activeDeliveries.size})")
+                        }
+                        SegmentedButton(
+                            selected = selectedTab == 1,
+                            onClick = {
+                                selectedTab = 1
+                                scope.launch { sheetScaffoldState.bottomSheetState.expand() }
+                            },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                        ) {
+                            Text("Completed (${completedDeliveries.size})")
+                        }
                     }
 
-                    else -> LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        items(currentList, key = { it.id }) { orderItem ->
-                            DeliveryCardItem(
-                                order = orderItem,
-                                isCompleted = selectedTab == 1,
-                                onAccept = { screenModel.claimCourierTask(orderItem) },
-                                onReject = { screenModel.rejectCourierTask(orderItem) },
-                                onMarkDelivered = { screenModel.markCourierOrderDelivered(orderItem) }
+                    when {
+                        isLoading -> Box(
+                            modifier = Modifier.fillMaxWidth().height(180.dp),
+                            contentAlignment = Alignment.Center
+                        ) { CircularProgressIndicator() }
+
+                        currentList.isEmpty() -> Box(
+                            modifier = Modifier.fillMaxWidth().height(180.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (selectedTab == 0) "No delivery tasks available." else "No completed deliveries yet.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+
+                        else -> LazyColumn(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            contentPadding = PaddingValues(bottom = 24.dp)
+                        ) {
+                            items(currentList, key = { it.id }) { orderItem ->
+                                DeliveryCardItem(
+                                    order = orderItem,
+                                    isCompleted = selectedTab == 1,
+                                    onAccept = { screenModel.claimCourierTask(orderItem) },
+                                    onReject = { screenModel.rejectCourierTask(orderItem) },
+                                    onMarkDelivered = { screenModel.markCourierOrderDelivered(orderItem) }
+                                )
+                            }
                         }
                     }
                 }
@@ -228,7 +231,7 @@ class DeliveryDashboardScreen : Screen {
                         myLocationButtonEnabled = false,
                         zoomControlsEnabled = false
                     ),
-                    contentPadding = PaddingValues(bottom = peekHeight) // keep the Google logo above the sheet
+                    contentPadding = PaddingValues(bottom = peekHeight)
                 ) {
                     activeDeliveries.forEach { order ->
                         val pos = pointOf(order) ?: return@forEach
@@ -239,8 +242,8 @@ class DeliveryDashboardScreen : Screen {
                                 icon = BitmapDescriptorFactory.defaultMarker(
                                     when {
                                         selectedOrderId == order.id -> BitmapDescriptorFactory.HUE_AZURE
-                                        order.deliveryId.isBlank() -> BitmapDescriptorFactory.HUE_ORANGE // open
-                                        else -> BitmapDescriptorFactory.HUE_GREEN                        // mine
+                                        order.deliveryId.isBlank() -> BitmapDescriptorFactory.HUE_ORANGE
+                                        else -> BitmapDescriptorFactory.HUE_GREEN
                                     }
                                 ),
                                 onClick = {
@@ -259,9 +262,10 @@ class DeliveryDashboardScreen : Screen {
                     shadowElevation = 4.dp
                 ) {
                     Text(
-                        "$mappedCount of ${activeDeliveries.size} orders on map",
+                        "$mappedCount of ${activeDeliveries.size} orders mapped",
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelLarge
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
@@ -269,12 +273,11 @@ class DeliveryDashboardScreen : Screen {
                     onClick = { locateMe() },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(end = 16.dp, bottom = peekHeight + 16.dp) // sits just above the collapsed sheet
+                        .padding(end = 16.dp, bottom = peekHeight + 16.dp)
                 ) {
-                    Icon(Icons.Default.MyLocation, contentDescription = "My fromLocation")
+                    Icon(Icons.Default.MyLocation, contentDescription = "My location")
                 }
 
-                // Detail popup when a marker is tapped
                 if (selectedOrder != null) {
                     ModalBottomSheet(onDismissRequest = { selectedOrderId = null }) {
                         Column(
@@ -282,14 +285,14 @@ class DeliveryDashboardScreen : Screen {
                                 .verticalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp)
                                 .padding(bottom = 24.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             val from = courier
                             val pickupPt = pickupOf(selectedOrder)
                             if (from != null && pickupPt != null) {
                                 val km = distanceKm(from, pickupPt)
                                 val eta = maxOf(1, Math.ceil(km / 25.0 * 60).toInt())
-                                Text("${"%.1f".format(km)} km to pickup · ~$eta min", style = MaterialTheme.typography.labelLarge)
+                                Text("${"%.1f".format(km)} km to pickup · ~$eta min away", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                             }
                             DeliveryCardItem(
                                 order = selectedOrder,
@@ -324,7 +327,9 @@ class DeliveryDashboardScreen : Screen {
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
@@ -333,53 +338,66 @@ class DeliveryDashboardScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.DirectionsBike,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = order.sourceName.ifBlank { "Store / Restaurant" },
-                            style = MaterialTheme.typography.titleMedium
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.DirectionsBike,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = order.sourceName.ifBlank { "Store / Restaurant" },
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "Order #${order.id.takeLast(6).uppercase()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
 
-                    Badge(containerColor = MaterialTheme.colorScheme.primaryContainer) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
                         Text(
-                            "Earn $${"%.2f".format(order.deliveryFee)}",
-                            modifier = Modifier.padding(4.dp),
-                            style = MaterialTheme.typography.labelLarge
+                            "+$${"%.2f".format(order.deliveryFee)}",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Order #${order.id.takeLast(6).uppercase()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-                Row(verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Column {
-                        Text("Pickup", style = MaterialTheme.typography.labelLarge)
-                        Text(order.pickupLocation.ifBlank { order.sourceName }, style = MaterialTheme.typography.bodyMedium)
+                // Pickup & Drop-off Flow Layout
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Pickup", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(order.pickupLocation.ifBlank { order.sourceName }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        }
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.Top) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Column {
-                        Text("Drop-off", style = MaterialTheme.typography.labelLarge)
-                        Text(order.dropoffLocation.ifBlank { "Address not specified" }, style = MaterialTheme.typography.bodyMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Drop-off", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(order.dropoffLocation.ifBlank { "Address not specified" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        }
                     }
                 }
 
@@ -387,30 +405,30 @@ class DeliveryDashboardScreen : Screen {
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
                                 Icons.Default.ShoppingBag,
                                 contentDescription = null,
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Products (${order.items.sumOf { it.quantity }} items):",
-                                style = MaterialTheme.typography.labelLarge,
+                                text = "Package Contents (${order.items.sumOf { it.quantity }} items)",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
                         if (order.items.isEmpty()) {
                             Text(
-                                "No item details available for this package.",
+                                "No item details available.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -422,15 +440,8 @@ class DeliveryDashboardScreen : Screen {
                                         .padding(vertical = 2.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(
-                                        text = "• ${item.quantity}x ${item.name}",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Text(
-                                        text = "$${"%.2f".format(item.totalPrice)}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Text(text = "${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
+                                    Text(text = "$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -441,12 +452,13 @@ class DeliveryDashboardScreen : Screen {
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Total Price to Collect:", style = MaterialTheme.typography.titleSmall)
+                    Text("Total to collect:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         "$${"%.2f".format(order.totalPrice)}",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -461,9 +473,10 @@ class DeliveryDashboardScreen : Screen {
                         ) {
                             Button(
                                 onClick = onAccept,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.Check, contentDescription = null)
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Accept Task")
                             }
@@ -471,9 +484,10 @@ class DeliveryDashboardScreen : Screen {
                             OutlinedButton(
                                 onClick = onReject,
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null)
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Decline")
                             }
@@ -483,19 +497,21 @@ class DeliveryDashboardScreen : Screen {
                             Button(
                                 onClick = onMarkDelivered,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null)
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Mark Delivered")
+                                Text("Mark as Delivered")
                             }
 
                             OutlinedButton(
                                 onClick = onReject,
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null)
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("Release Task")
                             }
@@ -509,12 +525,13 @@ class DeliveryDashboardScreen : Screen {
                         Icon(
                             Icons.Default.CheckCircle,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.outline
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
                         )
                         Text(
                             "Delivered Successfully",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.outline
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -528,14 +545,3 @@ private fun distanceKm(a: LatLng, b: LatLng): Double {
     Location.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude, result)
     return result[0] / 1000.0
 }
-
-private suspend fun forwardGeocode(context: Context, address: String): LatLng? =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            @Suppress("DEPRECATION")
-            Geocoder(context, Locale.getDefault())
-                .getFromLocationName(address, 1)
-                ?.firstOrNull()
-                ?.let { LatLng(it.latitude, it.longitude) }
-        }.getOrNull()
-    }

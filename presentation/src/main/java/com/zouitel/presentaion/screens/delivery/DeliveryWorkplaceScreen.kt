@@ -1,6 +1,9 @@
 package com.zouitel.presentaion.screens.delivery
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -10,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -30,8 +35,8 @@ class DeliveryWorkplaceScreen : Screen {
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = { Text("Delivery Workplace") },
+                CenterAlignedTopAppBar(
+                    title = { Text("Delivery Workplace", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -63,48 +68,79 @@ class DeliveryWorkplaceScreen : Screen {
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text("No Delivery Service Registered", style = MaterialTheme.typography.titleLarge)
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.DirectionsBike,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text("No Delivery Account Registered", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            "Register your delivery profile to start accepting delivery tasks.",
+                            "Register your delivery profile to start accepting delivery tasks and earning.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { showAddEditDialog = true }) {
-                            Text("Apply Now")
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = { showAddEditDialog = true },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Text("Apply for Delivery Service")
                         }
                     }
                 } else {
-                    Column(
+                    LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Button(
-                            onClick = { navigator?.push(DeliveryDashboardScreen()) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Go to Active Orders Dashboard")
-                        }
-
-                        HorizontalDivider()
-
-                        // User profile info summary
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(text = profile.fullName.ifBlank { "User Profile" }, style = MaterialTheme.typography.titleMedium)
-                                Text(text = "Phone: ${profile.phoneNumber?.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        item {
+                            Button(
+                                onClick = { navigator?.push(DeliveryDashboardScreen()) },
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("Open Active Orders Dashboard", fontWeight = FontWeight.Bold)
                             }
                         }
 
-                        Text("Delivery Account Info", style = MaterialTheme.typography.titleMedium)
+                        // Courier Profile Summary Card
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(text = profile.fullName.ifBlank { "Courier Profile" }, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                    Text(text = "Phone: ${profile.phoneNumber?.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
 
-                        DeliveryServiceCard(
-                            service = deliveryAccount!!,
-                            onEdit = { showAddEditDialog = true },
-                            onDelete = { screenModel.deleteDeliveryService() },
-                            onOnlineChanged = { screenModel.updateOnlineStatus(it) }
-                        )
+                        item {
+                            Text("Delivery Account Info", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        }
+
+                        item {
+                            DeliveryServiceCard(
+                                service = deliveryAccount!!,
+                                onEdit = { showAddEditDialog = true },
+                                onDelete = { screenModel.deleteDeliveryService() },
+                                onOnlineChanged = { screenModel.updateOnlineStatus(it) }
+                            )
+                        }
                     }
                 }
 
@@ -136,13 +172,15 @@ class DeliveryWorkplaceScreen : Screen {
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -150,27 +188,39 @@ class DeliveryWorkplaceScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DirectionsBike, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = service.deliveryType.name, style = MaterialTheme.typography.titleMedium)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.DirectionsBike, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(text = service.deliveryType.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                     }
 
-                    Badge(
-                        containerColor = when (service.status) {
-                            Status.APPROVED -> MaterialTheme.colorScheme.primaryContainer
-                            Status.PENDING -> MaterialTheme.colorScheme.tertiaryContainer
-                            else -> MaterialTheme.colorScheme.errorContainer
-                        }
+                    val (statusColor, containerColor) = when (service.status) {
+                        Status.APPROVED -> MaterialTheme.colorScheme.primary to MaterialTheme.colorScheme.primaryContainer
+                        Status.PENDING -> MaterialTheme.colorScheme.tertiary to MaterialTheme.colorScheme.tertiaryContainer
+                        else -> MaterialTheme.colorScheme.error to MaterialTheme.colorScheme.errorContainer
+                    }
+
+                    Surface(
+                        color = containerColor,
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
                             text = service.status.name,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = statusColor
                         )
                     }
                 }
 
-                HorizontalDivider()
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                 Text(text = "Vehicle Type: ${service.vehicleInfo?.type}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Document Link: ${service.identityDocumentLink.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
@@ -183,15 +233,15 @@ class DeliveryWorkplaceScreen : Screen {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (service.isOnline) "Ready for deliveries" else "Offline",
-                            style = MaterialTheme.typography.bodySmall,
+                            text = if (service.isOnline) "Online & Ready for Deliveries" else "Offline",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                             color = if (service.isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                         )
                         Switch(checked = service.isOnline, onCheckedChange = onOnlineChanged)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -199,7 +249,7 @@ class DeliveryWorkplaceScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit Service")
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Service", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     IconButton(onClick = onDelete) {
                         Icon(Icons.Default.Delete, contentDescription = "Delete Service", tint = MaterialTheme.colorScheme.error)
@@ -223,11 +273,12 @@ class DeliveryWorkplaceScreen : Screen {
 
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(if (service == null) "Register Delivery Service" else "Edit Delivery Service") },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(if (service == null) "Register Delivery Service" else "Edit Delivery Service", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     ExposedDropdownMenuBox(
                         expanded = expandedDropdown,
@@ -239,6 +290,7 @@ class DeliveryWorkplaceScreen : Screen {
                             readOnly = true,
                             label = { Text("Delivery Service Type") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDropdown) },
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .menuAnchor(
                                     type = ExposedDropdownMenuAnchorType.PrimaryEditable,
@@ -267,6 +319,7 @@ class DeliveryWorkplaceScreen : Screen {
                         value = vehicleType,
                         onValueChange = { vehicleType = it },
                         label = { Text("Vehicle Type (e.g., Bike, Car)") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -274,6 +327,7 @@ class DeliveryWorkplaceScreen : Screen {
                         value = documentLink,
                         onValueChange = { documentLink = it },
                         label = { Text("ID / Document Link") },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -283,7 +337,8 @@ class DeliveryWorkplaceScreen : Screen {
                     onClick = {
                         onConfirm(selectedServiceType, vehicleType, documentLink)
                     },
-                    enabled = vehicleType.isNotBlank()
+                    enabled = vehicleType.isNotBlank(),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(if (service == null) "Submit Application" else "Save Changes")
                 }

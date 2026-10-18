@@ -10,6 +10,7 @@ import coil3.compose.setSingletonImageLoaderFactory
 import coil3.network.ktor3.KtorNetworkFetcherFactory
 import com.mmk.kmpauth.google.GoogleAuthCredentials
 import com.mmk.kmpauth.google.GoogleAuthProvider
+import com.zouitel.presentaion.common.AppTheme
 import com.zouitel.presentaion.screens.account.LogInScreen
 
 class MainActivity : ComponentActivity() {
@@ -24,14 +25,15 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
+            AppTheme {
+                setSingletonImageLoaderFactory { context ->
+                    ImageLoader.Builder(context)
+                        .components { add(KtorNetworkFetcherFactory()) }
+                        .build()
+                }
 
-            setSingletonImageLoaderFactory { context ->
-                ImageLoader.Builder(context)
-                    .components { add(KtorNetworkFetcherFactory()) }
-                    .build()
+                Navigator(LogInScreen())
             }
-
-            Navigator(LogInScreen())
         }
     }
 }

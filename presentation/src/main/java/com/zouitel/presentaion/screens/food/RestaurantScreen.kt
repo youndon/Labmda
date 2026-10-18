@@ -1,9 +1,13 @@
 package com.zouitel.presentaion.screens.food
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -15,10 +19,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import coil3.compose.AsyncImage
 import com.google.android.gms.maps.model.LatLng
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.LocationPickerDialog
@@ -45,7 +55,6 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
             }
         }
 
-        // Checkout state
         var showOrderSheet by remember { mutableStateOf(false) }
         var showMapPicker by remember { mutableStateOf(false) }
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
@@ -60,97 +69,123 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                 LatLng(restaurant.latitude, restaurant.longitude) else null
         }
 
-        // Cart derived from the live menu (items that became unavailable drop out)
         val availableMeals = remember(meals) { meals.filter { it.isAvailable } }
         val cartLines = availableMeals.filter { (quantities[it.id] ?: 0) > 0 }
         val itemCount = cartLines.sumOf { quantities[it.id] ?: 0 }
         val subtotal = cartLines.sumOf { it.basePrice * (quantities[it.id] ?: 0) }
         val grandTotal = if (itemCount > 0) subtotal + restaurant.deliveryFee else 0.0
 
-        val groupedMeals = remember(availableMeals) { availableMeals.groupBy { it.category } }
+        val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+        val groupedMeals = remember(availableMeals) { availableMeals.groupBy { it.category }.toList() }
 
         Scaffold(
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                TopAppBar(
-                    title = { Text(restaurant.name) },
+                LargeFlexibleTopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                restaurant.name,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.headlineMedium
+                            )
+                            // Show details only when expanded (collapsedFraction close to 0)
+                            if (scrollBehavior.state.collapsedFraction < 0.5f) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.graphicsLayer {
+                                        alpha = 1f - (scrollBehavior.state.collapsedFraction * 2f).coerceIn(0f, 1f)
+                                    }
+                                ) {
+                                    Text(
+                                        "Fee: $${"%.2f".format(restaurant.deliveryFee)}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text("•", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "${restaurant.estimatedTimeMinutes} mins",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Surface(
+                                        color = if (restaurant.isOpen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            if (restaurant.isOpen) "Open" else "Closed",
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (restaurant.isOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
                     navigationIcon = {
-                        IconButton(onClick = { navigator?.pop() }) {
+                        FilledIconButton(
+                            onClick = { navigator?.pop() },
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            )
+                        ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
-                    }
+                    },
+                    scrollBehavior = scrollBehavior,
+                    colors = TopAppBarDefaults.largeTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                    ),
+                    modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                 )
             },
             bottomBar = {
                 if (itemCount > 0) {
-                    Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
+                    Surface(
+                        tonalElevation = 8.dp,
+                        shadowElevation = 8.dp,
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
                                 Text(
-                                    "$itemCount item(s)",
+                                    "$itemCount item(s) selected",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
                                     "$${"%.2f".format(grandTotal)}",
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
                             Button(
                                 onClick = { showOrderSheet = true },
-                                enabled = restaurant.isOpen
+                                enabled = restaurant.isOpen,
+                                modifier = Modifier.height(50.dp),
+                                shape = RoundedCornerShape(14.dp)
                             ) {
-                                Icon(Icons.Default.ReceiptLong, contentDescription = null)
+                                Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (restaurant.isOpen) "Review Order" else "Restaurant Closed")
+                                Text(if (restaurant.isOpen) "Review Order" else "Restaurant Closed", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
         ) { paddingValues ->
-            Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-
-                // Restaurant info header
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(restaurant.name, style = MaterialTheme.typography.titleLarge)
-                            Badge(
-                                containerColor = if (restaurant.isOpen) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.errorContainer
-                            ) {
-                                Text(
-                                    if (restaurant.isOpen) "Online" else "Offline",
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        }
-                        Text(
-                            "Delivery: $${"%.2f".format(restaurant.deliveryFee)} · ${restaurant.estimatedTimeMinutes} mins",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            restaurant.address.ifBlank { "Location not set" },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (restaurant.address.isBlank()) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+            Column(modifier = Modifier.fillMaxSize().padding(top = paddingValues.calculateTopPadding())) {
 
                 when {
                     isLoading -> Box(Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
@@ -158,29 +193,31 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     }
 
                     availableMeals.isEmpty() -> Box(Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
-                        Text("No meals available right now.")
+                        Text("No meals available right now.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
-                    else -> LazyColumn(
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         groupedMeals.forEach { (category, list) ->
-                            item(key = "header_${category.name}") {
-                                Text(
-                                    category.name.lowercase().replaceFirstChar { it.uppercase() },
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(top = 8.dp)
-                                )
-                            }
                             items(list, key = { it.id }) { meal ->
-                                MealRow(
+                                MealCard(
                                     meal = meal,
                                     quantity = quantities[meal.id] ?: 0,
                                     onAdd = { screenModel.addMeal(meal.id) },
-                                    onRemove = { screenModel.removeMeal(meal.id) }
+                                    onRemove = { screenModel.removeMeal(meal.id) },
+                                    onClick = {
+                                        navigator?.push(
+                                            MealScreen(
+                                                meal = meal,
+                                                onAddToOrderSheet = { screenModel.addMeal(meal.id) }
+                                            )
+                                        )
+                                    }
                                 )
                             }
                         }
@@ -189,7 +226,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
             }
         }
 
-        // ---------- Checkout bottom sheet ----------
+        // Checkout Bottom Sheet
         if (showOrderSheet) {
             ModalBottomSheet(onDismissRequest = { if (!isSubmitting) showOrderSheet = false }) {
                 Column(
@@ -198,10 +235,10 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp)
                         .padding(bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text("Your Order", style = MaterialTheme.typography.titleLarge)
-                    HorizontalDivider()
+                    Text("Review Your Order", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                     cartLines.forEach { meal ->
                         val qty = quantities[meal.id] ?: 0
@@ -211,10 +248,11 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(meal.name, style = MaterialTheme.typography.bodyLarge)
+                                Text(meal.name, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
                                 Text(
-                                    "$${"%.2f".format(meal.basePrice)} x $qty = $${"%.2f".format(meal.basePrice * qty)}",
-                                    style = MaterialTheme.typography.bodySmall
+                                    "$${"%.2f".format(meal.basePrice)} × $qty = $${"%.2f".format(meal.basePrice * qty)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -222,7 +260,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     screenModel.removeMeal(meal.id)
                                     if (itemCount <= 1) showOrderSheet = false
                                 }) { Icon(Icons.Default.Remove, contentDescription = "Decrease") }
-                                Text("$qty")
+                                Text("$qty", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
                                 IconButton(onClick = { screenModel.addMeal(meal.id) }) {
                                     Icon(Icons.Default.Add, contentDescription = "Increase")
                                 }
@@ -230,18 +268,15 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         }
                     }
 
-                    HorizontalDivider()
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    // Pickup = restaurant
-                    Row(verticalAlignment = Alignment.Top) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    // Pickup Location
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
                         Column {
-                            Text("Pickup (restaurant)", style = MaterialTheme.typography.labelMedium)
-                            Text(
-                                restaurant.address.ifBlank { restaurant.name },
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Text("Pickup (Restaurant)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(restaurant.address.ifBlank { restaurant.name }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                         }
                     }
 
@@ -253,58 +288,61 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         )
                     }
 
-                    // Drop-off = picked on the map
                     OutlinedButton(
                         onClick = {
                             showOrderSheet = false
                             showMapPicker = true
                         },
                         enabled = restaurantPoint != null,
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null)
+                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text(if (dropoff == null) "Choose drop-off on map" else "Change drop-off location")
+                        Text(if (dropoff == null) "Choose drop-off location on map" else "Change drop-off location")
                     }
 
                     if (dropoff != null) {
                         OutlinedTextField(
                             value = deliveryAddress,
                             onValueChange = { deliveryAddress = it },
-                            label = { Text("Drop-off address (add details if needed)") },
+                            label = { Text("Drop-off address details") },
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
 
-                    // Payment
-                    Text("Payment method", style = MaterialTheme.typography.labelLarge)
+                    Text("Payment Method", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         paymentOptions.forEach { option ->
                             FilterChip(
                                 selected = paymentMethod == option,
                                 onClick = { paymentMethod = option },
-                                label = { Text(option) }
+                                label = { Text(option) },
+                                shape = RoundedCornerShape(8.dp)
                             )
                         }
                     }
 
-                    HorizontalDivider()
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Subtotal")
-                        Text("$${"%.2f".format(subtotal)}")
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Delivery fee")
-                        Text("$${"%.2f".format(restaurant.deliveryFee)}")
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Total", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "$${"%.2f".format(grandTotal)}",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("$${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Total Amount", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text(
+                                "$${"%.2f".format(grandTotal)}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
 
                     Button(
@@ -326,7 +364,8 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                 }
                             )
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().height(52.dp)
                     ) {
                         if (isSubmitting) {
                             CircularProgressIndicator(
@@ -334,14 +373,14 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
                         } else {
-                            Text("Place Order")
+                            Text("Place Order Now", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
         }
 
-        // ---------- Map picker for the drop-off ----------
+        // Map Picker for Drop-off
         if (showMapPicker) {
             LocationPickerDialog(
                 title = "Choose drop-off location",
@@ -364,48 +403,82 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
     }
 
     @Composable
-    private fun MealRow(
+    private fun MealCard(
         meal: Meal,
         quantity: Int,
         onAdd: () -> Unit,
-        onRemove: () -> Unit
+        onRemove: () -> Unit,
+        onClick: () -> Unit
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(meal.name, style = MaterialTheme.typography.titleMedium)
-                    if (meal.description.isNotBlank()) {
-                        Text(
-                            meal.description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        "$${"%.2f".format(meal.basePrice)}",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary
+        val imageUrl = meal.imageUrls.firstOrNull().orEmpty()
+        val hasImage = imageUrl.isNotBlank()
+
+        Card(
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (hasImage) 260.dp else 160.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (hasImage) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = meal.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxWidth().height(120.dp)
+                            .clip(RoundedCornerShape(12.dp))
                     )
                 }
 
-                if (quantity == 0) {
-                    OutlinedButton(onClick = onAdd) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Add")
-                    }
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = onRemove) {
-                            Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                Column(
+                    modifier = Modifier.weight(1f).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = meal.name,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "$${"%.2f".format(meal.basePrice)}",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+
+//                    if (meal.description.isNotBlank()) {
+//                        Text(
+//                            text = meal.description,
+//                            style = MaterialTheme.typography.bodySmall,
+//                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+//                            maxLines = 2
+//                        )
+//                    }
+                }
+
+                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                    if (quantity == 0) {
+                        OutlinedButton(
+                            onClick = onAdd,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add", fontWeight = FontWeight.Bold)
                         }
-                        Text("$quantity", style = MaterialTheme.typography.titleMedium)
-                        IconButton(onClick = onAdd) {
-                            Icon(Icons.Default.Add, contentDescription = "Increase")
+                    } else {
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                            IconButton(onClick = onRemove) {
+                                Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                            }
+                            Text("$quantity", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            IconButton(onClick = onAdd) {
+                                Icon(Icons.Default.Add, contentDescription = "Increase")
+                            }
                         }
                     }
                 }

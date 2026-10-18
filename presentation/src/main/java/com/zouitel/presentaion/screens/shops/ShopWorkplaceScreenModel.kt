@@ -4,12 +4,19 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
+import com.zouitel.presentaion.common.DriveImageUploader
+import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.PickedImage
+import com.zouitel.presentaion.screens.food.ImageUploadState
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class ShopWorkplaceScreenModel : ScreenModel {
@@ -24,6 +31,10 @@ class ShopWorkplaceScreenModel : ScreenModel {
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _imageUpload = MutableStateFlow<ImageUploadState>(ImageUploadState.Idle)
+    val imageUpload: StateFlow<ImageUploadState> = _imageUpload.asStateFlow()
+    private var uploadJob: Job? = null
 
     init {
         observeUserShopApplication()
@@ -87,6 +98,40 @@ class ShopWorkplaceScreenModel : ScreenModel {
                 _isOnline.value = online
             }
         }
+    }
+
+    /**
+     * Uploads the store photo/logo to the signed-in user's Google Drive and exposes the link
+     * to store/display via [imageUpload].
+     */
+    fun uploadShopImage(image: PickedImage, accessToken: DriveTokenProvider) {
+        if (_imageUpload.value is ImageUploadState.Uploading) return
+        _imageUpload.value = ImageUploadState.Uploading
+
+        uploadJob = screenModelScope.launch {
+            try {
+                val url = DriveImageUploader.upload(
+                    bytes = image.readBytes(),
+                    accessToken = accessToken(),
+                    label = "shop"
+                )
+                _imageUpload.value = ImageUploadState.Success(url)
+            } catch (e: CancellationException) {
+                // Reset only when abandoned from outside (e.g. the consent screen closed);
+                // resetImageUpload() has already reset the state when it cancelled us.
+                if (isActive) _imageUpload.value = ImageUploadState.Idle
+                throw e
+            } catch (e: Exception) {
+                _imageUpload.value = ImageUploadState.Error(e.message ?: "Upload failed")
+            }
+        }
+    }
+
+    /** Clears the upload state and cancels an upload still in flight, so its result can't leak into the next form. */
+    fun resetImageUpload() {
+        uploadJob?.cancel()
+        uploadJob = null
+        _imageUpload.value = ImageUploadState.Idle
     }
 
     fun updateShopMode(shopMode: UserMode) {

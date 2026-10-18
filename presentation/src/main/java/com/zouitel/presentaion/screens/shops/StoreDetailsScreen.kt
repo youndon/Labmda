@@ -1,8 +1,10 @@
 package com.zouitel.presentaion.screens.shops
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -14,6 +16,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -22,11 +28,14 @@ import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import kotlinx.coroutines.launch
 import android.content.Context
 import android.location.Geocoder
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import coil3.compose.AsyncImage
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -63,7 +72,6 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var showMapPicker by remember { mutableStateOf(false) }
 
-// Store location: coordinates from the database, otherwise geocode its address
         LaunchedEffect(modelShopPoint) {
             shopPoint = modelShopPoint?.let { LatLng(it.lat, it.lng) }
                 ?: forwardGeocode(context, shop.address)
@@ -74,44 +82,69 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         val courierFee = 3.00
         val grandTotal = if (totalItemsCount > 0) subtotal + courierFee else 0.0
 
+        val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
         Scaffold(
+            modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
             topBar = {
-                TopAppBar(
-                    title = { Text(shop.name) },
+                LargeTopAppBar(
+                    title = {
+                        Column {
+                            Text(shop.name, fontWeight = FontWeight.Bold)
+                            if (scrollBehavior.state.collapsedFraction < 0.5f) {
+                                Text(
+                                    text = "${shop.category} • ${shop.address}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Normal,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
-                    }
+                    },
+                    scrollBehavior = scrollBehavior
                 )
             },
             bottomBar = {
                 if (totalItemsCount > 0) {
-                    Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
+                    Surface(
+                        tonalElevation = 8.dp,
+                        shadowElevation = 8.dp,
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                    ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                .padding(20.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column {
                                 Text(
-                                    text = "$totalItemsCount product(s)",
+                                    text = "$totalItemsCount product(s) selected",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
                                     text = "$${"%.2f".format(grandTotal)}",
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
 
-                            Button(onClick = { showOrderSheet = true }) {
-                                Icon(Icons.Default.ReceiptLong, contentDescription = null)
+                            Button(
+                                onClick = { showOrderSheet = true },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.height(50.dp)
+                            ) {
+                                Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("View Demand Card")
+                                Text("View Demand Card", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -119,25 +152,11 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
             }
         ) { paddingValues ->
             Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-                // Store Info Header
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(text = shop.name, style = MaterialTheme.typography.titleMedium)
-                        Text(text = "Category: ${shop.category}", style = MaterialTheme.typography.bodySmall)
-                        Text(text = "Address: ${shop.address}", style = MaterialTheme.typography.bodySmall)
-                        if (shop.description.isNotBlank()) {
-                            Text(text = shop.description, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-
                 Text(
                     text = "Store Products Catalog",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.primary
                 )
 
                 if (isLoading) {
@@ -145,65 +164,83 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         CircularProgressIndicator()
                     }
                 } else if (products.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
-                        Text("No items listed in this store currently.")
+                    Box(modifier = Modifier.fillMaxSize().weight(1f).padding(32.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            "No items listed in this store currently.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
                     }
                 } else {
-                    LazyColumn(
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
                         contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         items(products, key = { it.id }) { product ->
                             val currentItem = cartItems[product.id]
                             val currentQty = currentItem?.quantity ?: 0
 
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                            Card(
+                                modifier = Modifier.fillMaxSize(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(0.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(text = product.name, style = MaterialTheme.typography.titleMedium)
-                                        Text(text = product.description, style = MaterialTheme.typography.bodySmall)
+                                    AsyncImage(
+                                        model = product.imageUrl,
+                                        contentDescription = product.name,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(140.dp),
+                                        contentScale = ContentScale.Crop
+                                    )
+
+                                    Column(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = product.name,
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+
                                         Text(
                                             text = "$${"%.2f".format(product.price)}",
-                                            style = MaterialTheme.typography.titleSmall,
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            maxLines = 1,
                                             color = MaterialTheme.colorScheme.primary
                                         )
                                     }
 
                                     if (currentQty == 0) {
-                                        OutlinedButton(
+                                        Button(
                                             onClick = {
-                                                cartItems[product.id] = ShopCartItem(
-                                                    productId = product.id,
-                                                    productName = product.name,
-                                                    price = product.price,
-                                                    quantity = 1
-                                                )
-                                            }
+                                                cartItems[product.id] = ShopCartItem(product.id, product.name, product.price, 1)
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                            contentPadding = PaddingValues(0.dp)
                                         ) {
-                                            Icon(Icons.Default.Add, contentDescription = null)
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Add")
+                                            Text("Add to Card", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                                         }
                                     } else {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            IconButton(onClick = {
-                                                if (currentQty > 1) {
-                                                    cartItems[product.id] = currentItem!!.copy(quantity = currentQty - 1)
-                                                } else {
-                                                    cartItems.remove(product.id)
-                                                }
-                                            }) {
-                                                Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceEvenly
+                                        ) {
+                                            IconButton(onClick = { if (currentQty > 1) cartItems[product.id] = currentItem!!.copy(quantity = currentQty - 1) else cartItems.remove(product.id) }) {
+                                                Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(20.dp))
                                             }
-                                            Text("$currentQty", style = MaterialTheme.typography.titleMedium)
-                                            IconButton(onClick = {
-                                                cartItems[product.id] = currentItem!!.copy(quantity = currentQty + 1)
-                                            }) {
-                                                Icon(Icons.Default.Add, contentDescription = "Increase")
+                                            Text("$currentQty", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
+                                            IconButton(onClick = { cartItems[product.id] = currentItem!!.copy(quantity = currentQty + 1) }) {
+                                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
                                             }
                                         }
                                     }
@@ -221,8 +258,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("Store Demand Card Summary", style = MaterialTheme.typography.titleLarge)
-                        HorizontalDivider()
+                        Text("Store Demand Card Summary", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
@@ -235,8 +272,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(text = item.productName, style = MaterialTheme.typography.bodyLarge)
-                                        Text(text = "$${"%.2f".format(item.price)} x ${item.quantity} = $${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall)
+                                        Text(text = item.productName, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
+                                        Text(text = "$${"%.2f".format(item.price)} × ${item.quantity} = $${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     IconButton(onClick = { cartItems.remove(item.productId) }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
@@ -245,13 +282,14 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             }
                         }
 
-                        HorizontalDivider()
-                        Row(verticalAlignment = Alignment.Top) {
-                            Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(8.dp))
                             Column {
-                                Text("Pickup (store)", style = MaterialTheme.typography.labelMedium)
-                                Text("${shop.name} · ${shop.address}", style = MaterialTheme.typography.bodyMedium)
+                                Text("Pickup (Store)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${shop.name} · ${shop.address}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                             }
                         }
 
@@ -260,18 +298,20 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                 showOrderSheet = false
                                 showMapPicker = true
                             },
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.LocationOn, contentDescription = null)
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text(if (dropoff == null) "Choose drop-off on map" else "Change drop-off location")
+                            Text(if (dropoff == null) "Choose drop-off on map" else "Change drop-off location", fontWeight = FontWeight.Bold)
                         }
 
                         if (dropoff != null) {
                             OutlinedTextField(
                                 value = deliveryAddress,
                                 onValueChange = { deliveryAddress = it },
-                                label = { Text("Drop-off address (add details if needed)") },
+                                label = { Text("Drop-off address details") },
+                                shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -280,12 +320,13 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             value = paymentMethod,
                             onValueChange = { paymentMethod = it },
                             label = { Text("Payment Method") },
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Total Demand Price:", style = MaterialTheme.typography.titleMedium)
-                            Text("$${"%.2f".format(grandTotal)}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("Total Demand Price", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("$${"%.2f".format(grandTotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
 
                         Button(
@@ -316,14 +357,15 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                     )
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().height(52.dp)
                         ) {
                             if (isSubmitting) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
                             } else {
-                                Icon(Icons.Default.Send, contentDescription = null)
+                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Send Demand Card to Store Manager")
+                                Text("Send Demand Card", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -363,7 +405,6 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         var picked by remember { mutableStateOf(initial) }
         var address by remember { mutableStateOf("") }
 
-        // Start on the store (or the previous pick), never on the client's own position
         val start = initial ?: shopPoint
         val cameraPositionState = rememberCameraPositionState {
             position = CameraPosition.fromLatLngZoom(start ?: LatLng(0.0, 0.0), if (start != null) 14f else 2f)
@@ -383,8 +424,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
             Surface(modifier = Modifier.fillMaxSize()) {
                 Scaffold(
                     topBar = {
-                        TopAppBar(
-                            title = { Text("Choose drop-off location") },
+                        CenterAlignedTopAppBar(
+                            title = { Text("Choose drop-off location", fontWeight = FontWeight.Bold) },
                             navigationIcon = {
                                 IconButton(onClick = onDismiss) {
                                     Icon(Icons.Default.Close, contentDescription = "Close")
@@ -393,10 +434,14 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         )
                     },
                     bottomBar = {
-                        Surface(tonalElevation = 8.dp, shadowElevation = 8.dp) {
+                        Surface(
+                            tonalElevation = 8.dp,
+                            shadowElevation = 8.dp,
+                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                        ) {
                             Column(
-                                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Text(
                                     when {
@@ -404,14 +449,16 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                         address.isBlank() -> "Resolving address…"
                                         else -> address
                                     },
-                                    style = MaterialTheme.typography.bodyMedium
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
                                 )
                                 Button(
                                     onClick = { picked?.let { onConfirm(it, address) } },
                                     enabled = picked != null && address.isNotBlank(),
-                                    modifier = Modifier.fillMaxWidth()
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth().height(50.dp)
                                 ) {
-                                    Text("Confirm drop-off")
+                                    Text("Confirm Drop-off", fontWeight = FontWeight.Bold)
                                 }
                             }
                         }

@@ -83,14 +83,19 @@ dependencies {
     api(libs.firebase.auth)
     api(libs.firebase.firestore)
     api(libs.firebase.database)
-    implementation("dev.gitlive:firebase-messaging:2.7.0")
+    api(libs.firebase.storage)
+    api(libs.firebase.messaging)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.ktor3)
-    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.core)
 
     implementation(libs.kotlinx.serialization.json)
 
-    //Location(Native).
-implementation("com.google.android.gms:play-services-location:21.4.0")
+    implementation("io.github.vinceglb:filekit-compose:0.8.8")
+
+    //(Native Only).
+    implementation(libs.play.services.auth)
+    implementation("com.google.android.gms:play-services-location:21.4.0")
+    implementation(libs.ktor.client.okhttp)
 }
