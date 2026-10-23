@@ -24,7 +24,7 @@ import kotlinx.serialization.Serializable
  * Client facade for trusted Cloud Functions and read-only payment observations.
  * All order pricing, commissions, refunds, payouts and provider state are authoritative on the server.
  *
- * Expected callable contracts are documented in functions/*; never grant clients write access
+ * Expected callable contracts are documented in docs/payments/cloud-functions-contracts.md; never grant clients write access
  * to /payments or use client-provided amounts as settlement values.
  */
 class PaymentRepository(
