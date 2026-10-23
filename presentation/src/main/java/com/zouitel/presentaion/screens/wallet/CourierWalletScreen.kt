@@ -71,7 +71,7 @@ class CourierWalletScreen : Screen {
                             }
                         }
                     }
-                } ?: if (!loading && error == null) Text("No wallet information is available yet.")
+                } ?: if (!loading && error == null) Text("No wallet information is available yet.") else Unit
             }
         }
     }
