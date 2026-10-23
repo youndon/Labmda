@@ -70,6 +70,20 @@ class PanelScreen : Screen {
                     Text("Manage Freight Applications")
                 }
                 Button(
+                    onClick = { navigator?.push(AdminPaymentsScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Text("Payments, refunds & reconciliation")
+                }
+                Button(
+                    onClick = { navigator?.push(AdminCommissionScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Text("Commission settings")
+                }
+                Button(
                     onClick = { navigator?.push(AdminDriverScreen()) },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)
