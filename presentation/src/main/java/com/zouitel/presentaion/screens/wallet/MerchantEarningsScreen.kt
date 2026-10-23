@@ -72,7 +72,11 @@ class MerchantEarningsScreen : Screen {
                             }
                         }
                     }
-                } ?: if (!loading && error == null) Text("No wallet information is available yet.") else Unit
+                } ?: run {
+                    if (!loading && error == null) {
+                        Text("No wallet information is available yet.")
+                    }
+                }
             }
         }
     }
