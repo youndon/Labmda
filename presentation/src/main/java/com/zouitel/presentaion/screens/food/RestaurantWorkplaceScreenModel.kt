@@ -172,7 +172,8 @@ class RestaurantWorkplaceScreenModel(
                 "restaurantAddress" to address,
                 "restaurantLatitude" to latitude,
                 "restaurantLongitude" to longitude,
-                "foodStatus" to Status.APPROVED.name,
+                // New applications must remain pending until an administrator approves them.
+                "foodStatus" to Status.PENDING.name,
                 "foodMode" to UserMode.MANAGER.name
             )
             db.child("users").child(uid).updateChildren(updates)
