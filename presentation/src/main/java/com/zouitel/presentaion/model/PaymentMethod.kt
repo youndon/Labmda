@@ -3,6 +3,14 @@ package com.zouitel.presentaion.model
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class PaymentMethod {
+    CASH,
+    STRIPE,
+    PAYPAL
+}
+
+
+@Serializable
 enum class PaymentMethodType {
     STRIPE_CARD,
     PAYPAL,
