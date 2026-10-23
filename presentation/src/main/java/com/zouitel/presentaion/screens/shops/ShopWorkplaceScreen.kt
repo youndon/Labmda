@@ -34,6 +34,7 @@ import com.zouitel.presentaion.common.ImagePicker
 import com.zouitel.presentaion.screens.food.ImageUploadState
 import androidx.compose.runtime.collectAsState
 import coil3.compose.AsyncImage
+import com.zouitel.presentaion.screens.wallet.MerchantEarningsScreen
 
 class ShopWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -154,7 +155,8 @@ class ShopWorkplaceScreen : Screen {
                                             shop = shop,
                                             isOnline = isOnline,
                                             onOnlineChanged = { screenModel.updateShopOnlineStatus(shop.id, it) },
-                                            onOpenDashboard = { navigator?.push(ShopDashboardScreen(shop.id)) }
+                                            onOpenDashboard = { navigator?.push(ShopDashboardScreen(shop.id)) },
+                                            onOpenWallet = { navigator?.push(MerchantEarningsScreen()) }
                                         )
                                         else -> {}
                                     }
@@ -382,7 +384,8 @@ class ShopWorkplaceScreen : Screen {
         shop: Shop,
         isOnline: Boolean,
         onOnlineChanged: (Boolean) -> Unit,
-        onOpenDashboard: () -> Unit
+        onOpenDashboard: () -> Unit,
+        onOpenWallet: () -> Unit
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -451,6 +454,16 @@ class ShopWorkplaceScreen : Screen {
                         Text(text = "Address: ${shop.address}", style = MaterialTheme.typography.bodyMedium)
                         Text(text = "Phone: ${shop.phone}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                     }
+                }
+            }
+
+            item {
+                Button(
+                    onClick = onOpenWallet,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Text("Merchant earnings & payouts", fontWeight = FontWeight.Bold)
                 }
             }
 
