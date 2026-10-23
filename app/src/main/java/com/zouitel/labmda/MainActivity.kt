@@ -12,6 +12,8 @@ import com.mmk.kmpauth.google.GoogleAuthCredentials
 import com.mmk.kmpauth.google.GoogleAuthProvider
 import com.zouitel.presentaion.common.AppTheme
 import com.zouitel.presentaion.screens.account.LogInScreen
+import com.zouitel.presentaion.screens.payment.PayPalReturnHandler
+import com.zouitel.presentaion.screens.payment.PaymentScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,7 +34,8 @@ class MainActivity : ComponentActivity() {
                         .build()
                 }
 
-                Navigator(LogInScreen())
+                val returnOrderId = intent?.data?.let { PayPalReturnHandler().parse(it)?.orderId }
+                Navigator(returnOrderId?.let(::PaymentScreen) ?: LogInScreen())
             }
         }
     }
