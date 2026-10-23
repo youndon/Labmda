@@ -12,8 +12,6 @@ import com.zouitel.presentaion.model.PayPalSession
 import com.zouitel.presentaion.model.StripeSession
 import com.zouitel.presentaion.screens.wallet.PayoutAccount
 import com.zouitel.presentaion.screens.wallet.WalletSnapshot
-import com.zouitel.presentaion.screens.wallet.WalletSummary
-import com.zouitel.presentaion.screens.wallet.WalletTransaction
 import dev.gitlive.firebase.functions.FirebaseFunctions
 import dev.gitlive.firebase.functions.functions
 import dev.gitlive.firebase.database.DatabaseReference
