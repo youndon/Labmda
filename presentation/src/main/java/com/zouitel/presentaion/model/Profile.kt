@@ -13,6 +13,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class UserProfile(
     val uid: String = "",
+    /** Privileged role; assign ADMIN only through trusted administrative tooling. */
+    val role: String = "USER",
     val fullName: String = "",
     val email: String? = null,
     val phoneNumber: String? = null,

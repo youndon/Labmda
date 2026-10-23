@@ -89,7 +89,7 @@ class MainScreen() : Screen {
         val accountScreen = koinScreenModel<AccountScreenModel>()
         val profile by accountScreen.profile.collectAsState()
 
-        val tabs = remember(profile?.driverService, profile?.foodMode, profile?.shopMode) {
+        val tabs = remember(profile?.driverService, profile?.foodMode, profile?.shopMode, profile?.role) {
             listOf(
                 // The first tab depends on whether the driver is online.
                 if (profile?.driverService != null && profile?.driverService?.isOnline == true) {
@@ -113,10 +113,9 @@ class MainScreen() : Screen {
                 } else {
                     MainTab(ShopsScreen(), "Shops", Icons.Filled.Storefront, Icons.Outlined.Storefront)
                 },
-                MainTab(PanelScreen(), "Panel", Icons.Filled.AdminPanelSettings, Icons.Outlined.AdminPanelSettings),
+                if (profile?.role == "ADMIN") MainTab(PanelScreen(), "Panel", Icons.Filled.AdminPanelSettings, Icons.Outlined.AdminPanelSettings) else null,
                 MainTab(AccountScreen(), "Account", Icons.Filled.AccountCircle, Icons.Outlined.AccountCircle),
-            )
-        }
+            ).filterNotNull()        }
 
         Navigator(tabs.first().screen) { navigator ->
             Scaffold(
