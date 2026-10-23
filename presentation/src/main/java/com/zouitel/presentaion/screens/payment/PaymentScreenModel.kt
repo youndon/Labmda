@@ -30,11 +30,11 @@ class PaymentScreenModel(
         }
         screenModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingPayment = true)
-            runCatching { repository.observePayment(orderId) }.onSuccess { flow ->
-                flow.collect { payment ->
+            try {
+                repository.observePayment(orderId).collect { payment ->
                     _uiState.value = _uiState.value.copy(payment = payment, isLoadingPayment = false)
                 }
-            }.onFailure { error ->
+            } catch (error: Exception) {
                 _uiState.value = _uiState.value.copy(
                     isLoadingPayment = false,
                     errorMessage = error.message ?: "Unable to observe payment status."
