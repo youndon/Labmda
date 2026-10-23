@@ -178,18 +178,7 @@ class RestaurantWorkplaceScreenModel(
             )
             db.child("users").child(uid).updateChildren(updates)
 
-            val publicMap = mapOf(
-                "id" to uid,
-                "name" to restaurantName,
-                "imageUrl" to imageUrl,
-                "deliveryFee" to deliveryFee,
-                "estimatedTimeMinutes" to estimatedTimeMinutes,
-                "managers" to listOf(managerPhone),
-                "address" to address,
-                "latitude" to latitude,
-                "longitude" to longitude
-            )
-            db.child("restaurants").child(uid).updateChildren(publicMap)
+            // Public restaurant records are created by the admin approval workflow.
 
             _isLoading.value = false
         }
