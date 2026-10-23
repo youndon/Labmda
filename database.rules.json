@@ -5,12 +5,7 @@
     "users": {
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
-        "uid": { ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')" },
-        "fullName": { ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')" },
-        "email": { ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')" },
-        "phoneNumber": { ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')" },
-        "photoUrl": { ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')" },
-        "role": { ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'" }
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || (auth.uid === $uid && newData.child('role').val() === data.child('role').val()))"
       }
     },
     "orders": {
