@@ -1,0 +1,29 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".write": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        "role": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'"
+        }
+      }
+    },
+    "orders": {
+      "$orderId": {
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('sourceId').val() === auth.uid || data.child('deliveryId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".write": false
+      }
+    },
+    "payments": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+      ".write": false,
+      "$paymentId": {
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".write": false
+      }
+    }
+  }
+}
