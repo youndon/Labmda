@@ -62,7 +62,8 @@ data class PaymentScreen(val orderId: String) : Screen {
             }
         }
         LaunchedEffect(state.payment?.status) {
-            if (state.payment?.status in setOf(
+            val status = state.payment?.status
+            if (status != null && status in setOf(
                     PaymentStatus.SUCCEEDED, PaymentStatus.FAILED, PaymentStatus.CANCELLED,
                     PaymentStatus.REFUNDED, PaymentStatus.PARTIALLY_REFUNDED
                 )) showResult = true
