@@ -14,8 +14,16 @@ class LogInScreenModel(
             // Creates a path like: /users/{uid}
             val userNode = usersRef.child("users").child(userProfile.uid)
 
-            // RTDB uses setValue() for serialized classes
-            userNode.setValue(userProfile)
+            // Merge sign-in-owned fields; preserve service state and admin approvals.
+            userNode.updateChildren(
+                mapOf(
+                    "uid" to userProfile.uid,
+                    "fullName" to userProfile.fullName,
+                    "email" to userProfile.email,
+                    "phoneNumber" to userProfile.phoneNumber,
+                    "photoUrl" to userProfile.photoUrl
+                )
+            )
 
             result.data = Unit
         } catch (e: Exception) {
