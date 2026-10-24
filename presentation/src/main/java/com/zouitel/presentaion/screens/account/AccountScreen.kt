@@ -39,7 +39,10 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import com.zouitel.presentaion.common.Status
+import com.zouitel.presentaion.admin.AdminPaymentsScreen
 import com.zouitel.presentaion.screens.delivery.DeliveryWorkplaceScreen
+import com.zouitel.presentaion.screens.wallet.CourierWalletScreen
+import com.zouitel.presentaion.screens.wallet.MerchantEarningsScreen
 import com.zouitel.presentaion.screens.food.RestaurantWorkplaceScreen
 import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
 import com.zouitel.presentaion.screens.shops.ShopWorkplaceScreen
@@ -222,7 +225,15 @@ class AccountScreen : Screen {
                             Column {
                                 GroupedAccountRow(Icons.Filled.History, "Orders & Ride History") { /* TODO */ }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                GroupedAccountRow(Icons.Filled.CreditCard, "Payment Methods & Wallet") { navigator.push(PaymentMethodsScreen()) }
+                                GroupedAccountRow(Icons.Filled.CreditCard, "Payment Methods & Wallet") {
+                                    when {
+                                        profile?.role == "ADMIN" -> navigator.push(AdminPaymentsScreen())
+                                        profile?.deliveryServices?.status == Status.APPROVED -> navigator.push(CourierWalletScreen())
+                                        profile?.foodStatus == Status.APPROVED || profile?.shopStatus == Status.APPROVED ->
+                                            navigator.push(MerchantEarningsScreen())
+                                        else -> navigator.push(PaymentMethodsScreen())
+                                    }
+                                }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { /* TODO */ }
                             }
