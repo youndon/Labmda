@@ -65,14 +65,16 @@ class PaymentRepository(
     }
 
     suspend fun requestCashPayment(orderId: String) {
-        functions.httpsCallable("requestCashPayment")(OrderPaymentRequest(orderId)).data<CallableAcknowledgement>()
+        functions.httpsCallable("requestCashPayment")(OrderPaymentRequest(orderId))
+            .data<CallableAcknowledgement>()
+            .requireAccepted("Cash payment request")
     }
 
     /** The provider redirect is only a signal to ask the server to verify payment; not proof of payment. */
     suspend fun verifyProviderReturn(orderId: String, provider: String, sessionId: String, resultToken: String) {
         functions.httpsCallable("verifyPaymentReturn")(
             VerifyPaymentReturnRequest(orderId, provider, sessionId, resultToken)
-        ).data<CallableAcknowledgement>()
+        ).data<CallableAcknowledgement>().requireAccepted("Payment return verification")
     }
 
     suspend fun getMerchantWallet(): WalletSnapshot =
@@ -85,12 +87,16 @@ class PaymentRepository(
         functions.httpsCallable("getPayoutAccount")().data<PayoutAccountResponse>().account
 
     suspend fun savePayoutAccount(account: PayoutAccount) {
-        functions.httpsCallable("updatePayoutAccount")(account).data<CallableAcknowledgement>()
+        functions.httpsCallable("updatePayoutAccount")(account)
+            .data<CallableAcknowledgement>()
+            .requireAccepted("Payout account update")
     }
 
     suspend fun requestPayout(amount: Money) {
         require(amount.minorUnits > 0L) { "Payout amount must be positive." }
-        functions.httpsCallable("requestPayout")(PayoutRequest(amount)).data<CallableAcknowledgement>()
+        functions.httpsCallable("requestPayout")(PayoutRequest(amount))
+            .data<CallableAcknowledgement>()
+            .requireAccepted("Payout request")
     }
 
     suspend fun getAdminLedger(cursor: String? = null): PaymentLedgerResponse =
@@ -100,7 +106,7 @@ class PaymentRepository(
         require(reason.isNotBlank()) { "A refund reason is required." }
         functions.httpsCallable("adminRefundPayment")(
             RefundRequest(orderId, amount?.minorUnits, amount?.currencyCode, reason.trim())
-        ).data<CallableAcknowledgement>()
+        ).data<CallableAcknowledgement>().requireAccepted("Refund request")
     }
 
     suspend fun reconcilePayments(fromEpochMillis: Long, toEpochMillis: Long): ReconciliationResponse {
@@ -117,7 +123,9 @@ class PaymentRepository(
         require(settings.platformCommissionBps in 0..10_000)
         require(settings.courierShareBps in 0..10_000)
         require(settings.platformCommissionBps + settings.courierShareBps <= 10_000)
-        functions.httpsCallable("adminUpdateCommissionSettings")(settings).data<CallableAcknowledgement>()
+        functions.httpsCallable("adminUpdateCommissionSettings")(settings)
+            .data<CallableAcknowledgement>()
+            .requireAccepted("Commission settings update")
     }
 
     private fun DataSnapshot.toPaymentRecord(orderId: String): PaymentRecord? {
@@ -158,6 +166,10 @@ class PaymentRepository(
             updatedAtEpochMillis = long("updatedAtEpochMillis")
         )
     }
+}
+
+private fun CallableAcknowledgement.requireAccepted(action: String) {
+    check(accepted) { message.ifBlank { "$action was not accepted by the server." } }
 }
 
 @Serializable private data class CreatePaymentSessionRequest(val orderId: String, val method: String)
