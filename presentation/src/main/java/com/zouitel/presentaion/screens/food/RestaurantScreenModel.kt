@@ -2,9 +2,9 @@ package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
-import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.screens.orders.OrderCreationRepository
+import com.zouitel.presentaion.screens.orders.RequestedOrderItem
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -66,8 +66,8 @@ class RestaurantScreenModel(
     }
 
     /**
-     * Pickup is always the restaurant's saved location; drop-off is the point the client
-     * picked on the map. Totals are computed here so the stored order is the source of truth.
+     * Sends catalog IDs and quantities only. The trusted function reloads prices, delivery fees
+     * and merchant approval, then writes both the order and its payment record.
      */
     fun placeOrder(
         lines: List<Meal>,
@@ -78,8 +78,7 @@ class RestaurantScreenModel(
         onSuccess: (String) -> Unit
     ) {
         if (_isSubmitting.value) return
-        val uid = auth.currentUser?.uid
-        if (uid == null) {
+        if (auth.currentUser?.uid == null) {
             _error.value = "Please sign in to place an order."
             return
         }
@@ -88,41 +87,17 @@ class RestaurantScreenModel(
         _isSubmitting.value = true
         screenModelScope.launch {
             try {
-                val orderRef = db.child("orders").push()
-                val orderId = orderRef.key ?: System.currentTimeMillis().toString()
-
-                val items = lines.map { meal ->
-                    CartItem(
-                        id = meal.id,
-                        name = meal.name,
-                        basePrice = meal.basePrice,
-                        quantity = _quantities.value[meal.id] ?: 1
-                    )
-                }
-                val subtotal = items.sumOf { it.totalPrice }
-                val fee = restaurant.deliveryFee
-
-                val order = Order(
-                    id = orderId,
-                    clientId = uid,
+                val orderId = OrderCreationRepository().createOrder(
                     orderType = OrderType.FOOD,
                     sourceId = restaurant.id,
-                    sourceName = restaurant.name,
-                    items = items,
-                    subtotal = subtotal,
-                    deliveryFee = fee,
-                    totalPrice = subtotal + fee,
-                    pickupLocation = restaurant.address,
-                    pickupLat = restaurant.latitude,
-                    pickupLng = restaurant.longitude,
+                    items = lines.map { meal ->
+                        RequestedOrderItem(meal.id, (_quantities.value[meal.id] ?: 1).coerceIn(1, 99))
+                    },
                     dropoffLocation = dropoffAddress,
                     dropoffLat = dropoffLat,
                     dropoffLng = dropoffLng,
-                    createdAtTimestamp = System.currentTimeMillis(),
                     paymentMethod = paymentMethod
                 )
-
-                orderRef.setValue(order)
                 clearCart()
                 onSuccess(orderId)
             } catch (e: Exception) {
@@ -132,4 +107,5 @@ class RestaurantScreenModel(
             }
         }
     }
+
 }
