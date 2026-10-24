@@ -1,7 +1,7 @@
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onValueUpdated } from "firebase-functions/v2/database";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
 import { defineSecret, defineString } from "firebase-functions/params";
@@ -339,7 +339,7 @@ async function postWalletSettlement(
   currencyCode: string,
   provider: string
 ): Promise<void> {
-  if (!uid || (creditMinorUnits <= 0 && cashOwedDelta <= 0)) return;
+  if (!uid || (creditMinorUnits === 0 && cashOwedDelta === 0)) return;
   const walletRef = getDatabase().ref("wallets/" + uid);
   await walletRef.transaction((current) => {
     const wallet = current && typeof current === "object" ? current as Record<string, unknown> : {};
