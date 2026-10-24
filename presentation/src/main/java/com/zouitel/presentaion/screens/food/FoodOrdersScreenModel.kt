@@ -36,7 +36,7 @@ class FoodOrdersScreenModel : ScreenModel {
                 _isLoading.value = false
                 return@launch
             }
-            db.child("orders").orderByChild("sourceId").equalTo(uid).valueEvents.collect { snapshot ->
+            db.child("orders").orderByChild("merchantId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
                     // Food orders only; retail shop orders live in the shop dashboard
