@@ -155,7 +155,7 @@ type StripeIntent = {
   latest_charge?: string | { id?: string } | null; error?: { message?: string };
 };
 
-async function stripeApi<T>(
+async function stripeApiResult<T>(
   secretKey: string,
   path: string,
   form?: URLSearchParams,
@@ -169,7 +169,7 @@ async function stripeApi<T>(
 }
 
 async function getStripeIntent(secretKey: string, intentId: string): Promise<StripeIntent> {
-  const { ok, data } = await stripeApi<StripeIntent>(secretKey, "payment_intents/" + encodeURIComponent(intentId));
+  const { ok, data } = await stripeApiResult<StripeIntent>(secretKey, "payment_intents/" + encodeURIComponent(intentId));
   if (!ok || data.id !== intentId) throw new HttpsError("failed-precondition", "Stripe could not verify this payment.");
   return data;
 }
@@ -184,7 +184,7 @@ async function cancelOpenStripeIntent(secretKey: string, intentId: string): Prom
   if (!OPEN_STRIPE_INTENT_STATUSES.has(String(intent.status))) {
     throw new HttpsError("failed-precondition", "The current Stripe payment is already authorized or processing.");
   }
-  const cancelled = await stripeApi<StripeIntent>(
+  const cancelled = await stripeApiResult<StripeIntent>(
     secretKey, "payment_intents/" + encodeURIComponent(intentId) + "/cancel", new URLSearchParams()
   );
   if (!cancelled.ok || cancelled.data.status !== "canceled") {
@@ -1223,7 +1223,7 @@ export const createPaymentSession = onCall({
     form.set("metadata[orderId]", orderId);
     form.set("metadata[contextType]", contextType);
     form.set("metadata[firebaseUid]", uid);
-    const { ok, data } = await stripeApi<StripeIntent>(key, "payment_intents", form, idempotencyKey);
+    const { ok, data } = await stripeApiResult<StripeIntent>(key, "payment_intents", form, idempotencyKey);
     if (!ok || !data.id?.startsWith("pi_") || !data.client_secret || data.capture_method !== "manual" ||
         data.amount !== amountMinorUnits || !OPEN_STRIPE_INTENT_STATUSES.has(String(data.status))) {
       throw new HttpsError("failed-precondition", data.error?.message || "Stripe could not create the payment.");
@@ -1271,7 +1271,7 @@ export const createPaymentSession = onCall({
 
   // Re-read immediately before storing the hosted URL. An order may be cancelled while
   // the provider API call is in flight; do not return a live checkout URL in that case.
-  const latestRoot = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+  const latestRoot = await getDatabase().ref(rootPath + "/" + orderId).get();
   const latestPaymentSnapshot = await getDatabase().ref("payments/" + orderId).get();
   const latestRootStatus = String(latestRoot.child("status").val() ?? "");
   const latestPayment = latestPaymentSnapshot.val() as Record<string, unknown> | null;
@@ -1393,6 +1393,13 @@ export const verifyPaymentReturn = onCall({
     return { accepted: true, message: "Payment is already confirmed by the server." };
   }
 
+  const expected = await recomputeAuthoritativeAmount(orderId, context);
+  const keyAmount = moneyValue(payment.amount);
+  if (expected.minorUnits !== keyAmount.minorUnits ||
+      expected.currencyCode.toUpperCase() !== keyAmount.currencyCode.toUpperCase()) {
+    throw new HttpsError("failed-precondition", "The server payment amount is inconsistent.");
+  }
+
   // The cancel redirect is only a request. Query the provider before changing the state.
   if (resultToken === "cancel") {
     if (!recordedSessionId) {
@@ -1402,7 +1409,7 @@ export const verifyPaymentReturn = onCall({
     if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
       const key = stripeSecretKey.value().trim();
       if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
-      return applyStripeIntentState(orderId, context, key, recordedSessionId, expectedMinorUnits, expectedCurrency, true);
+      return applyStripeIntentState(orderId, context, key, recordedSessionId, expected.minorUnits, expected.currencyCode.toUpperCase(), true);
     }
     if (provider === "STRIPE") {
       const key = stripeSecretKey.value().trim();
@@ -1418,8 +1425,8 @@ export const verifyPaymentReturn = onCall({
         throw new HttpsError("failed-precondition", "Stripe could not verify the cancellation request.");
       }
       if (providerSession.payment_status === "paid") {
-        if (providerSession.amount_total !== expectedMinorUnits ||
-            String(providerSession.currency ?? "").toUpperCase() !== expectedCurrency) {
+        if (providerSession.amount_total !== expected.minorUnits ||
+            String(providerSession.currency ?? "").toUpperCase() !== expected.currencyCode.toUpperCase()) {
           throw new HttpsError("failed-precondition", "Stripe's settled amount does not match the server payment.");
         }
         const intentId = typeof providerSession.payment_intent === "string"
@@ -1459,7 +1466,7 @@ export const verifyPaymentReturn = onCall({
         const unit = providerOrder.purchase_units?.[0];
         const actualCurrency = String(unit?.amount?.currency_code ?? "").toUpperCase();
         const actualMinor = Math.round(Number(unit?.amount?.value ?? "NaN") * 100);
-        if (actualCurrency !== expectedCurrency || actualMinor !== expectedMinorUnits) {
+        if (actualCurrency !== expected.currencyCode.toUpperCase() || actualMinor !== expected.minorUnits) {
           throw new HttpsError("failed-precondition", "PayPal's settled amount does not match the server payment.");
         }
         await setPaymentStatus(orderId, context, "SUCCEEDED", {
@@ -1474,22 +1481,10 @@ export const verifyPaymentReturn = onCall({
     return { accepted: true, message: "Provider confirmed no successful payment; checkout was cancelled." };
   }
 
-  const expected = await recomputeAuthoritativeAmount(orderId, context);
-  const keyAmount = moneyValue(payment.amount);
-  if (expected.minorUnits !== keyAmount.minorUnits ||
-      expected.currencyCode.toUpperCase() !== keyAmount.currencyCode.toUpperCase()) {
-    throw new HttpsError("failed-precondition", "The server payment amount is inconsistent.");
-  }
-  if (resultToken === "cancel") {
-    // A provider redirect is not the order-cancellation authority. The order status trigger
-    // will release a real authorization only after the order itself enters CANCELLED.
-    return { accepted: true, message: "Checkout return received. Payment state remains provider-webhook authoritative." };
-  }
-
   if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
     const key = stripeSecretKey.value().trim();
     if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
-    return applyStripeIntentState(orderId, context, key, recordedSessionId, expectedMinorUnits, expectedCurrency, false);
+    return applyStripeIntentState(orderId, context, key, recordedSessionId, expected.minorUnits, expected.currencyCode.toUpperCase(), false);
   }
   if (provider === "STRIPE") {
     const secret = stripeSecretKey.value().trim();
