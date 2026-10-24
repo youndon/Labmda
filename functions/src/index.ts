@@ -367,7 +367,7 @@ export const createPaymentSession = onCall({
       }],
       application_context: {
         return_url: returnUrl,
-        cancel_url: returnUrl + "&token=cancel",
+        cancel_url: returnUrl + "&cancelled=1",
         user_action: "PAY_NOW",
         shipping_preference: "NO_SHIPPING"
       }
