@@ -87,7 +87,7 @@ dependencies {
     api(libs.firebase.messaging)
     api(libs.firebase.functions)
     api(libs.stripe.android)
-    implementation(libs.paypal.web.payments)
+    implementation(libs.paypal.payments)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.ktor3)
