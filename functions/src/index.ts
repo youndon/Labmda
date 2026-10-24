@@ -107,3 +107,41 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   await db.ref().update({ [`orders/${orderId}`]: order, [`payments/${orderId}`]: payment });
   return { orderId, subtotalMinor: subtotal, deliveryFeeMinor: fee, totalMinor: total, currencyCode: "USD" };
 });
+
+/**
+ * All order lifecycle writes pass through this callable. The caller cannot update arbitrary
+ * fields or transition another user's order.
+ */
+export const updateOrderStatus = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to update an order.");
+  const body = request.data as { orderId?: string; status?: string };
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  const nextStatus = typeof body.status === "string" ? body.status : "";
+  const allowed = ["CANCELLED", "ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"];
+  if (!orderId || !allowed.includes(nextStatus)) throw new HttpsError("invalid-argument", "Invalid order ID or status.");
+  const db = getDatabase();
+  const ref = db.ref(`orders/${orderId}`);
+  const snap = await ref.get();
+  if (!snap.exists()) throw new HttpsError("not-found", "Order not found.");
+  const order = snap.val() as Record<string, unknown>;
+  const currentStatus = String(order.status ?? "PLACED");
+  const profile = await db.ref(`users/${uid}`).get();
+  const isAdmin = profile.child("role").val() === "ADMIN";
+  const clientOwns = order.clientId === uid;
+  const sourceId = String(order.sourceId ?? "");
+  const isFoodManager = order.orderType === "FOOD" && (sourceId === uid ||
+    (await db.ref(`restaurants/${sourceId}/managers`).get()).val()?.[uid] === true);
+  const shop = await db.ref(`shops/${sourceId}`).get();
+  const isShopManager = order.orderType === "RETAIL" && (shop.child("ownerUid").val() === uid ||
+    (shop.child("managers").val() && (shop.child("managers").val() as unknown[]).includes(uid)));
+  const courierOwns = order.deliveryId === uid;
+  const allowedByRole =
+    (nextStatus === "CANCELLED" && clientOwns && currentStatus === "PLACED") ||
+    (["ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY"].includes(nextStatus) && (isFoodManager || isShopManager) &&
+      ["PLACED", "ACCEPTED", "PREPARING"].includes(currentStatus)) ||
+    (nextStatus === "DELIVERED" && courierOwns && currentStatus === "OUT_FOR_DELIVERY");
+  if (!isAdmin && !allowedByRole) throw new HttpsError("permission-denied", "You are not allowed to make this order transition.");
+  await ref.update({ status: nextStatus, updatedAtTimestamp: Date.now() });
+  return { accepted: true, status: nextStatus };
+});
