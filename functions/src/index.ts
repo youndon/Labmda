@@ -54,9 +54,7 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     approved = profile.child("foodStatus").val() === "APPROVED" || source.status === "APPROVED";
     if (!approved || source.isOpen === false) throw new HttpsError("failed-precondition", "This restaurant is not approved or is closed.");
   } else {
-    const ownerUid = typeof source.ownerUid === "string" ? source.ownerUid : "";
-    const profile = ownerUid ? await db.ref(`users/${ownerUid}`).get() : null;
-    approved = source.status === "APPROVED" && (profile?.child("shopStatus").val() === "APPROVED" || profile?.child("role").val() === "ADMIN");
+    approved = source.status === "APPROVED";
     if (!approved || source.isOnline === false) throw new HttpsError("failed-precondition", "This shop is not approved or is offline.");
   }
 
@@ -76,9 +74,14 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     normalizedItems.push({ id: item.id, name: typeof catalog.name === "string" ? catalog.name : "", basePrice: unit / 100, quantity: item.quantity, specialInstructions: "" });
   }
 
-  const fee = orderType === "FOOD"
-    ? minorUnits(source.deliveryFee ?? 0, "delivery fee")
-    : minorUnits((await db.ref("settings/deliveryFees/RETAIL").get()).val() ?? 3, "retail delivery fee");
+  let fee: number;
+  if (orderType === "FOOD") {
+    fee = minorUnits(source.deliveryFee ?? 0, "delivery fee");
+  } else {
+    const configuredFee = await db.ref("settings/deliveryFees/RETAIL").get();
+    if (!configuredFee.exists()) throw new HttpsError("failed-precondition", "Retail delivery fee is not configured.");
+    fee = minorUnits(configuredFee.val(), "retail delivery fee");
+  }
   const total = subtotal + fee;
   const orderRef = db.ref("orders").push();
   const orderId = orderRef.key;
