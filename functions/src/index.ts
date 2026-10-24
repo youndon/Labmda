@@ -1584,13 +1584,18 @@ async function requestCashoutForUid(uid: string, body: CashoutInput): Promise<Re
   const existing = await payoutRef.get();
   if (existing.exists()) {
     const record = existing.val() as Record<string, unknown>;
+    const recordedAmount = record.amount as Record<string, unknown> | undefined;
+    if (String(record.uid ?? "") !== uid ||
+        Number(recordedAmount?.minorUnits) !== minorUnitsRequested ||
+        String(recordedAmount?.currencyCode ?? "").toUpperCase() !== currencyCode) {
+      throw new HttpsError("failed-precondition", "This idempotency key was already used with a different cashout request.");
+    }
     if (record.status === "QUEUED" || record.status === "TRANSFERRED" || record.status === "PROCESSING" ||
-        record.status === "SUBMITTED" || record.status === "PAID") return { accepted: true, payoutId, status: record.status };
-    if (record.status !== "RESERVING" ||
-        Number((record.amount as Record<string, unknown> | undefined)?.minorUnits) !== minorUnitsRequested ||
-        String((record.amount as Record<string, unknown> | undefined)?.currencyCode ?? "").toUpperCase() !== currencyCode ||
-        String(record.uid ?? "") !== uid) {
-      throw new HttpsError("failed-precondition", "This idempotent cashout request has already been rejected or conflicts with another request.");
+        record.status === "SUBMITTED" || record.status === "PAID") {
+      return { accepted: true, payoutId, status: record.status };
+    }
+    if (record.status !== "RESERVING") {
+      throw new HttpsError("failed-precondition", "This idempotent cashout request has already been rejected.");
     }
     // Resume an interrupted reservation safely; reserveCashout is idempotent per payout ID.
   }
@@ -1867,6 +1872,36 @@ export const runPayouts = onSchedule({
 }, async () => {
   if (payoutsEnabled.value().toLowerCase() !== "true") return;
   const db = getDatabase();
+  const now = Date.now();
+
+  // Recover work interrupted after a provider API request. All provider-side mutations use
+  // stable idempotency/request IDs, so retrying after the lease expires is safe.
+  const processingSnapshot = await db.ref("payouts").orderByChild("status").equalTo("PROCESSING").limitToFirst(100).get();
+  for (const [id, raw] of Object.entries((processingSnapshot.val() ?? {}) as Record<string, unknown>)) {
+    const record = raw as Record<string, unknown>;
+    if (Number(record.lastAttemptAtEpochMillis ?? 0) > now - 10 * 60 * 1000) continue;
+    await db.ref("payouts/" + id).transaction(current => {
+      if (!current || typeof current !== "object") return;
+      const item = current as Record<string, unknown>;
+      if (item.status !== "PROCESSING" || Number(item.lastAttemptAtEpochMillis ?? 0) > now - 10 * 60 * 1000) return;
+      return { ...item, status: item.transferReference ? "TRANSFERRED" : "QUEUED", recoveredAtEpochMillis: now, updatedAtEpochMillis: now };
+    });
+  }
+
+  const reservingSnapshot = await db.ref("payouts").orderByChild("status").equalTo("RESERVING").limitToFirst(100).get();
+  for (const [id, raw] of Object.entries((reservingSnapshot.val() ?? {}) as Record<string, unknown>)) {
+    const record = raw as Record<string, unknown>;
+    if (Number(record.updatedAtEpochMillis ?? record.createdAtEpochMillis ?? 0) > now - 10 * 60 * 1000) continue;
+    const walletSnap = await db.ref("wallets/" + String(record.uid ?? "") + "/payoutReservations/" + id).get();
+    await db.ref("payouts/" + id).transaction(current => {
+      if (!current || typeof current !== "object" || (current as Record<string, unknown>).status !== "RESERVING") return;
+      const item = current as Record<string, unknown>;
+      return walletSnap.val() === true
+        ? { ...item, status: "QUEUED", recoveredAtEpochMillis: now, updatedAtEpochMillis: now }
+        : { ...item, status: "REJECTED_INTERRUPTED_BEFORE_RESERVATION", rejectionReason: "INTERRUPTED_BEFORE_RESERVATION", updatedAtEpochMillis: now };
+    });
+  }
+
   for (const status of ["QUEUED", "TRANSFERRED"]) {
     const snapshot = await db.ref("payouts").orderByChild("status").equalTo(status).limitToFirst(20).get();
     const raw = snapshot.val() as Record<string, unknown> | null;
