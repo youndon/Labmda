@@ -1,5 +1,3 @@
-@AGENTS.md
-
 # CLAUDE.md
 
 Labmda is a ride, food, shop and delivery super-app: one Android app with role modes (client, restaurant/shop manager, courier, driver, admin), backed by Firebase Realtime Database (RTDB) and Firebase Cloud Functions. `AGENTS.md` (imported above) has the module map and general rules. This file covers commands, the payment architecture and known problems. Verified against commit `725d617`.
