@@ -5,7 +5,7 @@ coreKtx = "1.19.0"
 firebaseMessaging = "2.7.0"
 firebaseFunctions = "2.7.0"
 stripeAndroid = "23.25.0"
-paypalAndroid = "2.3.0"
+paypalAndroid = "3.1.0"
 junit = "4.13.2"
 junitVersion = "1.3.0"
 espressoCore = "3.7.0"
@@ -52,7 +52,7 @@ androidx-material-icons-core = { module = "androidx.compose.material:material-ic
 firebase-messaging = { module = "dev.gitlive:firebase-messaging", version.ref = "firebaseMessaging" }
 firebase-functions = { module = "dev.gitlive:firebase-functions", version.ref = "firebaseFunctions" }
 stripe-android = { module = "com.stripe:stripe-android", version.ref = "stripeAndroid" }
-paypal-web-payments = { module = "com.paypal.android:paypal-web-payments", version.ref = "paypalAndroid" }
+paypal-payments = { module = "com.paypal.android:paypal-payments", version.ref = "paypalAndroid" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
