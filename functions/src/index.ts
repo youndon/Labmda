@@ -128,9 +128,16 @@ function walletSnapshot(wallet: Record<string, unknown>, currencyCode = "USD"): 
 async function getOrCreateStripeCustomer(uid: string, secretKey: string): Promise<string> {
   const db = getDatabase();
   const ref = db.ref(`paymentCustomers/${uid}`);
-  const stored = await ref.child("stripeCustomerId").get();
-  const existingId = stored.val();
-  if (typeof existingId === "string" && existingId.startsWith("cus_")) return existingId;
+  const stored = await ref.get();
+  const storedValue = stored.val() as unknown;
+  // Accept the earlier object form if present, but write the canonical value as the provider ID
+  // string at paymentCustomers/{uid}, keeping the schema small and outside users/{uid}.
+  const existingId = typeof storedValue === "string"
+    ? storedValue
+    : storedValue && typeof storedValue === "object"
+      ? String((storedValue as Record<string, unknown>).stripeCustomerId ?? "")
+      : "";
+  if (existingId.startsWith("cus_")) return existingId;
 
   // A stable idempotency key prevents concurrent first checkouts from creating duplicate
   // Stripe customers. Contact fields are intentionally not copied into the customer node.
@@ -149,11 +156,7 @@ async function getOrCreateStripeCustomer(uid: string, secretKey: string): Promis
   if (!response.ok || !customer.id || !customer.id.startsWith("cus_")) {
     throw new HttpsError("failed-precondition", customer.error?.message || "Stripe could not create a customer.");
   }
-  await ref.update({
-    stripeCustomerId: customer.id,
-    provider: "STRIPE",
-    updatedAtEpochMillis: Date.now()
-  });
+  await ref.set(customer.id);
   return customer.id;
 }
 
