@@ -8,6 +8,8 @@ import com.zouitel.presentaion.screens.food.toOrderOrNull
 import com.zouitel.presentaion.screens.orders.OrderStatusRepository
 import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,13 +30,13 @@ class ShopOrdersScreenModel : ScreenModel {
     }
 
     private fun listenToShopOrders() {
-        val uid = dev.gitlive.firebase.auth.auth.currentUser?.uid
+        val uid = Firebase.auth.currentUser?.uid
         if (uid.isNullOrBlank()) {
             _isLoading.value = false
             return
         }
         screenModelScope.launch {
-            db.child("orders").orderByChild("sourceId").equalTo(uid).valueEvents.collect { snapshot ->
+            db.child("orders").orderByChild("merchantId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
                     .filter { it.orderType == OrderType.RETAIL }
