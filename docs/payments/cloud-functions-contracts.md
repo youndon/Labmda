@@ -1,6 +1,6 @@
 # Payment Cloud Functions contracts
 
-The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. The trusted `createOrder`, `createRideTrip`, order lifecycle, `createPaymentSession`, `requestCashPayment`, and `verifyPaymentReturn` handlers are implemented in `functions/src/index.ts`. Checkout creation and provider-return verification use the Stripe and PayPal APIs from server code. Signed provider webhooks, refunds/reconciliation, wallet accounting, admin commission handlers, and real payout execution remain unimplemented, so the integration is not production-ready.
+The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. `createOrder`, `createRideTrip`, order lifecycle handlers, hosted checkout and provider-return verification, wallet snapshots, admin payment listing, and admin commission configuration are implemented in `functions/src/index.ts`. Signed provider webhooks, refund/reconciliation handlers, wallet balance allocation, payout-account management, and real payout execution remain unimplemented, so the integration is not production-ready.
 
 ## Security invariants
 
@@ -35,7 +35,7 @@ All property names are camelCase and currently match kotlinx.serialization DTOs 
 | `adminGetCommissionSettings` | no arguments | `CommissionSettings` |
 | `adminUpdateCommissionSettings` | `CommissionSettings` | `{ accepted, message }` |
 
-The order screens now call `createOrder`; the function derives item prices and fees from RTDB and writes `orders/{orderId}` and `payments/{orderId}` in one server-side multi-location update. Retail orders require `settings/deliveryFees/RETAIL` to be configured. The initial payment record is pending and intentionally omits settlement splits until trusted commission and gateway-fee settings are available; provider sessions and verified webhook updates still need implementation. `requestPayout` intentionally fails closed even for approved accounts until transactional wallet reservation and provider payout execution exist. Do not reopen client writes to make existing screens work.
+The order screens call `createOrder`; the function derives item prices and fees from RTDB and writes `orders/{orderId}` and `payments/{orderId}` in one server-side multi-location update. Retail orders require `settings/deliveryFees/RETAIL` to be configured. Payment records include provider, provider reference, amount, and all four breakdown components. Their `breakdownStatus` is `UNALLOCATED` and components start at zero; this must not be interpreted as a final split. Commission configuration is stored at `config/commission`, and wallet nodes are initialized server-side with zero balances. Wallet balance credits, cash collection postings, signed webhook reconciliation, and payouts remain disabled until a verified fee/allocation policy and transactional ledger posting are implemented. Do not reopen client writes to make existing screens work.
 
 ## Expected wallet response
 
@@ -44,6 +44,7 @@ The order screens now call `createOrder`; the function derives item prices and f
   "summary": {
     "availableBalance": { "minorUnits": 0, "currencyCode": "USD" },
     "pendingBalance": { "minorUnits": 0, "currencyCode": "USD" },
+    "cashOwed": { "minorUnits": 0, "currencyCode": "USD" },
     "lifetimeEarnings": { "minorUnits": 0, "currencyCode": "USD" },
     "updatedAtEpochMillis": 0
   },
