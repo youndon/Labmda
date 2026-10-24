@@ -27,7 +27,10 @@
         "clientId",
         "merchantId",
         "courierId",
-        "updatedAtEpochMillis"
+        "updatedAtEpochMillis",
+        "status",
+        "providerReference",
+        "providerPaymentIntentId"
       ],
       ".read": false,
       "$paymentId": {
