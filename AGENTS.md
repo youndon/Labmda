@@ -1,43 +1,49 @@
-# AGENTS.md
+@AGENTS.md
 
-## Project overview
+# CLAUDE.md
 
-Labmda is an Android application written in Kotlin. The UI uses Jetpack Compose and Material 3; navigation uses Voyager; dependency injection uses Koin; Firebase is accessed through the GitLive Kotlin SDK. Build configuration is Gradle Kotlin DSL with a version catalog in `gradle/libs.versions.toml`.
+Labmda is a ride, food, shop and delivery super-app: one Android app with role modes (client, restaurant/shop manager, courier, driver, admin), backed by Firebase Realtime Database (RTDB) and Firebase Cloud Functions. `AGENTS.md` (imported above) has the module map and general rules. This file covers commands, the payment architecture and known problems. Verified against commit `725d617`.
 
-## Module map
+## Commands
 
-- `:app` — Android application entry points and platform configuration. Start at `app/src/main/java/com/zouitel/labmda/MainActivity.kt` and `LambdaApplication.kt`.
-- `:presentation` — Compose screens, Voyager ScreenModels, UI models, shared UI utilities, and presentation DI. The existing package/namespace is spelled `com.zouitel.presentaion`; preserve it in changes unless a deliberate package migration is requested.
-- `:domain` — domain models, repository contracts, and use cases.
-- `:core:repository` — repository implementations, data-source contracts, mapping, and repository DI.
-- `:core:datastore` — DataStore-backed settings implementation, settings mapping, and related DI.
-- `gradle/libs.versions.toml` — central dependency and plugin version catalog.
+- Android: `./gradlew assembleDebug`, `./gradlew testDebugUnitTest` (CI runs both on JDK 17).
+- Functions (Node 20): `cd functions && npm install && npm run build` (`tsc`), `npm run lint` (`tsc --noEmit`). There is no function test script yet.
+- Android build config: Stripe publishable key via `-PstripePublishableKey=pk_test_...` or env `STRIPE_PUBLISHABLE_KEY`.
+- Function secrets (Firebase secrets, never in the repo or APK): `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`. Plain params: `PAYPAL_ENVIRONMENT` (default `sandbox`), `PAYPAL_WEBHOOK_ID`, `PAYOUTS_ENABLED` (default `false`).
 
-Check `settings.gradle.kts` and the relevant module `build.gradle.kts` before adding dependencies or changing module boundaries.
+## Code layout that matters
 
-## Build and test
+- The package is spelled `com.zouitel.presentaion`. Keep that spelling.
+- Screens live in `presentation/.../screens/<feature>/` (`food`, `shops`, `ride`, `delivery`, `account`, `payment`, `wallet`), each with a `modules.kt` Koin module included from `di/modules.kt`. Admin screens are in `admin/`.
+- Voyager `Screen` plus `ScreenModel`. Firebase comes from the GitLive SDK (`Firebase.database`, `Firebase.functions`, `Firebase.auth`).
+- Money is `model/Money.kt`: integer minor units plus an ISO currency code. Never use `Double` for payment amounts. Older screens still show `Double` prices; convert at the edge.
+- `:domain`, `:core:repository` and `:core:datastore` hold only the settings feature. Orders, trips and payments are handled in `:presentation`.
+- Payment SDKs: `stripe-android` (PaymentSheet) and PayPal `paypal-payments`, declared in `gradle/libs.versions.toml`.
 
-Use the Gradle wrapper from the repository root:
+## Payment architecture
 
-- Debug APK build: `./gradlew assembleDebug`
-- Unit tests: `./gradlew testDebugUnitTest`
-- Full Gradle build: `./gradlew build`
+Docs: `docs/payments/realtime-database-schema.md` and `docs/payments/cloud-functions-contracts.md`. They lag the code in places (see "Docs vs code"); when they disagree, trust `functions/src/index.ts`.
 
-The CI workflow uses JDK 17 and runs `assembleDebug` followed by `testDebugUnitTest`. Run the narrowest relevant tests during iteration, then the CI commands when practical. If a command cannot run because the environment lacks the Android SDK, required secrets, or network access, report that limitation rather than claiming it passed.
+- The app never writes `orders`, `payments`, `wallets`, `ledger`, `payouts` or `config/commission`; `database.rules.json` denies client writes. Changes go through callable functions (`createOrder`, `createRideTrip`, `createPaymentSession`, `requestCashPayment`, `updateOrderStatus`, `confirmCashCollected`, wallet, payout and admin callables).
+- The server recomputes prices, fees and fares. `createPaymentSession` fails rather than charge an amount that differs from the stored total.
+- Stripe: a manual-capture PaymentIntent; the client secret goes to the app's PaymentSheet. PayPal: the server returns an approval URL. Capture or void is done by server code when an order or trip changes status (`onOrderStatusChange`, `onTripStatusChange`), with scheduled retries (`retryAuthorizedPaymentCapture`, `retryPaymentSettlement`). Stripe authorizations expire after about 7 days.
+- `stripeWebhook` (HMAC signature check) and `paypalWebhook` (PayPal verification, `PAYPAL_WEBHOOK_ID`) are the source of truth for payment status. They deduplicate provider event IDs and check amount and currency. `verifyPaymentReturn` only inspects the provider; it must never set a final status.
+- Wallet allocation can wait on the provider's gateway fee (`AWAITING_GATEWAY_FEE`). `runPayouts` does nothing unless `PAYOUTS_ENABLED=true`. Refunds are blocked after wallet allocation until reversal postings exist. Cash remittance verification is not implemented.
+- Do not reopen client writes to make a screen work. Add or extend a callable instead.
 
-## Implementation guidance
+## Known issues (verified at 725d617, not fixed)
 
-- Follow existing Kotlin style, package names, file organization, and nearby patterns; avoid unrelated reformatting.
-- Keep Compose UI declarative. Put non-trivial screen state and UI actions in the existing Voyager ScreenModel pattern where appropriate, and keep reusable UI pieces in the established shared/common locations.
-- Follow the current separation between presentation, domain contracts/use cases, and core data implementations. Avoid adding Firebase or platform-specific details to domain code.
-- Use Koin modules for dependency registration, following the existing DI setup. Check existing module wiring before introducing another registration path.
-- Add or update tests for behavior changes. Do not rely on the placeholder example tests as meaningful coverage.
-- Add dependencies through `gradle/libs.versions.toml` and the appropriate module build file when possible; avoid hard-coding versions elsewhere if the catalog can represent them.
-- Preserve existing Android SDK and Java compatibility settings unless the task requires changing them. Current CI expects JDK 17.
-- Keep changes scoped to the requested task. Do not rename modules, package namespaces, or public APIs as incidental cleanup.
+1. Ride requests send the wrong field. An earlier rename from `PaymentMethod` to `PaymentMethodType` also renamed a JSON field: `CreateRideTripRequest` in `PassengerScreenModel.kt` declares `val PaymentMethodType: String`, but `createRideTrip` reads `body.paymentMethod`, so the server sees no method and rejects the request. The trip reader in the same file also reads the key `"PaymentMethodType"`, while the server writes `paymentMethod`. Local variables named `PaymentMethodType` (shadowing the enum) remain in `PassengerScreen.kt` and `StoreDetailsScreen.kt`.
+2. Every callable sets `enforceAppCheck: true`, but no App Check dependency or initialization exists in the Android code. Deployed calls will be rejected until it is added or enforcement is relaxed for development.
+3. `PaymentRepository.kt` calls `adminReconcilePayments`, which `functions/src/index.ts` does not export.
+4. `database.rules.json` covers only `config`, `deliveryQueue`, `ledger`, `orders`, `paymentCustomers`, `payments`, `payouts`, `users` and `wallets`. Deploying it as is would deny paths the app still uses (trips, restaurants, shops, driver presence). `firebase.json` configures Functions only.
+5. Tests are thin: `MoneyTest` plus placeholder example tests on the Android side and none for the functions. Webhook signature checks, status transitions and request DTO field names (see issue 1) need tests.
 
-## Configuration and security
+## Docs vs code
 
-- Treat Firebase configuration, OAuth client identifiers, tokens, signing files, and other credentials as sensitive configuration. Do not introduce new secrets, print credentials in logs, or copy secrets into documentation, tests, or commits.
-- Do not change `app/google-services.json` or authentication setup unless the task explicitly concerns that configuration.
-- Never report a build, test, or runtime check as successful unless it was actually executed and passed.
+`cloud-functions-contracts.md` lists `getPayoutAccount`, `updatePayoutAccount` and `adminRefundPayment` as "Not implemented", but all three are exported by the functions. Update the docs when you touch these areas.
+
+## Working rules
+
+- Keep changes scoped. Do not edit `app/google-services.json` or auth setup unless asked.
+- Do not claim a build or test passed unless you ran it. The Android SDK and Firebase credentials may be missing in a sandbox; say so.
