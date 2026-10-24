@@ -1,6 +1,6 @@
 # Payment Cloud Functions contracts
 
-The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. `createOrder`, `createRideTrip`, order lifecycle handlers, hosted checkout and provider-return verification, wallet snapshots, admin payment listing, and admin commission configuration are implemented in `functions/src/index.ts`. Signed provider webhooks, refund/reconciliation handlers, wallet balance allocation, payout-account management, and real payout execution remain unimplemented, so the integration is not production-ready.
+The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. Provider state is finalized by signed Stripe and PayPal webhooks. Checkout redirects may request/inspect authorization, but they do not set a final payment status.
 
 ## Security invariants
 
@@ -11,11 +11,9 @@ The Android payment layer calls callable HTTPS functions via GitLive Firebase Fu
 - Keep provider secret keys in managed server secrets. The app may receive only a hosted-checkout URL, a Stripe PaymentIntent client secret, public identifiers, opaque payout account references, and display-safe status.
 - Make order/session creation, webhook handling, refunds, and payout requests idempotent. Verify webhook signatures and deduplicate provider event IDs.
 
-## Callable functions used by the Kotlin client
+## Callable functions
 
-All property names are camelCase and currently match kotlinx.serialization DTOs in `PaymentRepository.kt`.
-
-| Callable | Request | Response |
+| Callable | Request | Behavior |
 |---|---|---|
 | `createOrder` | `{ orderType, sourceId, items: [{ id, quantity }], dropoffLocation, dropoffLat, dropoffLng, paymentMethod }` | `{ orderId, subtotalMinor, deliveryFeeMinor, totalMinor, currencyCode }` |
 | `updateOrderStatus` | `{ orderId, status }` | `{ accepted, status }` |

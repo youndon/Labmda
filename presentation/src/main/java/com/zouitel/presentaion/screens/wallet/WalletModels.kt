@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 data class WalletSummary(
     val availableBalance: Money = Money(),
     val pendingBalance: Money = Money(),
+    val cashOwed: Money = Money(),
     val lifetimeEarnings: Money = Money(),
     val updatedAtEpochMillis: Long = 0L
 )
@@ -43,7 +44,8 @@ data class PayoutAccount(
     val providerAccountId: String = "",
     val countryCode: String = "",
     val accountLabel: String = "",
-    val updatedAtEpochMillis: Long = 0L
+    val updatedAtEpochMillis: Long = 0L,
+    val status: String = ""
 )
 
 // Kept for existing screens that still display legacy Double-valued prices.

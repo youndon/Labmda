@@ -7,6 +7,7 @@ enum class PaymentStatus {
     CREATED,
     PENDING,
     REQUIRES_ACTION,
+    AUTHORIZED,
     PROCESSING,
     SUCCEEDED,
     FAILED,
