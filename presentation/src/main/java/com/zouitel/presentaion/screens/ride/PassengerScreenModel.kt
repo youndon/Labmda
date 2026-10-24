@@ -5,12 +5,15 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
+import com.zouitel.presentaion.model.PaymentMethod
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import dev.gitlive.firebase.functions.functions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
 import kotlinx.coroutines.launch
 
 /** Name and phone used to prefill the request form. */
@@ -80,6 +83,9 @@ class PassengerScreenModel : ScreenModel {
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
+                            paymentMethod = str("paymentMethod").ifBlank { "CASH" },
+                            paymentStatus = str("paymentStatus").ifBlank { "PENDING" },
+                            paymentId = str("paymentId"),
                             driverId = str("driverId"),
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
@@ -139,6 +145,10 @@ class PassengerScreenModel : ScreenModel {
         }
     }
 
+    /**
+     * Creates the trip through trusted server code. The visible fare is only an estimate;
+     * the server recalculates distance and fare before writing the trip and payment record.
+     */
     fun requestTrip(
         pickupAddress: String,
         pickupLat: Double,
@@ -146,40 +156,38 @@ class PassengerScreenModel : ScreenModel {
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        fare: Double,
+        paymentMethod: PaymentMethod,
         passengerName: String,
         passengerPhone: String,
-        targetDriver: UserProfile? = null
+        targetDriver: UserProfile? = null,
+        onSuccess: (String) -> Unit,
+        onFailure: (String) -> Unit
     ) {
-        val uid = currentUser?.uid ?: return
+        if (currentUser?.uid.isNullOrBlank()) {
+            onFailure("Please sign in before requesting a ride.")
+            return
+        }
         screenModelScope.launch {
-            val ref = db.child("trips").push()
-            val tripId = ref.key ?: System.currentTimeMillis().toString()
-
-//            val vehicleStr = targetDriver?.vehicleInfo?.let {
-//                "[${it.type?.name ?: requestedVehicleType.name}] ${it.color} ${it.make} ${it.model} (${it.licensePlate})"
-//            } ?: "[${requestedVehicleType.name}] Standard Request"
-
-            val trip = Trip(
-                id = tripId,
-                passengerId = uid,
-                passengerName = passengerName.ifBlank { "Passenger" },
-                passengerPhone = passengerPhone,
-                pickupLocation = pickupAddress,
-                dropoffLocation = dropoffAddress,
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                fare = fare,
-                driverId = targetDriver?.uid ?: "",
-                driverName = targetDriver?.fullName ?: "",
-                driverPhone = targetDriver?.phoneNumber ?: "",
-//                vehicleDetails = vehicleStr,
-                status = if (targetDriver != null) "ACCEPTED" else "REQUESTED",
-                createdAtTimestamp = System.currentTimeMillis()
-            )
-            ref.setValue(trip)
+            try {
+                val response = Firebase.functions.httpsCallable("createRideTrip")(
+                    CreateRideTripRequest(
+                        pickupLocation = pickupAddress,
+                        pickupLat = pickupLat,
+                        pickupLng = pickupLng,
+                        dropoffLocation = dropoffAddress,
+                        dropoffLat = dropoffLat,
+                        dropoffLng = dropoffLng,
+                        passengerName = passengerName.ifBlank { "Passenger" },
+                        passengerPhone = passengerPhone,
+                        targetDriverUid = targetDriver?.uid,
+                        paymentMethod = paymentMethod.name
+                    )
+                ).data<CreateRideTripResponse>()
+                require(response.tripId.isNotBlank()) { "The server did not return a ride ID." }
+                onSuccess(response.tripId)
+            } catch (error: Exception) {
+                onFailure(error.message ?: "Could not request the ride. Please try again.")
+            }
         }
     }
 
@@ -189,3 +197,23 @@ class PassengerScreenModel : ScreenModel {
         }
     }
 }
+@Serializable
+private data class CreateRideTripRequest(
+    val pickupLocation: String,
+    val pickupLat: Double,
+    val pickupLng: Double,
+    val dropoffLocation: String,
+    val dropoffLat: Double,
+    val dropoffLng: Double,
+    val passengerName: String,
+    val passengerPhone: String,
+    val targetDriverUid: String?,
+    val paymentMethod: String
+)
+
+@Serializable
+private data class CreateRideTripResponse(
+    val tripId: String = "",
+    val fareMinorUnits: Long = 0L,
+    val currencyCode: String = "USD"
+)
