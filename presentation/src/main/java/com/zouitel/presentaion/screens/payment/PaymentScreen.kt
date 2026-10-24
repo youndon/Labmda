@@ -81,7 +81,11 @@ data class PaymentScreen(val orderId: String, val initialMethod: PaymentMethod? 
                             is StripeSession -> stripeLauncher.launch(context, session)
                             is PayPalSession -> paypalLauncher.launch(context, session)
                         }
-                    }.onFailure { /* State remains server-driven; errors can be retried from this screen. */ }
+                    }.onFailure { error ->
+                        model.reportCheckoutLaunchError(
+                            error.message ?: "Could not open the payment provider. Please try again."
+                        )
+                    }
                     PaymentEvent.CashPaymentRequested -> showResult = true
                     is PaymentEvent.Error -> Unit
                 }
