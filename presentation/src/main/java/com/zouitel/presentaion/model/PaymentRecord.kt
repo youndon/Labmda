@@ -13,9 +13,12 @@ data class PaymentRecord(
     val merchantId: String = "",
     val courierId: String = "",
     val method: PaymentMethod = PaymentMethod.CASH,
+    val provider: PaymentMethod = PaymentMethod.CASH,
+    val providerReference: String = "",
     val status: PaymentStatus = PaymentStatus.UNKNOWN,
     val amount: Money = Money(),
     val breakdown: OrderBreakdown? = null,
+    val breakdownStatus: String = "UNALLOCATED",
     val providerPaymentId: String = "",
     val refundAmount: Money = Money(),
     val updatedAtEpochMillis: Long = 0L
