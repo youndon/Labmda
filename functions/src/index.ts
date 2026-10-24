@@ -1400,45 +1400,924 @@ export const adminListPayments = onCall({ enforceAppCheck: true }, async (reques
   return { payments, nextCursor };
 });
 
-/**
- * Payout execution deliberately fails closed until the wallet ledger and provider payout
- * integration are implemented. This guard ensures unapproved accounts cannot start payouts.
- */
-export const requestPayout = onCall({ enforceAppCheck: true }, async (request) => {
-  const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting a payout.");
-  const body = request.data as { amount?: { minorUnits?: number; currencyCode?: string } };
-  const minorUnitsRequested = Number(body.amount?.minorUnits);
-  const currencyCode = typeof body.amount?.currencyCode === "string"
-    ? body.amount.currencyCode.toUpperCase() : "";
-  if (!Number.isSafeInteger(minorUnitsRequested) || minorUnitsRequested <= 0 ||
-      !/^[A-Z]{3}$/.test(currencyCode)) {
+
+type CashoutInput = {
+  amount?: { minorUnits?: number; currencyCode?: string };
+  idempotencyKey?: string;
+};
+
+function cashoutRecordId(uid: string, key: string): string {
+  return "cashout_" + createHash("sha256").update(uid + "|" + key).digest("hex").slice(0, 48);
+}
+
+async function reserveCashout(uid: string, payoutId: string, amount: AuthoritativeAmount): Promise<boolean> {
+  const walletRef = getDatabase().ref("wallets/" + uid);
+  await ensureWallet(uid, amount.currencyCode);
+  await walletRef.transaction(current => {
+    if (!current || typeof current !== "object") return;
+    const wallet = current as Record<string, unknown>;
+    const reservations = wallet.payoutReservations && typeof wallet.payoutReservations === "object"
+      ? wallet.payoutReservations as Record<string, unknown> : {};
+    if (reservations[payoutId] === true) return;
+    const available = moneyValue(wallet.available, amount.currencyCode);
+    const pending = moneyValue(wallet.pending, amount.currencyCode);
+    if (available.currencyCode.toUpperCase() !== amount.currencyCode.toUpperCase() ||
+        available.minorUnits < amount.minorUnits) return;
+    return {
+      ...wallet,
+      available: { minorUnits: available.minorUnits - amount.minorUnits, currencyCode: amount.currencyCode },
+      pending: { minorUnits: pending.minorUnits + amount.minorUnits, currencyCode: amount.currencyCode },
+      payoutReservations: { ...reservations, [payoutId]: true },
+      updatedAtEpochMillis: Date.now()
+    };
+  });
+  const after = await walletRef.get();
+  const wallet = after.val() as Record<string, unknown> | null;
+  const reservations = wallet?.payoutReservations as Record<string, unknown> | undefined;
+  return reservations?.[payoutId] === true;
+}
+
+async function closeCashoutReservation(payout: Record<string, unknown>, payoutId: string, releaseAvailable: boolean): Promise<void> {
+  const uid = String(payout.uid ?? "");
+  if (!uid) throw new Error("Payout has no wallet owner.");
+  const amount = moneyValue(payout.amount);
+  const walletRef = getDatabase().ref("wallets/" + uid);
+  await walletRef.transaction(current => {
+    if (!current || typeof current !== "object") return;
+    const wallet = current as Record<string, unknown>;
+    const reservations = wallet.payoutReservations && typeof wallet.payoutReservations === "object"
+      ? wallet.payoutReservations as Record<string, unknown> : {};
+    const closed = wallet.closedPayouts && typeof wallet.closedPayouts === "object"
+      ? wallet.closedPayouts as Record<string, unknown> : {};
+    if (closed[payoutId] === true || reservations[payoutId] !== true) return;
+    const available = moneyValue(wallet.available, amount.currencyCode);
+    const pending = moneyValue(wallet.pending, amount.currencyCode);
+    return {
+      ...wallet,
+      available: {
+        minorUnits: available.minorUnits + (releaseAvailable ? amount.minorUnits : 0),
+        currencyCode: amount.currencyCode
+      },
+      pending: {
+        minorUnits: Math.max(0, pending.minorUnits - amount.minorUnits),
+        currencyCode: amount.currencyCode
+      },
+      closedPayouts: { ...closed, [payoutId]: true },
+      updatedAtEpochMillis: Date.now()
+    };
+  });
+  await getDatabase().ref("ledger/payout_" + payoutId + (releaseAvailable ? "_released" : "_paid")).set({
+    id: "payout_" + payoutId + (releaseAvailable ? "_released" : "_paid"),
+    uid,
+    payoutId,
+    entryType: releaseAvailable ? "PAYOUT_RESERVATION_RELEASED" : "PAYOUT_PAID",
+    status: releaseAvailable ? "REVERSED" : "POSTED",
+    amount,
+    affectsWallet: true,
+    createdAtEpochMillis: Date.now()
+  });
+}
+
+async function requestCashoutForUid(uid: string, body: CashoutInput): Promise<Record<string, unknown>> {
+  const amount = body.amount;
+  const minorUnitsRequested = Number(amount?.minorUnits);
+  const currencyCode = typeof amount?.currencyCode === "string" ? amount.currencyCode.trim().toUpperCase() : "";
+  if (!Number.isSafeInteger(minorUnitsRequested) || minorUnitsRequested <= 0 || !/^[A-Z]{3}$/.test(currencyCode)) {
     throw new HttpsError("invalid-argument", "A positive payout amount and currency are required.");
   }
   const db = getDatabase();
   const profile = await db.ref("users/" + uid).get();
-  const approvedMerchant = profile.child("foodStatus").val() === "APPROVED" ||
-    profile.child("shopStatus").val() === "APPROVED";
+  const approvedMerchant = profile.child("foodStatus").val() === "APPROVED" || profile.child("shopStatus").val() === "APPROVED";
   const approvedCourier = profile.child("deliveryServices").child("status").val() === "APPROVED";
   if (!approvedMerchant && !approvedCourier) {
-    throw new HttpsError("permission-denied", "Only administrator-approved merchants and couriers may request payouts.");
+    throw new HttpsError("permission-denied", "Only administrator-approved merchants and couriers may request cashout.");
+  }
+  const settings = await db.ref("config/commission").get();
+  const configuredCurrency = String(settings.child("currencyCode").val() ?? "USD").toUpperCase();
+  if (currencyCode !== configuredCurrency) {
+    throw new HttpsError("failed-precondition", "Cashout currency does not match the configured wallet currency.");
   }
 
-  // Keep a server-owned audit record of the rejected attempt, but do not reserve or change
-  // balances until a transactional payout processor is configured.
-  const payoutRef = db.ref("payouts").push();
   const now = Date.now();
-  await payoutRef.set({
-    id: payoutRef.key ?? "",
-    uid,
+  const requestedKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+  const key = requestedKey && /^[A-Za-z0-9_-]{8,100}$/.test(requestedKey)
+    ? requestedKey : "minute_" + Math.floor(now / 60000) + "_" + minorUnitsRequested + "_" + currencyCode;
+  const payoutId = cashoutRecordId(uid, key);
+  const payoutRef = db.ref("payouts/" + payoutId);
+  const existing = await payoutRef.get();
+  if (existing.exists()) {
+    const record = existing.val() as Record<string, unknown>;
+    if (record.status === "QUEUED" || record.status === "TRANSFERRED" || record.status === "SUBMITTED" ||
+        record.status === "PAID") return { accepted: true, payoutId, status: record.status };
+    throw new HttpsError("failed-precondition", "This idempotent cashout request has already been rejected.");
+  }
+
+  const accountSnap = await db.ref("payoutAccounts/" + uid).get();
+  const account = accountSnap.val() as Record<string, unknown> | null;
+  const enabled = payoutsEnabled.value().toLowerCase() === "true";
+  const rejection = !enabled ? "PAYOUTS_DISABLED"
+    : !account || account.status !== "VERIFIED" ? "PAYOUT_ACCOUNT_NOT_VERIFIED"
+    : String(account.provider ?? "") !== "STRIPE" && String(account.provider ?? "") !== "PAYPAL" ? "UNSUPPORTED_PAYOUT_PROVIDER"
+    : "";
+  const record = {
+    id: payoutId, uid,
     merchantId: approvedMerchant ? uid : "",
     courierId: approvedCourier ? uid : "",
+    provider: String(account?.provider ?? ""),
+    providerAccountId: String(account?.providerAccountId ?? ""),
     amount: { minorUnits: minorUnitsRequested, currencyCode },
-    status: "REJECTED_DISABLED",
-    rejectionReason: "PAYOUT_EXECUTION_NOT_CONFIGURED",
+    status: rejection ? "REJECTED" : "RESERVING",
+    rejectionReason: rejection,
     providerReference: "",
-    createdAtEpochMillis: now,
-    updatedAtEpochMillis: now
+    idempotencyKeyHash: createHash("sha256").update(key).digest("hex"),
+    createdAtEpochMillis: now, updatedAtEpochMillis: now
+  };
+  await payoutRef.set(record);
+  if (rejection) {
+    throw new HttpsError("failed-precondition", rejection === "PAYOUTS_DISABLED"
+      ? "Cashouts are disabled until provider payout credentials and account verification are configured."
+      : "A verified payout account is required before cashout.");
+  }
+  const reserved = await reserveCashout(uid, payoutId, { minorUnits: minorUnitsRequested, currencyCode });
+  if (!reserved) {
+    await payoutRef.update({ status: "REJECTED_INSUFFICIENT_BALANCE", rejectionReason: "INSUFFICIENT_AVAILABLE_BALANCE", updatedAtEpochMillis: Date.now() });
+    throw new HttpsError("failed-precondition", "Available wallet balance is insufficient.");
+  }
+  await payoutRef.update({ status: "QUEUED", updatedAtEpochMillis: Date.now() });
+  return { accepted: true, payoutId, status: "QUEUED" };
+}
+
+export const requestCashout = onCall({ enforceAppCheck: true }, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting a cashout.");
+  return requestCashoutForUid(uid, request.data as CashoutInput);
+});
+
+/** Compatibility callable used by the existing Android wallet UI. */
+export const requestPayout = onCall({ enforceAppCheck: true }, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting a payout.");
+  return requestCashoutForUid(uid, request.data as CashoutInput);
+});
+
+export const getPayoutAccount = onCall({ enforceAppCheck: true }, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in before viewing payout settings.");
+  const snapshot = await getDatabase().ref("payoutAccounts/" + uid).get();
+  if (!snapshot.exists()) return { account: null };
+  const value = snapshot.val() as Record<string, unknown>;
+  return { account: {
+    provider: value.provider ?? "",
+    providerAccountId: value.providerAccountId ?? "",
+    countryCode: value.countryCode ?? "",
+    accountLabel: value.accountLabel ?? "",
+    updatedAtEpochMillis: value.updatedAtEpochMillis ?? 0,
+    status: value.status ?? "PENDING_VERIFICATION"
+  } };
+});
+
+export const updatePayoutAccount = onCall({
+  enforceAppCheck: true,
+  secrets: [stripeSecretKey]
+}, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in before updating payout settings.");
+  const body = request.data as { provider?: string; providerAccountId?: string; countryCode?: string; accountLabel?: string; recipientType?: string };
+  const provider = typeof body.provider === "string" ? body.provider.trim().toUpperCase() : "";
+  const providerAccountId = typeof body.providerAccountId === "string" ? body.providerAccountId.trim() : "";
+  const countryCode = typeof body.countryCode === "string" ? body.countryCode.trim().toUpperCase() : "";
+  const accountLabel = typeof body.accountLabel === "string" ? body.accountLabel.trim().slice(0, 80) : "";
+  const recipientType = typeof body.recipientType === "string" ? body.recipientType.trim().toUpperCase() : "EMAIL";
+  if ((provider !== "STRIPE" && provider !== "PAYPAL") || !providerAccountId ||
+      providerAccountId.length > 200 || /[\r\n]/.test(providerAccountId) ||
+      !/^[A-Z]{2}$/.test(countryCode) ||
+      (provider === "STRIPE" && !/^acct_[A-Za-z0-9]+$/.test(providerAccountId)) ||
+      (provider === "PAYPAL" && !["EMAIL", "PAYPAL_ID", "PHONE"].includes(recipientType))) {
+    throw new HttpsError("invalid-argument", "Payout provider or account details are invalid.");
+  }
+
+  let status = "PENDING_VERIFICATION";
+  if (provider === "STRIPE") {
+    const key = stripeSecretKey.value().trim();
+    if (!key) throw new HttpsError("failed-precondition", "Stripe credentials are not configured.");
+    const response = await fetch("https://api.stripe.com/v1/accounts/" + encodeURIComponent(providerAccountId), {
+      headers: { Authorization: "Bearer " + key }
+    });
+    const account = await response.json() as {
+      id?: string; payouts_enabled?: boolean; metadata?: Record<string, string>; country?: string;
+    };
+    if (!response.ok || account.id !== providerAccountId || account.metadata?.firebaseUid !== uid || account.payouts_enabled !== true) {
+      throw new HttpsError("failed-precondition", "Stripe account ownership or payout readiness could not be verified.");
+    }
+    status = "VERIFIED";
+  } else if (recipientType === "EMAIL" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(providerAccountId)) {
+    throw new HttpsError("invalid-argument", "PayPal EMAIL recipients must be valid email addresses.");
+  }
+
+  const value = {
+    provider, providerAccountId, countryCode, accountLabel, recipientType,
+    status, verifiedBy: status === "VERIFIED" ? "STRIPE_ACCOUNT_API" : "",
+    verifiedAtEpochMillis: status === "VERIFIED" ? Date.now() : 0,
+    updatedAtEpochMillis: Date.now()
+  };
+  await getDatabase().ref("payoutAccounts/" + uid).set(value);
+  return { accepted: true, message: status === "VERIFIED"
+    ? "Stripe payout account ownership and payout readiness verified."
+    : "Payout account saved and is awaiting administrator verification." };
+});
+
+export const adminVerifyPayoutAccount = onCall({ enforceAppCheck: true }, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const targetUid = typeof request.data?.uid === "string" ? request.data.uid.trim() : "";
+  if (!targetUid) throw new HttpsError("invalid-argument", "Account owner UID is required.");
+  const ref = getDatabase().ref("payoutAccounts/" + targetUid);
+  const snapshot = await ref.get();
+  if (!snapshot.exists()) throw new HttpsError("not-found", "Payout account was not found.");
+  const account = snapshot.val() as Record<string, unknown>;
+  if (account.provider !== "PAYPAL" || account.status !== "PENDING_VERIFICATION") {
+    throw new HttpsError("failed-precondition", "Only pending PayPal accounts require this administrator verification step.");
+  }
+  await ref.update({ status: "VERIFIED", verifiedBy: uid, verifiedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
+  return { accepted: true, message: "Payout account marked verified by an administrator." };
+});
+
+async function finalizePayoutEvent(payoutId: string, status: "PAID" | "FAILED", providerReference: string): Promise<void> {
+  const ref = getDatabase().ref("payouts/" + payoutId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists()) return;
+  const payout = snapshot.val() as Record<string, unknown>;
+  if (payout.status === "PAID" || payout.status === "FAILED") return;
+  if (status === "PAID") {
+    await closeCashoutReservation(payout, payoutId, false);
+    await ref.update({ status: "PAID", providerReference, completedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
+  } else {
+    await closeCashoutReservation(payout, payoutId, true);
+    await ref.update({ status: "FAILED", providerReference, failedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
+  }
+}
+
+async function processPayout(payoutId: string, initialStatus: string): Promise<void> {
+  const ref = getDatabase().ref("payouts/" + payoutId);
+  const claim = await ref.transaction(current => {
+    if (!current || !["QUEUED", "TRANSFERRED"].includes(String(current.status ?? ""))) return;
+    return { ...current, status: "PROCESSING", lastAttemptAtEpochMillis: Date.now() };
   });
-  throw new HttpsError("failed-precondition", "Payouts are disabled until server-side wallet reservation and provider payout processing are configured.");
+  if (!claim.committed) return;
+  const payout = claim.snapshot.val() as Record<string, unknown>;
+  const accountSnap = await getDatabase().ref("payoutAccounts/" + String(payout.uid ?? "")).get();
+  const account = accountSnap.val() as Record<string, unknown> | null;
+  try {
+    if (!account || account.status !== "VERIFIED" ||
+        account.provider !== payout.provider || account.providerAccountId !== payout.providerAccountId) {
+      throw new Error("Payout account is missing, changed, or not verified.");
+    }
+    const amount = moneyValue(payout.amount);
+    if (amount.minorUnits <= 0 || !/^[A-Z]{3}$/.test(amount.currencyCode.toUpperCase())) throw new Error("Payout amount is invalid.");
+    if (account.provider === "STRIPE") {
+      const secret = stripeSecretKey.value().trim();
+      const acct = String(account.providerAccountId);
+      const accountInfo = await stripeApi<Record<string, unknown>>("accounts/" + encodeURIComponent(acct), secret);
+      const metadata = accountInfo.metadata as Record<string, unknown> | undefined;
+      if (accountInfo.id !== acct || metadata?.firebaseUid !== payout.uid || accountInfo.payouts_enabled !== true) {
+        throw new Error("Stripe connected account is not verified for this user or cannot receive payouts.");
+      }
+      if (initialStatus === "QUEUED") {
+        const transferBody = new URLSearchParams();
+        transferBody.set("amount", String(amount.minorUnits));
+        transferBody.set("currency", amount.currencyCode.toLowerCase());
+        transferBody.set("destination", acct);
+        transferBody.set("transfer_group", payoutId);
+        transferBody.set("metadata[payoutId]", payoutId);
+        transferBody.set("metadata[firebaseUid]", String(payout.uid));
+        const transfer = await stripeApi<Record<string, unknown>>(
+          "transfers", secret, "POST", transferBody, "labmda-transfer-" + payoutId
+        );
+        if (typeof transfer.id !== "string") throw new Error("Stripe transfer response did not contain an ID.");
+        await ref.update({ status: "TRANSFERRED", transferReference: transfer.id, updatedAtEpochMillis: Date.now() });
+        return;
+      }
+      const payoutBody = new URLSearchParams();
+      payoutBody.set("amount", String(amount.minorUnits));
+      payoutBody.set("currency", amount.currencyCode.toLowerCase());
+      payoutBody.set("metadata[payoutId]", payoutId);
+      payoutBody.set("metadata[firebaseUid]", String(payout.uid));
+      const result = await stripeApi<Record<string, unknown>>(
+        "payouts", secret, "POST", payoutBody, "labmda-payout-" + payoutId, acct
+      );
+      if (typeof result.id !== "string") throw new Error("Stripe payout response did not contain an ID.");
+      await ref.update({ status: "SUBMITTED", providerReference: result.id, submittedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
+      return;
+    }
+    if (account.provider === "PAYPAL") {
+      if (initialStatus !== "QUEUED") throw new Error("Unexpected PayPal payout state.");
+      const access = await getPayPalAccessToken();
+      const recipientType = String(account.recipientType ?? "EMAIL");
+      const requestBody = {
+        sender_batch_header: {
+          sender_batch_id: payoutId,
+          email_subject: "Your Labmda payout is on the way"
+        },
+        items: [{
+          recipient_type: recipientType,
+          amount: { value: (amount.minorUnits / 100).toFixed(2), currency: amount.currencyCode.toUpperCase() },
+          receiver: String(account.providerAccountId),
+          sender_item_id: payoutId,
+          note: "Labmda wallet cashout"
+        }]
+      };
+      const response = await fetch(access.baseUrl + "/v1/payments/payouts", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer " + access.token,
+          "Content-Type": "application/json",
+          "PayPal-Request-Id": "labmda-payout-" + payoutId
+        },
+        body: JSON.stringify(requestBody)
+      });
+      const result = await response.json() as { batch_header?: { payout_batch_id?: string; batch_status?: string } };
+      const batchId = String(result.batch_header?.payout_batch_id ?? "");
+      if (!response.ok || !batchId) throw new Error("PayPal payout request failed.");
+      await ref.update({ status: "SUBMITTED", providerReference: batchId, submittedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
+      return;
+    }
+    throw new Error("Unsupported payout provider.");
+  } catch (error) {
+    await ref.update({
+      status: initialStatus,
+      lastError: error instanceof Error ? error.message.slice(0, 250) : "Unknown payout processing error",
+      updatedAtEpochMillis: Date.now()
+    });
+    throw error;
+  }
+}
+
+/** Periodically submits queued cashouts to verified provider accounts; webhooks confirm the final outcome. */
+export const runPayouts = onSchedule({
+  schedule: "every 5 minutes",
+  timeoutSeconds: 540,
+  secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
+}, async () => {
+  if (payoutsEnabled.value().toLowerCase() !== "true") return;
+  const db = getDatabase();
+  for (const status of ["QUEUED", "TRANSFERRED"]) {
+    const snapshot = await db.ref("payouts").orderByChild("status").equalTo(status).limitToFirst(20).get();
+    const raw = snapshot.val() as Record<string, unknown> | null;
+    for (const [id] of Object.entries(raw ?? {})) {
+      try { await processPayout(id, status); }
+      catch (error) { console.error("Payout processing deferred for", id, error instanceof Error ? error.message : "unknown error"); }
+    }
+  }
+});
+
+async function submitProviderRefund(orderId: string, context: PaymentContext, amountMinorUnits: number, reason: string): Promise<string> {
+  const payment = context.payment;
+  if (String(payment.status ?? "") !== "SUCCEEDED" && String(payment.status ?? "") !== "PARTIALLY_REFUNDED") {
+    throw new HttpsError("failed-precondition", "Only captured payments can be refunded.");
+  }
+  if (String(payment.breakdownStatus ?? "") === "ALLOCATED" || String(payment.breakdownStatus ?? "") === "ALLOCATING") {
+    throw new HttpsError("failed-precondition", "This payment has already affected wallets. Reversal accounting is required before refunding it.");
+  }
+  if (payment.refundRequest && (payment.refundRequest as Record<string, unknown>).status === "SUBMITTED") {
+    throw new HttpsError("failed-precondition", "A refund request is already in progress for this payment.");
+  }
+  const total = moneyValue(payment.amount);
+  const refunded = moneyValue(payment.refundAmount, total.currencyCode);
+  const remaining = total.minorUnits - refunded.minorUnits;
+  if (!Number.isSafeInteger(amountMinorUnits) || amountMinorUnits <= 0 || amountMinorUnits > remaining) {
+    throw new HttpsError("invalid-argument", "Refund amount exceeds the remaining refundable balance.");
+  }
+  const provider = normalizePaymentMethod(payment.provider ?? payment.method);
+  let refundId = "";
+  if (provider === "STRIPE") {
+    const intentId = String(payment.providerPaymentIntentId ?? "");
+    if (!intentId) throw new HttpsError("failed-precondition", "Stripe PaymentIntent reference is missing.");
+    const secret = stripeSecretKey.value().trim();
+    const form = new URLSearchParams();
+    form.set("payment_intent", intentId);
+    form.set("amount", String(amountMinorUnits));
+    form.set("metadata[orderId]", orderId);
+    form.set("metadata[reason]", reason.slice(0, 200));
+    const result = await stripeApi<Record<string, unknown>>(
+      "refunds", secret, "POST", form, "labmda-refund-" + orderId + "-" + (refunded.minorUnits + amountMinorUnits)
+    );
+    refundId = String(result.id ?? "");
+    if (!refundId) throw new HttpsError("internal", "Stripe did not return a refund identifier.");
+  } else if (provider === "PAYPAL") {
+    const captureId = String(payment.providerReceiptId ?? "");
+    if (!captureId) throw new HttpsError("failed-precondition", "PayPal capture reference is missing.");
+    const access = await getPayPalAccessToken();
+    const response = await fetch(access.baseUrl + "/v2/payments/captures/" + encodeURIComponent(captureId) + "/refund", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + access.token,
+        "Content-Type": "application/json",
+        "PayPal-Request-Id": "labmda-refund-" + orderId + "-" + (refunded.minorUnits + amountMinorUnits)
+      },
+      body: JSON.stringify({
+        amount: { value: (amountMinorUnits / 100).toFixed(2), currency_code: total.currencyCode.toUpperCase() },
+        invoice_id: orderId,
+        note_to_payer: reason.slice(0, 200)
+      })
+    });
+    const result = await response.json() as { id?: string };
+    if (!response.ok || !result.id) throw new HttpsError("failed-precondition", "PayPal did not accept the refund request.");
+    refundId = result.id;
+  } else {
+    throw new HttpsError("failed-precondition", "This payment provider does not support remote refunds.");
+  }
+  await getDatabase().ref("payments/" + orderId + "/refundRequest").set({
+    id: refundId, amount: { minorUnits: amountMinorUnits, currencyCode: total.currencyCode },
+    reason: reason.slice(0, 200), status: "SUBMITTED", submittedAtEpochMillis: Date.now()
+  });
+  return refundId;
+}
+
+async function refundPaymentForAdmin(uid: string, body: {
+  orderId?: string; amountMinorUnits?: number | null; currencyCode?: string | null; reason?: string;
+}): Promise<Record<string, unknown>> {
+  await requireAdmin(uid);
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
+  const context = await loadPaymentContext(orderId);
+  if (!context) throw new HttpsError("not-found", "Payment record was not found.");
+  const total = moneyValue(context.payment.amount);
+  const currentRefund = moneyValue(context.payment.refundAmount, total.currencyCode);
+  const remaining = total.minorUnits - currentRefund.minorUnits;
+  const currency = typeof body.currencyCode === "string" ? body.currencyCode.trim().toUpperCase() : total.currencyCode.toUpperCase();
+  if (currency !== total.currencyCode.toUpperCase()) throw new HttpsError("invalid-argument", "Refund currency does not match the payment.");
+  const amount = body.amountMinorUnits === undefined || body.amountMinorUnits === null ? remaining : Number(body.amountMinorUnits);
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > remaining) throw new HttpsError("invalid-argument", "Refund amount is invalid.");
+  const reason = typeof body.reason === "string" && body.reason.trim() ? body.reason.trim() : "Admin refund";
+  const refundId = await submitProviderRefund(orderId, context, amount, reason);
+  return { accepted: true, refundId, message: "Refund submitted to the provider; final refund status will be recorded by its verified webhook." };
+}
+
+export const refundPayment = onCall({
+  enforceAppCheck: true,
+  secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
+}, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  return refundPaymentForAdmin(uid, request.data as {
+    orderId?: string; amountMinorUnits?: number | null; currencyCode?: string | null; reason?: string;
+  });
+});
+
+/** Compatibility callable referenced by the existing admin presentation layer. */
+export const adminRefundPayment = onCall({
+  enforceAppCheck: true,
+  secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
+}, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  return refundPaymentForAdmin(uid, request.data as {
+    orderId?: string; amountMinorUnits?: number | null; currencyCode?: string | null; reason?: string;
+  });
+});
+
+export const setCommissionRules = onCall({ enforceAppCheck: true }, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const body = request.data as { currencyCode?: string; platformCommissionBps?: number; courierShareBps?: number };
+  const currencyCode = typeof body.currencyCode === "string" ? body.currencyCode.trim().toUpperCase() : "";
+  const platformCommissionBps = Number(body.platformCommissionBps);
+  const courierShareBps = Number(body.courierShareBps);
+  if (!/^[A-Z]{3}$/.test(currencyCode) ||
+      !Number.isInteger(platformCommissionBps) || platformCommissionBps < 0 || platformCommissionBps > 10000 ||
+      !Number.isInteger(courierShareBps) || courierShareBps < 0 || courierShareBps > 10000 ||
+      platformCommissionBps + courierShareBps > 10000) {
+    throw new HttpsError("invalid-argument", "Currency or commission basis points are invalid.");
+  }
+  await getDatabase().ref("config/commission").set({
+    currencyCode, platformCommissionBps, courierShareBps, updatedAtEpochMillis: Date.now()
+  });
+  return { accepted: true, message: "Commission rules saved." };
+});
+
+export const confirmCashCollected = onCall({ enforceAppCheck: true }, async request => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as the assigned courier.");
+  const body = request.data as { orderId?: string };
+  const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
+  if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
+  const context = await loadPaymentContext(orderId);
+  if (!context || context.rootPath !== "orders") throw new HttpsError("not-found", "Cash order was not found.");
+  if (normalizePaymentMethod(context.payment.provider ?? context.payment.method) !== "CASH") {
+    throw new HttpsError("failed-precondition", "This order does not use cash payment.");
+  }
+  const orderSnap = await getDatabase().ref("orders/" + orderId).get();
+  if (!orderSnap.exists()) throw new HttpsError("not-found", "Order was not found.");
+  const order = orderSnap.val() as Record<string, unknown>;
+  if (order.deliveryId !== uid || order.status !== "DELIVERED") {
+    throw new HttpsError("permission-denied", "Only the assigned courier can confirm cash after delivery.");
+  }
+  if (String(context.payment.status ?? "") === "SUCCEEDED") {
+    await settleCompletedPayment(orderId);
+    return { accepted: true, message: "Cash collection was already recorded." };
+  }
+  if (String(context.payment.status ?? "") === "REFUNDED") throw new HttpsError("failed-precondition", "A refunded payment cannot be marked collected.");
+  const amount = moneyValue(context.payment.amount);
+  await getDatabase().ref("payments/" + orderId).transaction(current => {
+    if (!current || typeof current !== "object") return;
+    if (String((current as Record<string, unknown>).status ?? "") === "SUCCEEDED") return;
+    return {
+      ...current,
+      status: "SUCCEEDED",
+      cashCollectedBy: uid,
+      cashCollectedAtEpochMillis: Date.now(),
+      provider: "CASH",
+      updatedAtEpochMillis: Date.now()
+    };
+  });
+  const after = await loadPaymentContext(orderId);
+  if (!after || String(after.payment.status ?? "") !== "SUCCEEDED") {
+    throw new HttpsError("failed-precondition", "Cash collection status could not be committed.");
+  }
+  await setPaymentStatus(orderId, after, "SUCCEEDED", {
+    provider: "CASH",
+    method: "CASH",
+    cashCollectedBy: uid,
+    cashCollectedAtEpochMillis: Date.now()
+  });
+  await settleCompletedPayment(orderId);
+  return { accepted: true, amount, message: "Cash collection recorded and settlement attempted." };
+});
+
+async function handleOrderStatusChange(orderId: string, status: string): Promise<void> {
+  const context = await loadPaymentContext(orderId);
+  if (!context) return;
+  const paymentStatus = String(context.payment.status ?? "PENDING");
+  if (status === "ACCEPTED") {
+    if (paymentStatus === "AUTHORIZED") await captureAuthorizedPayment(orderId, context);
+    else if (paymentStatus === "SUCCEEDED") await maybeCaptureAfterAuthorization(orderId);
+    return;
+  }
+  if (status === "CANCELLED") {
+    if (paymentStatus === "AUTHORIZED" || paymentStatus === "REQUIRES_ACTION" || paymentStatus === "PENDING") {
+      await releasePaymentAuthorization(orderId, context);
+      return;
+    }
+    if (paymentStatus === "SUCCEEDED" && String(context.payment.breakdownStatus ?? "") !== "ALLOCATED" &&
+        normalizePaymentMethod(context.payment.provider ?? context.payment.method) !== "CASH") {
+      try {
+        const total = moneyValue(context.payment.amount);
+        const refunded = moneyValue(context.payment.refundAmount, total.currencyCode);
+        const remaining = total.minorUnits - refunded.minorUnits;
+        if (remaining > 0) await submitProviderRefund(orderId, context, remaining, "Order cancelled before settlement");
+      } catch (error) {
+        await getDatabase().ref("payments/" + orderId).update({
+          requiresAdminReconciliation: true,
+          reconciliationReason: error instanceof Error ? error.message.slice(0, 250) : "Automatic cancellation refund failed",
+          updatedAtEpochMillis: Date.now()
+        });
+      }
+      return;
+    }
+    if (paymentStatus === "SUCCEEDED" && String(context.payment.breakdownStatus ?? "") === "ALLOCATED") {
+      await getDatabase().ref("payments/" + orderId).update({
+        requiresAdminReconciliation: true,
+        reconciliationReason: "Order cancelled after wallet settlement; reversal accounting is required.",
+        updatedAtEpochMillis: Date.now()
+      });
+    }
+    return;
+  }
+  if (status === "DELIVERED" && paymentStatus === "SUCCEEDED") await settleCompletedPayment(orderId);
+}
+
+export const onOrderStatusChange = onValueUpdated({
+  ref: "/orders/{orderId}/status",
+  secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
+}, async event => {
+  const orderId = String(event.params.orderId ?? "");
+  const status = String(event.data.after.val() ?? "");
+  if (!orderId || !status || event.data.before.val() === status) return;
+  await handleOrderStatusChange(orderId, status);
+});
+
+export const onTripStatusChange = onValueUpdated({
+  ref: "/trips/{tripId}/status",
+  secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
+}, async event => {
+  const tripId = String(event.params.tripId ?? "");
+  const status = String(event.data.after.val() ?? "");
+  if (!tripId || status !== "COMPLETED" || event.data.before.val() === status) return;
+  await maybeCaptureAfterAuthorization(tripId);
+});
+
+async function claimProviderEvent(provider: "stripe" | "paypal", eventId: string): Promise<"PROCESS" | "DONE"> {
+  const ref = getDatabase().ref("providerEvents/" + provider + "/" + eventId);
+  const now = Date.now();
+  const result = await ref.transaction(current => {
+    if (current && typeof current === "object") {
+      const record = current as Record<string, unknown>;
+      if (record.status === "PROCESSED") return;
+      if (record.status === "PROCESSING" && Number(record.leaseUntilEpochMillis ?? 0) > now) return;
+    }
+    return { status: "PROCESSING", leaseUntilEpochMillis: now + 120000, updatedAtEpochMillis: now };
+  });
+  if (result.committed) return "PROCESS";
+  const snapshot = await ref.get();
+  if (snapshot.child("status").val() === "PROCESSED") return "DONE";
+  throw new Error("Provider event is already being processed; retry later.");
+}
+
+async function completeProviderEvent(provider: "stripe" | "paypal", eventId: string): Promise<void> {
+  await getDatabase().ref("providerEvents/" + provider + "/" + eventId).update({
+    status: "PROCESSED", processedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now()
+  });
+}
+
+async function failProviderEvent(provider: "stripe" | "paypal", eventId: string, error: unknown): Promise<void> {
+  await getDatabase().ref("providerEvents/" + provider + "/" + eventId).update({
+    status: "FAILED",
+    lastError: error instanceof Error ? error.message.slice(0, 250) : "Unknown provider webhook error",
+    leaseUntilEpochMillis: 0,
+    updatedAtEpochMillis: Date.now()
+  });
+}
+
+async function handleStripeIntent(orderId: string, intent: Record<string, unknown>, eventType: string): Promise<void> {
+  const context = await loadPaymentContext(orderId);
+  if (!context) throw new Error("Payment not found for Stripe event.");
+  if (normalizePaymentMethod(context.payment.provider ?? context.payment.method) !== "STRIPE") {
+    throw new Error("Stripe event does not match the payment provider.");
+  }
+  const expected = moneyValue(context.payment.amount);
+  const actualAmount = eventType === "payment_intent.amount_capturable_updated"
+    ? Number(intent.amount_capturable ?? 0)
+    : Number(intent.amount_received ?? intent.amount ?? 0);
+  const actualCurrency = String(intent.currency ?? "").toUpperCase();
+  if (actualAmount !== expected.minorUnits || actualCurrency !== expected.currencyCode.toUpperCase()) {
+    throw new Error("Stripe amount or currency mismatch for payment " + orderId);
+  }
+  const intentId = String(intent.id ?? "");
+  if (!intentId) throw new Error("Stripe PaymentIntent ID is missing.");
+  if (eventType === "payment_intent.amount_capturable_updated" ||
+      (eventType === "checkout.session.completed" && intent.status === "requires_capture")) {
+    if (intent.status !== "requires_capture") throw new Error("Stripe PaymentIntent is not awaiting capture.");
+    await setPaymentStatus(orderId, context, "AUTHORIZED", {
+      provider: "STRIPE", providerPaymentIntentId: intentId, authorizedAtEpochMillis: Date.now()
+    });
+    await maybeCaptureAfterAuthorization(orderId);
+    return;
+  }
+  if (eventType === "payment_intent.succeeded" || intent.status === "succeeded") {
+    if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(String(context.payment.status ?? ""))) {
+      await getDatabase().ref("payments/" + orderId).update({ requiresAdminReconciliation: true, reconciliationReason: "Stripe reported success after local refund status." });
+      return;
+    }
+    const charge = intent.latest_charge;
+    const chargeId = typeof charge === "string" ? charge : String((charge as Record<string, unknown> | undefined)?.id ?? "");
+    await setPaymentStatus(orderId, context, "SUCCEEDED", {
+      provider: "STRIPE", providerPaymentIntentId: intentId,
+      providerReceiptId: chargeId || intentId, providerReference: String(context.payment.providerReference ?? ""),
+      verifiedAtEpochMillis: Date.now()
+    });
+    await maybeCaptureAfterAuthorization(orderId);
+    return;
+  }
+  if (eventType === "payment_intent.canceled") {
+    await setPaymentStatus(orderId, context, "CANCELLED", { provider: "STRIPE", providerPaymentIntentId: intentId });
+    return;
+  }
+  if (eventType === "payment_intent.payment_failed") {
+    await setPaymentStatus(orderId, context, "FAILED", {
+      provider: "STRIPE", providerPaymentIntentId: intentId,
+      failureMessage: String((intent.last_payment_error as Record<string, unknown> | undefined)?.message ?? "Payment failed")
+    });
+  }
+}
+
+async function findPaymentByIntentId(intentId: string): Promise<{ orderId: string; context: PaymentContext } | null> {
+  const snapshot = await getDatabase().ref("payments").orderByChild("providerPaymentIntentId").equalTo(intentId).limitToFirst(2).get();
+  const entries = Object.entries((snapshot.val() ?? {}) as Record<string, unknown>);
+  if (entries.length !== 1) return null;
+  const [orderId, raw] = entries[0];
+  const payment = raw as Record<string, unknown>;
+  return { orderId, context: { payment, rootPath: String(payment.contextType ?? "") === "RIDE" ? "trips" : "orders" } };
+}
+
+export const stripeWebhook = onRequest({
+  secrets: [stripeWebhookSecret, stripeSecretKey, paypalClientId, paypalClientSecret],
+  timeoutSeconds: 120
+}, async (request, response) => {
+  const eventId = String((request.body as Record<string, unknown> | undefined)?.id ?? "");
+  try {
+    const signature = String(request.headers["stripe-signature"] ?? "");
+    if (!stripeSignatureValid(request.rawBody, signature, stripeWebhookSecret.value().trim())) {
+      response.status(400).send("Invalid Stripe signature");
+      return;
+    }
+    const event = request.body as { id?: string; type?: string; data?: { object?: Record<string, unknown> } };
+    if (!event.id || !event.type || !event.data?.object) {
+      response.status(400).send("Invalid Stripe event");
+      return;
+    }
+    const claim = await claimProviderEvent("stripe", event.id);
+    if (claim === "DONE") {
+      response.status(200).send("Duplicate event");
+      return;
+    }
+    try {
+      const object = event.data.object;
+      if (event.type.startsWith("payment_intent.")) {
+        const metadata = object.metadata as Record<string, unknown> | undefined;
+        const orderId = String(metadata?.orderId ?? "");
+        if (orderId && [
+          "payment_intent.amount_capturable_updated", "payment_intent.succeeded",
+          "payment_intent.canceled", "payment_intent.payment_failed"
+        ].includes(event.type)) await handleStripeIntent(orderId, object, event.type);
+      } else if (event.type === "checkout.session.completed") {
+        const orderId = String(object.client_reference_id ?? (object.metadata as Record<string, unknown> | undefined)?.orderId ?? "");
+        const intentId = typeof object.payment_intent === "string" ? object.payment_intent :
+          String((object.payment_intent as Record<string, unknown> | undefined)?.id ?? "");
+        if (orderId && intentId) {
+          const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), stripeSecretKey.value().trim());
+          await handleStripeIntent(orderId, intent, event.type);
+        }
+      } else if (event.type === "charge.refunded") {
+        const intentId = String(object.payment_intent ?? "");
+        const located = intentId ? await findPaymentByIntentId(intentId) : null;
+        if (located) {
+          const total = moneyValue(located.context.payment.amount);
+          const refundedMinor = Number(object.amount_refunded ?? 0);
+          if (!Number.isSafeInteger(refundedMinor) || refundedMinor < 0 || refundedMinor > total.minorUnits) throw new Error("Stripe refund amount is invalid.");
+          const status = refundedMinor >= total.minorUnits ? "REFUNDED" : refundedMinor > 0 ? "PARTIALLY_REFUNDED" : String(located.context.payment.status ?? "SUCCEEDED");
+          await getDatabase().ref("payments/" + located.orderId).update({
+            status,
+            refundAmount: { minorUnits: refundedMinor, currencyCode: total.currencyCode },
+            refundRequest: { ...(located.context.payment.refundRequest as Record<string, unknown> ?? {}), status: "COMPLETED", updatedAtEpochMillis: Date.now() },
+            requiresAdminReconciliation: String(located.context.payment.breakdownStatus ?? "") === "ALLOCATED",
+            updatedAtEpochMillis: Date.now()
+          });
+          await getDatabase().ref("ledger/refund_" + located.orderId + "_" + refundedMinor).set({
+            id: "refund_" + located.orderId + "_" + refundedMinor,
+            orderId: located.orderId, entryType: "PROVIDER_REFUND_CONFIRMED",
+            amount: { minorUnits: refundedMinor, currencyCode: total.currencyCode }, status: "CONFIRMED",
+            affectsWallet: false, requiresReversal: String(located.context.payment.breakdownStatus ?? "") === "ALLOCATED",
+            createdAtEpochMillis: Date.now()
+          });
+        }
+      } else if (event.type === "payout.paid" || event.type === "payout.failed") {
+        const payoutId = String((object.metadata as Record<string, unknown> | undefined)?.payoutId ?? "");
+        const accountId = String((event as unknown as Record<string, unknown>).account ?? "");
+        if (payoutId) {
+          const payout = await getDatabase().ref("payouts/" + payoutId).get();
+          const record = payout.val() as Record<string, unknown> | null;
+          if (record && record.provider === "STRIPE" && record.providerAccountId === accountId) {
+            await finalizePayoutEvent(payoutId, event.type === "payout.paid" ? "PAID" : "FAILED", String(object.id ?? ""));
+          }
+        }
+      }
+      await completeProviderEvent("stripe", event.id);
+      response.status(200).send("OK");
+    } catch (error) {
+      await failProviderEvent("stripe", event.id, error);
+      console.error("Stripe webhook failed", error instanceof Error ? error.message : "unknown error");
+      response.status(500).send("Retry webhook processing");
+    }
+  } catch (error) {
+    console.error("Stripe webhook rejected", error instanceof Error ? error.message : "unknown error");
+    response.status(500).send("Webhook processing error");
+  }
+});
+
+function firstHeader(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? String(value[0] ?? "") : String(value ?? "");
+}
+
+export const paypalWebhook = onRequest({
+  secrets: [paypalClientId, paypalClientSecret, paypalWebhookId, stripeSecretKey],
+  timeoutSeconds: 120
+}, async (request, response) => {
+  const body = request.body as Record<string, unknown>;
+  const eventId = String(body?.id ?? "");
+  try {
+    if (!eventId || !await verifyPayPalWebhook(body, request.headers)) {
+      response.status(400).send("Invalid PayPal signature");
+      return;
+    }
+    const claim = await claimProviderEvent("paypal", eventId);
+    if (claim === "DONE") {
+      response.status(200).send("Duplicate event");
+      return;
+    }
+    try {
+      const eventType = String(body.event_type ?? "");
+      const resource = body.resource && typeof body.resource === "object" ? body.resource as Record<string, unknown> : {};
+      const related = ((resource.supplementary_data as Record<string, unknown> | undefined)?.related_ids ?? {}) as Record<string, unknown>;
+      const orderReference = String(
+        related.order_id ?? resource.custom_id ?? resource.invoice_id ?? resource.id ?? ""
+      );
+      const located = await findPaymentByProviderReference(orderReference);
+      if (eventType === "CHECKOUT.ORDER.APPROVED" && located) {
+        const orderId = located.orderId;
+        const access = await getPayPalAccessToken();
+        const authResponse = await fetch(access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(orderReference) + "/authorize", {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + access.token,
+            "Content-Type": "application/json",
+            "PayPal-Request-Id": "labmda-authorize-" + orderId
+          },
+          body: "{}"
+        });
+        const authorized = await authResponse.json() as {
+          id?: string; purchase_units?: Array<{ payments?: { authorizations?: Array<{ id?: string }> } }>;
+        };
+        const authorizationId = String(authorized.purchase_units?.[0]?.payments?.authorizations?.[0]?.id ?? "");
+        if (!authResponse.ok || authorized.id !== orderReference || !authorizationId) {
+          throw new Error("PayPal order authorization failed.");
+        }
+        await getDatabase().ref("payments/" + orderId).update({ providerAuthorizationId: authorizationId, updatedAtEpochMillis: Date.now() });
+      } else if (eventType === "PAYMENT.AUTHORIZATION.CREATED" && located) {
+        const amount = moneyValue(located.context.payment.amount);
+        const actualMinor = Math.round(Number((resource.amount as Record<string, unknown> | undefined)?.value ?? "NaN") * 100);
+        const actualCurrency = String((resource.amount as Record<string, unknown> | undefined)?.currency_code ?? "").toUpperCase();
+        const authorizationId = String(resource.id ?? "");
+        if (actualMinor !== amount.minorUnits || actualCurrency !== amount.currencyCode.toUpperCase() || !authorizationId) {
+          throw new Error("PayPal authorization amount, currency, or ID is invalid.");
+        }
+        await setPaymentStatus(located.orderId, located.context, "AUTHORIZED", {
+          provider: "PAYPAL", providerAuthorizationId: authorizationId, authorizedAtEpochMillis: Date.now()
+        });
+        await maybeCaptureAfterAuthorization(located.orderId);
+      } else if (eventType === "PAYMENT.CAPTURE.COMPLETED" && located) {
+        const amount = moneyValue(located.context.payment.amount);
+        const actualMinor = Math.round(Number((resource.amount as Record<string, unknown> | undefined)?.value ?? "NaN") * 100);
+        const actualCurrency = String((resource.amount as Record<string, unknown> | undefined)?.currency_code ?? "").toUpperCase();
+        if (actualMinor !== amount.minorUnits || actualCurrency !== amount.currencyCode.toUpperCase()) {
+          throw new Error("PayPal capture amount or currency does not match the server payment.");
+        }
+        const feeValue = ((resource.seller_receivable_breakdown as Record<string, unknown> | undefined)?.paypal_fee) as Record<string, unknown> | undefined;
+        const gatewayFeeMinorUnits = feeValue ? Math.round(Number(feeValue.value ?? "NaN") * 100) : undefined;
+        await setPaymentStatus(located.orderId, located.context, "SUCCEEDED", {
+          provider: "PAYPAL", providerReceiptId: String(resource.id ?? ""),
+          gatewayFeeMinorUnits: Number.isSafeInteger(gatewayFeeMinorUnits) && Number(gatewayFeeMinorUnits) >= 0 ? gatewayFeeMinorUnits : undefined,
+          verifiedAtEpochMillis: Date.now()
+        });
+        await maybeCaptureAfterAuthorization(located.orderId);
+      } else if (eventType === "PAYMENT.AUTHORIZATION.VOIDED" && located) {
+        await setPaymentStatus(located.orderId, located.context, "CANCELLED", {
+          provider: "PAYPAL", providerAuthorizationId: String(resource.id ?? "")
+        });
+      } else if (eventType === "PAYMENT.CAPTURE.REFUNDED" && located) {
+        const total = moneyValue(located.context.payment.amount);
+        const previous = moneyValue(located.context.payment.refundAmount, total.currencyCode);
+        const refund = Math.round(Number((resource.amount as Record<string, unknown> | undefined)?.value ?? "NaN") * 100);
+        if (!Number.isSafeInteger(refund) || refund <= 0) throw new Error("PayPal refund amount is invalid.");
+        const cumulative = Math.min(total.minorUnits, previous.minorUnits + refund);
+        await getDatabase().ref("payments/" + located.orderId).update({
+          status: cumulative >= total.minorUnits ? "REFUNDED" : "PARTIALLY_REFUNDED",
+          refundAmount: { minorUnits: cumulative, currencyCode: total.currencyCode },
+          refundRequest: { ...(located.context.payment.refundRequest as Record<string, unknown> ?? {}), status: "COMPLETED", updatedAtEpochMillis: Date.now() },
+          requiresAdminReconciliation: String(located.context.payment.breakdownStatus ?? "") === "ALLOCATED",
+          updatedAtEpochMillis: Date.now()
+        });
+      } else if (eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED" || eventType === "PAYMENT.PAYOUTS-ITEM.FAILED") {
+        const payoutItem = resource;
+        const payoutId = String(payoutItem.sender_item_id ?? (payoutItem.payout_item as Record<string, unknown> | undefined)?.sender_item_id ?? "");
+        if (payoutId) {
+          const locatedPayout = await getDatabase().ref("payouts/" + payoutId).get();
+          const record = locatedPayout.val() as Record<string, unknown> | null;
+          if (record && record.provider === "PAYPAL") {
+            await finalizePayoutEvent(
+              payoutId,
+              eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED" ? "PAID" : "FAILED",
+              String(payoutItem.payout_item_id ?? payoutItem.id ?? "")
+            );
+          }
+        }
+      }
+      await completeProviderEvent("paypal", eventId);
+      response.status(200).send("OK");
+    } catch (error) {
+      await failProviderEvent("paypal", eventId, error);
+      console.error("PayPal webhook failed", error instanceof Error ? error.message : "unknown error");
+      response.status(500).send("Retry webhook processing");
+    }
+  } catch (error) {
+    console.error("PayPal webhook rejected", error instanceof Error ? error.message : "unknown error");
+    response.status(500).send("Webhook processing error");
+  }
+});
+
+/** Retry terminal-order settlements while waiting for provider fee data or a transient provider response. */
+export const retryPaymentSettlement = onSchedule({
+  schedule: "every 15 minutes",
+  timeoutSeconds: 540,
+  secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
+}, async () => {
+  const snapshot = await getDatabase().ref("payments").orderByChild("status").equalTo("SUCCEEDED").limitToFirst(100).get();
+  const raw = snapshot.val() as Record<string, unknown> | null;
+  for (const [orderId, value] of Object.entries(raw ?? {})) {
+    const payment = value as Record<string, unknown>;
+    if (payment.breakdownStatus === "ALLOCATED") continue;
+    try { await settleCompletedPayment(orderId); }
+    catch (error) { console.error("Settlement retry deferred for", orderId, error instanceof Error ? error.message : "unknown error"); }
+  }
 });
