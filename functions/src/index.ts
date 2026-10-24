@@ -1012,7 +1012,10 @@ export const createPaymentSession = onCall({
     form.set("metadata[orderId]", orderId);
     form.set("metadata[contextType]", context.rootPath === "trips" ? "RIDE" : "ORDER");
     form.set("payment_intent_data[metadata][orderId]", orderId);
-    form.set("payment_intent_data[capture_method]", "manual");
+    // Stripe Checkout exposes manual capture per card payment method; limit this session
+    // to cards because not every Dashboard-enabled payment method supports authorization holds.
+    form.set("payment_method_types[0]", "card");
+    form.set("payment_method_options[card][capture_method]", "manual");
     form.set("line_items[0][quantity]", "1");
     form.set("line_items[0][price_data][currency]", currencyCode);
     form.set("line_items[0][price_data][unit_amount]", String(amountMinorUnits));
