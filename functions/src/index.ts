@@ -970,8 +970,13 @@ export const createPaymentSession = onCall({
   const context = await getOwnedPaymentContext(orderId, uid);
   const payment = context.payment;
   const currentStatus = String(payment.status ?? "PENDING");
-  if (currentStatus === "SUCCEEDED" || currentStatus === "REFUNDED" || currentStatus === "PARTIALLY_REFUNDED") {
+  if (["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(currentStatus)) {
     throw new HttpsError("failed-precondition", "This payment has already been settled.");
+  }
+  const orderOrTrip = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+  const orderOrTripStatus = String(orderOrTrip.child("status").val() ?? "");
+  if (!orderOrTrip.exists() || ["CANCELLED", "CANCELED", "DELIVERED", "COMPLETED"].includes(orderOrTripStatus)) {
+    throw new HttpsError("failed-precondition", "Checkout cannot be started for a cancelled or completed order/ride.");
   }
 
   const authoritative = await recomputeAuthoritativeAmount(orderId, context);
@@ -1077,6 +1082,25 @@ export const createPaymentSession = onCall({
     checkoutUrl = approvalLink;
   }
 
+  // Re-read immediately before storing the hosted URL. An order may be cancelled while
+  // the provider API call is in flight; do not return a live checkout URL in that case.
+  const latestRoot = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+  const latestPaymentSnapshot = await getDatabase().ref("payments/" + orderId).get();
+  const latestRootStatus = String(latestRoot.child("status").val() ?? "");
+  const latestPayment = latestPaymentSnapshot.val() as Record<string, unknown> | null;
+  if (!latestRoot.exists() || ["CANCELLED", "CANCELED", "DELIVERED", "COMPLETED"].includes(latestRootStatus) ||
+      String(latestPayment?.status ?? "") === "CANCELLED") {
+    if (method === "STRIPE") {
+      try {
+        await stripeApi<Record<string, unknown>>(
+          "checkout/sessions/" + encodeURIComponent(sessionId) + "/expire",
+          stripeSecretKey.value().trim(), "POST", new URLSearchParams(), "labmda-cancel-session-" + orderId
+        );
+      } catch { /* Best effort only; no checkout URL is returned to the client. */ }
+    }
+    throw new HttpsError("failed-precondition", "The order was cancelled while checkout was being prepared.");
+  }
+
   const now = Date.now();
   await getDatabase().ref().update({
     ["payments/" + orderId + "/provider"]: method,
@@ -1103,8 +1127,12 @@ export const requestCashPayment = onCall({ enforceAppCheck: true }, async (reque
   if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
   const context = await getOwnedPaymentContext(orderId, uid);
   const status = String(context.payment.status ?? "PENDING");
-  if (status === "SUCCEEDED" || status === "REFUNDED" || status === "PARTIALLY_REFUNDED") {
+  if (["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) {
     throw new HttpsError("failed-precondition", "This payment has already been settled.");
+  }
+  const linkedRoot = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+  if (!linkedRoot.exists() || ["CANCELLED", "CANCELED", "DELIVERED", "COMPLETED"].includes(String(linkedRoot.child("status").val() ?? ""))) {
+    throw new HttpsError("failed-precondition", "Cash payment cannot be selected for a cancelled or completed order/ride.");
   }
   const existingSessionId = String(context.payment.providerPaymentId ?? "");
   const existingExpiry = Number(context.payment.expiresAtEpochMillis ?? 0);
@@ -2442,6 +2470,13 @@ export const paypalWebhook = onRequest({
       const located = await findPaymentByProviderReference(orderReference);
       if (eventType === "CHECKOUT.ORDER.APPROVED" && located) {
         const orderId = located.orderId;
+        const linkedRoot = await getDatabase().ref(located.context.rootPath + "/" + orderId).get();
+        if (!linkedRoot.exists() || ["CANCELLED", "CANCELED", "DELIVERED", "COMPLETED"].includes(String(linkedRoot.child("status").val() ?? ""))) {
+          await setPaymentStatus(orderId, located.context, "CANCELLED", { cancelReason: "ORDER_TERMINAL_BEFORE_PAYPAL_AUTHORIZATION" });
+          await completeProviderEvent("paypal", eventId);
+          response.status(200).send("Payment cancelled; PayPal authorization skipped");
+          return;
+        }
         const access = await getPayPalAccessToken();
         const authResponse = await fetch(access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(orderReference) + "/authorize", {
           method: "POST",
