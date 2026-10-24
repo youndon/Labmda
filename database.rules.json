@@ -26,7 +26,8 @@
       ".indexOn": [
         "clientId",
         "merchantId",
-        "courierId"
+        "courierId",
+        "updatedAtEpochMillis"
       ],
       ".read": false,
       "$paymentId": {
