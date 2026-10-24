@@ -54,11 +54,11 @@ The owner can read their own wallet and an admin can read wallets through the ad
 
 ## `ledger/{entryId}`
 
-Append-only server-owned journal entries should include `uid` (the wallet owner), `orderId`, `type`, `amount` (Money), `status`, `provider`, `providerReference`, `createdAtEpochMillis`, and an idempotency/event identifier. Order-associated records may also carry `clientId`, `merchantId`, and `courierId` for participant-scoped reads. Client writes are denied; each party can read only a ledger entry associated with their UID. This PR defines the rule boundary and wallet transaction response, but does not post balance-changing ledger entries yet.
+Append-only server-owned journal entries should include `uid` (the wallet owner) for balance postings, `orderId`, `type`, `amount` (Money), `status`, `provider`, `providerReference`, `createdAtEpochMillis`, and an idempotency/event identifier. Order-associated records may also carry `clientId`, `merchantId`, and `courierId` for participant-scoped reads. Verified provider completion writes one deterministic `PAYMENT_CONFIRMED_GROSS` event with `affectsWallet: false`, preserving an audit trail without treating gross receipts as wallet earnings. Client writes are denied; each party can read only a ledger entry associated with their UID. Balance-changing ledger entries are not posted yet.
 
 ## `payouts/{payoutId}`
 
-Server-owned payout request/result records should include `uid`, role-specific `merchantId` or `courierId`, `amount` (Money), `status`, `providerReference`, and created/updated timestamps. The owner can read their own payout records; direct writes are denied. Actual payout execution is disabled, and `requestPayout` deliberately fails closed without reserving funds or creating a live payout.
+Server-owned payout request/result records should include `uid`, role-specific `merchantId` or `courierId`, `amount` (Money), `status`, `providerReference`, and created/updated timestamps. The owner can read their own payout records; direct writes are denied. Actual payout execution is disabled. `requestPayout` writes a server-owned `REJECTED_DISABLED` audit record, then fails closed without reserving funds or creating a live payout.
 
 ## `config/commission`
 
