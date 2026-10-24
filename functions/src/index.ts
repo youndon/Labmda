@@ -529,25 +529,49 @@ async function releasePaymentAuthorization(orderId: string, context: PaymentCont
     return;
   }
   if (provider === "STRIPE") {
-    const intentId = String(payment.providerPaymentIntentId ?? "");
-    if (!intentId) return;
     const key = stripeSecretKey.value().trim();
-    const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), key);
-    if (intent.status === "requires_capture") {
-      await stripeApi<Record<string, unknown>>(
-        "payment_intents/" + encodeURIComponent(intentId) + "/cancel", key, "POST",
-        new URLSearchParams(), "labmda-cancel-" + orderId
-      );
+    const intentId = String(payment.providerPaymentIntentId ?? "");
+    if (intentId) {
+      const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), key);
+      if (intent.status === "requires_capture") {
+        await stripeApi<Record<string, unknown>>(
+          "payment_intents/" + encodeURIComponent(intentId) + "/cancel", key, "POST",
+          new URLSearchParams(), "labmda-cancel-" + orderId
+        );
+      } else if (intent.status === "succeeded" && String(payment.breakdownStatus ?? "") !== "ALLOCATED") {
+        const total = moneyValue(payment.amount);
+        const refunded = moneyValue(payment.refundAmount, total.currencyCode);
+        const remaining = total.minorUnits - refunded.minorUnits;
+        if (remaining > 0) await submitProviderRefund(orderId, context, remaining, "Order cancelled before settlement");
+      }
+      return;
     }
+    const sessionId = String(payment.providerReference ?? payment.providerPaymentId ?? "");
+    if (sessionId.startsWith("cs_")) {
+      const session = await stripeApi<Record<string, unknown>>("checkout/sessions/" + encodeURIComponent(sessionId), key);
+      if (session.status === "open") {
+        await stripeApi<Record<string, unknown>>(
+          "checkout/sessions/" + encodeURIComponent(sessionId) + "/expire", key, "POST",
+          new URLSearchParams(), "labmda-expire-" + orderId
+        );
+      } else if (session.status !== "expired") {
+        await getDatabase().ref("payments/" + orderId).update({ requiresAdminReconciliation: true, reconciliationReason: "Order cancelled after checkout left the open state but no PaymentIntent reference was stored." });
+      }
+      return;
+    }
+    await setPaymentStatus(orderId, context, "CANCELLED", { cancelReason: "ORDER_CANCELLED_BEFORE_PROVIDER_SESSION" });
   } else if (provider === "PAYPAL") {
     const authorizationId = String(payment.providerAuthorizationId ?? "");
-    if (!authorizationId) return;
     const access = await getPayPalAccessToken();
+    if (!authorizationId) {
+      await setPaymentStatus(orderId, context, "CANCELLED", { cancelReason: "ORDER_CANCELLED_BEFORE_AUTHORIZATION" });
+      return;
+    }
     const response = await fetch(access.baseUrl + "/v2/payments/authorizations/" + encodeURIComponent(authorizationId) + "/void", {
       method: "POST",
       headers: { Authorization: "Bearer " + access.token, "PayPal-Request-Id": "labmda-void-" + orderId }
     });
-    if (!response.ok) throw new Error("PayPal authorization void failed.");
+    if (!response.ok && response.status !== 422) throw new Error("PayPal authorization void failed.");
   }
 }
 
@@ -2158,6 +2182,14 @@ export const stripeWebhook = onRequest({
         if (orderId && intentId) {
           const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), stripeSecretKey.value().trim());
           await handleStripeIntent(orderId, intent, event.type);
+        }
+      } else if (event.type === "checkout.session.expired") {
+        const orderId = String(object.client_reference_id ?? (object.metadata as Record<string, unknown> | undefined)?.orderId ?? "");
+        if (orderId) {
+          const context = await loadPaymentContext(orderId);
+          if (context && String(context.payment.status ?? "") !== "SUCCEEDED") {
+            await setPaymentStatus(orderId, context, "CANCELLED", { provider: "STRIPE" });
+          }
         }
       } else if (event.type === "charge.refunded") {
         const intentId = String(object.payment_intent ?? "");
