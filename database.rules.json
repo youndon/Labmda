@@ -28,14 +28,57 @@
         "merchantId",
         "courierId"
       ],
-      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+      ".read": false,
       "$paymentId": {
-        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('merchantIds').child(auth.uid).val() === true || data.child('courierId').val() === auth.uid)",
         ".write": false
       }
     },
     "deliveryQueue": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('deliveryServices').child('status').val() === 'APPROVED'",
+      ".write": false
+    },
+    "wallets": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".write": false
+      }
+    },
+    "ledger": {
+      ".indexOn": [
+        "uid",
+        "clientId",
+        "merchantId",
+        "courierId"
+      ],
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+      "$entryId": {
+        ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('merchantIds').child(auth.uid).val() === true || data.child('courierId').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "payouts": {
+      ".indexOn": [
+        "uid",
+        "merchantId",
+        "courierId",
+        "status"
+      ],
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+      "$payoutId": {
+        ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "config": {
+      "commission": {
+        ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+        ".write": false
+      }
+    },
+    "paymentCustomers": {
+      ".read": false,
       ".write": false
     }
   }
