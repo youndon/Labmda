@@ -64,6 +64,7 @@ class CourierWalletScreen : Screen {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Available: ${value.summary.availableBalance.format()}", style = MaterialTheme.typography.titleLarge)
                             Text("Pending: ${value.summary.pendingBalance.format()}")
+                            Text("Cash owed: ${value.summary.cashOwed.format()}")
                             Text("Lifetime earnings: ${value.summary.lifetimeEarnings.format()}")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { navigator?.push(PayoutAccountScreen()) }) { Text("Payout account") }
