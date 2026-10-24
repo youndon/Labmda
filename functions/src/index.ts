@@ -1054,107 +1054,37 @@ export const verifyPaymentReturn = onCall({
   }
   const context = await getOwnedPaymentContext(orderId, uid);
   const payment = context.payment;
-  if (normalizePaymentMethod(payment.method) !== provider) {
+  if (normalizePaymentMethod(payment.provider ?? payment.method) !== provider) {
     throw new HttpsError("permission-denied", "This provider does not match the payment method.");
   }
-  const currentStatus = String(payment.status ?? "PENDING");
-  if (currentStatus === "SUCCEEDED") return { accepted: true, message: "Payment already verified." };
-  if (currentStatus === "REFUNDED" || currentStatus === "PARTIALLY_REFUNDED") {
+  const recordedSessionId = String(payment.providerReference ?? payment.providerPaymentId ?? "");
+  if (!recordedSessionId || (resultToken !== "cancel" && (sessionId !== recordedSessionId || resultToken !== recordedSessionId))) {
+    throw new HttpsError("permission-denied", "The returned session does not match this payment.");
+  }
+  if (String(payment.status ?? "") === "SUCCEEDED") {
+    return { accepted: true, message: "Payment is already confirmed by the server." };
+  }
+  if (String(payment.status ?? "") === "REFUNDED" || String(payment.status ?? "") === "PARTIALLY_REFUNDED") {
     throw new HttpsError("failed-precondition", "This payment has already been refunded.");
   }
-  const recordedSessionId = String(payment.providerPaymentId ?? "");
-  const amount = payment.amount as Record<string, unknown> | undefined;
-  const expectedMinorUnits = Number(amount?.minorUnits);
-  const expectedCurrency = String(amount?.currencyCode ?? "USD").toUpperCase();
-  if (!Number.isSafeInteger(expectedMinorUnits) || expectedMinorUnits <= 0) {
-    throw new HttpsError("failed-precondition", "The server payment amount is invalid.");
-  }
 
-  // The cancel redirect is only a request. Query the provider before changing the state.
+  const expected = await recomputeAuthoritativeAmount(orderId, context);
+  const keyAmount = moneyValue(payment.amount);
+  if (expected.minorUnits !== keyAmount.minorUnits ||
+      expected.currencyCode.toUpperCase() !== keyAmount.currencyCode.toUpperCase()) {
+    throw new HttpsError("failed-precondition", "The server payment amount is inconsistent.");
+  }
   if (resultToken === "cancel") {
-    if (!recordedSessionId) {
-      await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
-      return { accepted: true, message: "Checkout was cancelled before a provider session was created." };
-    }
-    if (provider === "STRIPE") {
-      const key = stripeSecretKey.value().trim();
-      if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
-      const statusResponse = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(recordedSessionId), {
-        headers: { Authorization: "Bearer " + key }
-      });
-      const providerSession = await statusResponse.json() as {
-        id?: string; status?: string; payment_status?: string; amount_total?: number; currency?: string;
-        payment_intent?: string | { id?: string };
-      };
-      if (!statusResponse.ok || providerSession.id !== recordedSessionId) {
-        throw new HttpsError("failed-precondition", "Stripe could not verify the cancellation request.");
-      }
-      if (providerSession.payment_status === "paid") {
-        if (providerSession.amount_total !== expectedMinorUnits ||
-            String(providerSession.currency ?? "").toUpperCase() !== expectedCurrency) {
-          throw new HttpsError("failed-precondition", "Stripe's settled amount does not match the server payment.");
-        }
-        const intentId = typeof providerSession.payment_intent === "string"
-          ? providerSession.payment_intent : String(providerSession.payment_intent?.id ?? "");
-        await setPaymentStatus(orderId, context, "SUCCEEDED", {
-          providerPaymentId: recordedSessionId, providerReceiptId: intentId, verifiedAtEpochMillis: Date.now()
-        });
-        return { accepted: true, message: "Stripe confirmed the payment despite the return redirect." };
-      }
-      if (providerSession.status === "complete") {
-        await setPaymentStatus(orderId, context, "PROCESSING");
-        return { accepted: true, message: "The Stripe session completed; payment confirmation is still pending." };
-      }
-      if (providerSession.status === "open") {
-        const expireResponse = await fetch(
-          "https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(recordedSessionId) + "/expire",
-          { method: "POST", headers: { Authorization: "Bearer " + key } }
-        );
-        if (!expireResponse.ok) {
-          throw new HttpsError("failed-precondition", "Stripe could not close the checkout session safely.");
-        }
-      }
-    } else {
-      const access = await getPayPalAccessToken();
-      const statusResponse = await fetch(
-        access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(recordedSessionId),
-        { headers: { Authorization: "Bearer " + access.token } }
-      );
-      const providerOrder = await statusResponse.json() as {
-        id?: string; status?: string;
-        purchase_units?: Array<{ amount?: { currency_code?: string; value?: string }; payments?: { captures?: Array<{ id?: string }> } }>;
-      };
-      if (!statusResponse.ok || providerOrder.id !== recordedSessionId) {
-        throw new HttpsError("failed-precondition", "PayPal could not verify the cancellation request.");
-      }
-      if (providerOrder.status === "COMPLETED") {
-        const unit = providerOrder.purchase_units?.[0];
-        const actualCurrency = String(unit?.amount?.currency_code ?? "").toUpperCase();
-        const actualMinor = Math.round(Number(unit?.amount?.value ?? "NaN") * 100);
-        if (actualCurrency !== expectedCurrency || actualMinor !== expectedMinorUnits) {
-          throw new HttpsError("failed-precondition", "PayPal's settled amount does not match the server payment.");
-        }
-        await setPaymentStatus(orderId, context, "SUCCEEDED", {
-          providerPaymentId: recordedSessionId,
-          providerReceiptId: String(unit?.payments?.captures?.[0]?.id ?? recordedSessionId),
-          verifiedAtEpochMillis: Date.now()
-        });
-        return { accepted: true, message: "PayPal confirmed the payment despite the return redirect." };
-      }
-    }
-    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
-    return { accepted: true, message: "Provider confirmed no successful payment; checkout was cancelled." };
-  }
-
-  if (!recordedSessionId || sessionId !== recordedSessionId || resultToken !== recordedSessionId) {
-    throw new HttpsError("permission-denied", "The returned session does not match this payment.");
+    // A provider redirect is not the order-cancellation authority. The order status trigger
+    // will release a real authorization only after the order itself enters CANCELLED.
+    return { accepted: true, message: "Checkout return received. Payment state remains provider-webhook authoritative." };
   }
 
   if (provider === "STRIPE") {
-    const key = stripeSecretKey.value().trim();
-    if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+    const secret = stripeSecretKey.value().trim();
+    if (!secret) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
     const response = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(sessionId), {
-      headers: { Authorization: "Bearer " + key }
+      headers: { Authorization: "Bearer " + secret }
     });
     const session = await response.json() as {
       id?: string; status?: string; payment_status?: string; amount_total?: number;
@@ -1163,63 +1093,86 @@ export const verifyPaymentReturn = onCall({
     if (!response.ok || session.id !== recordedSessionId) {
       throw new HttpsError("failed-precondition", "Stripe could not verify this checkout session.");
     }
+    if (session.amount_total !== expected.minorUnits ||
+        String(session.currency ?? "").toUpperCase() !== expected.currencyCode.toUpperCase()) {
+      throw new HttpsError("failed-precondition", "Stripe's amount or currency does not match the server order.");
+    }
     if (session.status === "expired") {
-      await setPaymentStatus(orderId, context, "CANCELLED");
-      throw new HttpsError("failed-precondition", "The Stripe checkout session expired.");
+      return { accepted: true, message: "Stripe checkout expired; payment state will be reconciled by provider events." };
     }
-    if (session.payment_status !== "paid") {
-      throw new HttpsError("failed-precondition", "Stripe has not confirmed that payment is complete.");
-    }
-    if (session.amount_total !== expectedMinorUnits || String(session.currency ?? "").toUpperCase() !== expectedCurrency) {
-      throw new HttpsError("failed-precondition", "The Stripe amount or currency does not match the server order.");
-    }
-    const intentId = typeof session.payment_intent === "string" ? session.payment_intent : String(session.payment_intent?.id ?? "");
-    await setPaymentStatus(orderId, context, "SUCCEEDED", {
-      providerPaymentId: session.id,
-      providerReceiptId: intentId,
-      verifiedAtEpochMillis: Date.now()
+    const intentId = typeof session.payment_intent === "string"
+      ? session.payment_intent : String(session.payment_intent?.id ?? "");
+    if (!intentId) throw new HttpsError("failed-precondition", "Stripe has not created a PaymentIntent for this session.");
+    const intentResponse = await fetch("https://api.stripe.com/v1/payment_intents/" + encodeURIComponent(intentId), {
+      headers: { Authorization: "Bearer " + secret }
     });
-    return { accepted: true, message: "Stripe confirmed the payment." };
+    const intent = await intentResponse.json() as {
+      id?: string; status?: string; amount?: number; amount_capturable?: number;
+      currency?: string; latest_charge?: string | { id?: string };
+    };
+    if (!intentResponse.ok || intent.id !== intentId ||
+        intent.amount !== expected.minorUnits ||
+        String(intent.currency ?? "").toUpperCase() !== expected.currencyCode.toUpperCase()) {
+      throw new HttpsError("failed-precondition", "Stripe's PaymentIntent does not match the server order.");
+    }
+    if (intent.status !== "requires_capture" && intent.status !== "succeeded") {
+      throw new HttpsError("failed-precondition", "Stripe has not created a valid authorization or captured payment.");
+    }
+    await getDatabase().ref("payments/" + orderId).update({
+      providerPaymentIntentId: intentId,
+      updatedAtEpochMillis: Date.now()
+    });
+    return { accepted: true, message: "Stripe status checked. The signed webhook is the source of truth for payment state." };
   }
 
   const access = await getPayPalAccessToken();
-  const getResponse = await fetch(access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(sessionId), {
+  const response = await fetch(access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(sessionId), {
     headers: { Authorization: "Bearer " + access.token }
   });
-  let paypalOrder = await getResponse.json() as {
+  const paypalOrder = await response.json() as {
     id?: string; status?: string;
-    purchase_units?: Array<{ amount?: { currency_code?: string; value?: string }; payments?: { captures?: Array<{ id?: string; status?: string }> } }>;
+    purchase_units?: Array<{
+      amount?: { currency_code?: string; value?: string };
+      payments?: { authorizations?: Array<{ id?: string; status?: string }> };
+    }>;
   };
-  if (!getResponse.ok || paypalOrder.id !== recordedSessionId) {
+  if (!response.ok || paypalOrder.id !== recordedSessionId) {
     throw new HttpsError("failed-precondition", "PayPal could not verify this order.");
   }
-  if (paypalOrder.status !== "COMPLETED") {
-    const captureResponse = await fetch(access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(sessionId) + "/capture", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + access.token,
-        "Content-Type": "application/json"
-      },
-      body: "{}"
-    });
-    paypalOrder = await captureResponse.json() as typeof paypalOrder;
-    if (!captureResponse.ok || paypalOrder.status !== "COMPLETED") {
-      throw new HttpsError("failed-precondition", "PayPal has not confirmed that capture is complete.");
-    }
-  }
   const unit = paypalOrder.purchase_units?.[0];
-  const paypalCurrency = String(unit?.amount?.currency_code ?? "").toUpperCase();
-  const paypalAmount = Math.round(Number(unit?.amount?.value ?? "NaN") * 100);
-  if (paypalCurrency !== expectedCurrency || paypalAmount !== expectedMinorUnits) {
-    throw new HttpsError("failed-precondition", "The PayPal amount or currency does not match the server payment.");
+  const actualCurrency = String(unit?.amount?.currency_code ?? "").toUpperCase();
+  const actualMinor = Math.round(Number(unit?.amount?.value ?? "NaN") * 100);
+  if (actualCurrency !== expected.currencyCode.toUpperCase() || actualMinor !== expected.minorUnits) {
+    throw new HttpsError("failed-precondition", "PayPal's amount or currency does not match the server order.");
   }
-  const captureId = String(unit?.payments?.captures?.[0]?.id ?? sessionId);
-  await setPaymentStatus(orderId, context, "SUCCEEDED", {
-    providerPaymentId: sessionId,
-    providerReceiptId: captureId,
-    verifiedAtEpochMillis: Date.now()
+  if (paypalOrder.status === "COMPLETED") {
+    return { accepted: true, message: "PayPal reports a completed payment; the verified webhook will update payment status." };
+  }
+  if (paypalOrder.status !== "APPROVED") {
+    throw new HttpsError("failed-precondition", "PayPal checkout is not approved for authorization.");
+  }
+  const authorizeResponse = await fetch(access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(sessionId) + "/authorize", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + access.token,
+      "Content-Type": "application/json",
+      "PayPal-Request-Id": "labmda-authorize-" + orderId
+    },
+    body: "{}"
   });
-  return { accepted: true, message: "PayPal confirmed the payment." };
+  const authorized = await authorizeResponse.json() as {
+    id?: string;
+    purchase_units?: Array<{ payments?: { authorizations?: Array<{ id?: string; status?: string }> } }>;
+  };
+  const authorizationId = String(authorized.purchase_units?.[0]?.payments?.authorizations?.[0]?.id ?? "");
+  if (!authorizeResponse.ok || authorized.id !== sessionId || !authorizationId) {
+    throw new HttpsError("failed-precondition", "PayPal could not create an authorization.");
+  }
+  await getDatabase().ref("payments/" + orderId).update({
+    providerAuthorizationId: authorizationId,
+    updatedAtEpochMillis: Date.now()
+  });
+  return { accepted: true, message: "PayPal authorization requested. The verified webhook will update payment state." };
 });
 
 /**
