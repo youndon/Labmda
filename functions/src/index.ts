@@ -889,11 +889,15 @@ export const createPaymentSession = onCall({
     throw new HttpsError("failed-precondition", "This payment has already been settled.");
   }
 
+  const authoritative = await recomputeAuthoritativeAmount(orderId, context);
   const amount = payment.amount as Record<string, unknown> | undefined;
   const amountMinorUnits = Number(amount?.minorUnits);
   const currencyCode = String(amount?.currencyCode ?? "USD").toLowerCase();
-  if (!Number.isSafeInteger(amountMinorUnits) || amountMinorUnits <= 0 || !/^[a-z]{3}$/.test(currencyCode)) {
-    throw new HttpsError("failed-precondition", "The server payment amount is invalid.");
+  if (!Number.isSafeInteger(amountMinorUnits) || amountMinorUnits <= 0 ||
+      amountMinorUnits !== authoritative.minorUnits ||
+      currencyCode.toUpperCase() !== authoritative.currencyCode.toUpperCase() ||
+      !/^[a-z]{3}$/.test(currencyCode)) {
+    throw new HttpsError("failed-precondition", "The recomputed order or ride amount does not match its payment record.");
   }
 
   const existingSessionId = String(payment.providerPaymentId ?? "");
@@ -923,6 +927,7 @@ export const createPaymentSession = onCall({
     form.set("metadata[orderId]", orderId);
     form.set("metadata[contextType]", context.rootPath === "trips" ? "RIDE" : "ORDER");
     form.set("payment_intent_data[metadata][orderId]", orderId);
+    form.set("payment_intent_data[capture_method]", "manual");
     form.set("line_items[0][quantity]", "1");
     form.set("line_items[0][price_data][currency]", currencyCode);
     form.set("line_items[0][price_data][unit_amount]", String(amountMinorUnits));
@@ -951,7 +956,7 @@ export const createPaymentSession = onCall({
     const access = await getPayPalAccessToken();
     const returnUrl = "labmda://payment-return?" + returnParams;
     const paypalBody = {
-      intent: "CAPTURE",
+      intent: "AUTHORIZE",
       purchase_units: [{
         reference_id: orderId,
         custom_id: orderId,
