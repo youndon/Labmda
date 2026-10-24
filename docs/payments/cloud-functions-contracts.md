@@ -67,7 +67,7 @@ The order screens call `createOrder`; the function derives item prices and fees 
 
 Write `payments/{orderId}` as a server-owned record containing at least `orderId`, `clientId`, `merchantId`, `courierId`, `method`, `status`, `amount`, `breakdown`, `providerPaymentId`, `refundAmount`, and `updatedAtEpochMillis`. Money values use `{ minorUnits, currencyCode }`; breakdown contains `merchantShare`, `courierShare`, `platformShare`, and `gatewayFee` Money values.
 
-A provider redirect only triggers `verifyPaymentReturn`; it must never mark a payment successful on its own. Stripe and PayPal webhook handlers should verify signatures, update payment and wallet records atomically where possible, and use provider event IDs for replay protection.
+A provider redirect only triggers `verifyPaymentReturn`; it must never mark a payment successful on its own. Verified provider completion currently writes a deterministic gross-payment confirmation entry to `ledger/` with `affectsWallet: false`; it does not credit a wallet. Signed Stripe and PayPal webhooks still need to verify signatures, update payment status and final allocation atomically where possible, and deduplicate provider event IDs.
 
 For payouts, verify the merchant/shop/restaurant or courier was approved by an administrator, check available balance and payout-account ownership on the server, and reserve/debit funds transactionally. For refunds, enforce refundable amount and provider state on the server, then record the provider refund result and wallet reversals.
 
