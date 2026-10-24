@@ -334,7 +334,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                 val drop = dropoff ?: return@Button
                                 isSubmitting = true
                                 scope.launch {
-                                    screenModel.placeShopOrder(
+                                    try {
+                                        screenModel.placeShopOrder(
                                         cartItems = cartItems.values.toList(),
                                         dropoffAddress = deliveryAddress,
                                         dropoffLat = drop.latitude,
@@ -349,6 +350,9 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                             navigator?.push(LiveOrderTrackingScreen(orderId))
                                         }
                                     )
+                                    } catch (_: Exception) {
+                                        isSubmitting = false
+                                    }
                                 }
                             },
                             shape = RoundedCornerShape(14.dp),
