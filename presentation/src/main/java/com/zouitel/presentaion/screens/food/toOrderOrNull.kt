@@ -24,8 +24,13 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
 
     val status = runCatching { OrderStatus.valueOf(str("status")) }.getOrDefault(OrderStatus.PLACED)
     val typeValue = firstString("orderType")
+    val looksLikeRetail = firstString("shopId", "shopName").isNotBlank() ||
+        child("items").children.any { item ->
+            runCatching { item.child("productId").value<String>() }.isSuccess ||
+                runCatching { item.child("productName").value<String>() }.isSuccess
+        }
     val orderType = runCatching { OrderType.valueOf(typeValue) }
-        .getOrElse { if (firstString("shopId").isNotBlank()) OrderType.RETAIL else OrderType.FOOD }
+        .getOrElse { if (looksLikeRetail) OrderType.RETAIL else OrderType.FOOD }
 
     val items = child("items").children.map { itemChild ->
         CartItem(
