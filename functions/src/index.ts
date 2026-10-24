@@ -193,7 +193,9 @@ async function setPaymentStatus(
     [`payments/${orderId}/updatedAtEpochMillis`]: now,
     ...Object.fromEntries(Object.entries(extraPaymentFields).map(([key, value]) => [`payments/${orderId}/${key}`, value])),
     [`payments/${orderId}/provider`]:
-      typeof extraPaymentFields.provider === "string" ? extraPaymentFields.provider : String(context.payment.provider ?? context.payment.method ?? "CASH"),
+      typeof extraPaymentFields.provider === "string" ? extraPaymentFields.provider :
+      typeof extraPaymentFields.method === "string" ? extraPaymentFields.method :
+      String(context.payment.provider ?? context.payment.method ?? "CASH"),
     [`payments/${orderId}/providerReference`]:
       typeof extraPaymentFields.providerReference === "string" ? extraPaymentFields.providerReference :
       typeof extraPaymentFields.providerPaymentId === "string" ? extraPaymentFields.providerPaymentId :
