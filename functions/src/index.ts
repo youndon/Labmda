@@ -65,6 +65,184 @@ function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): num
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
+const SETTLED_PAYMENT_STATUSES = new Set(["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED"]);
+const OPEN_STRIPE_INTENT_STATUSES = new Set(["requires_payment_method", "requires_confirmation", "requires_action"]);
+/** RTDB key guard: rejects empty, oversized, or path-like values such as "a/b". */
+function isSafeKey(value: string): boolean {
+  return value.length > 0 && value.length <= 768 && !/[.#$\[\]\/]/.test(value);
+}
+
+type OrderQuote = {
+  source: Record<string, unknown>;
+  subtotal: number;
+  fee: number;
+  total: number;
+  normalizedItems: Array<Record<string, unknown>>;
+};
+
+/**
+ * Prices an order from the current server catalog and fee settings. Used both when an order is
+ * created and again when checkout starts, so a stored or client-supplied total is never trusted.
+ */
+async function quoteOrder(orderType: OrderType, sourceId: string, rawItems: unknown): Promise<OrderQuote> {
+  if (!sourceId) throw new HttpsError("invalid-argument", "A valid source is required.");
+  const items = Array.isArray(rawItems) ? rawItems as ItemRequest[] : [];
+  if (!items.length || items.length > 100) throw new HttpsError("invalid-argument", "An order must contain 1–100 items.");
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (!item || typeof item.id !== "string" || !item.id.trim() || !isSafeKey(item.id) ||
+        !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 99 || seen.has(item.id))
+      throw new HttpsError("invalid-argument", "Invalid or duplicate item/quantity.");
+    seen.add(item.id);
+  }
+
+  const db = getDatabase();
+  const sourcePath = orderType === "FOOD" ? `restaurants/${sourceId}` : `shops/${sourceId}`;
+  const sourceSnap = await db.ref(sourcePath).get();
+  if (!sourceSnap.exists()) throw new HttpsError("not-found", "This store is no longer available.");
+  const source = sourceSnap.val() as Record<string, unknown>;
+  let approved = false;
+  if (orderType === "FOOD") {
+    const profile = await db.ref(`users/${sourceId}`).get();
+    approved = profile.child("foodStatus").val() === "APPROVED" || source.status === "APPROVED";
+    if (!approved || source.isOpen === false) throw new HttpsError("failed-precondition", "This restaurant is not approved or is closed.");
+  } else {
+    approved = source.status === "APPROVED";
+    if (!approved || source.isOnline === false) throw new HttpsError("failed-precondition", "This shop is not approved or is offline.");
+  }
+
+  let subtotal = 0;
+  const normalizedItems: Array<Record<string, unknown>> = [];
+  for (const item of items) {
+    const itemPath = orderType === "FOOD" ? `${sourcePath}/meals/${item.id}` : `${sourcePath}/products/${item.id}`;
+    const itemSnap = await db.ref(itemPath).get();
+    if (!itemSnap.exists()) throw new HttpsError("failed-precondition", "An item is no longer available.");
+    const catalog = itemSnap.val() as Record<string, unknown>;
+    const available = catalog.isAvailable !== false;
+    const stock = typeof catalog.stockQuantity === "number" ? catalog.stockQuantity : Number.MAX_SAFE_INTEGER;
+    if (!available || (orderType === "RETAIL" && stock < item.quantity)) throw new HttpsError("failed-precondition", "An item is unavailable or out of stock.");
+    const unit = minorUnits(orderType === "FOOD" ? catalog.basePrice : catalog.price, "item price");
+    subtotal += unit * item.quantity;
+    if (!Number.isSafeInteger(subtotal)) throw new HttpsError("out-of-range", "Order total is too large.");
+    normalizedItems.push({ id: item.id, name: typeof catalog.name === "string" ? catalog.name : "", basePrice: unit / 100, quantity: item.quantity, specialInstructions: "" });
+  }
+
+  let fee: number;
+  if (orderType === "FOOD") {
+    fee = minorUnits(source.deliveryFee ?? 0, "delivery fee");
+  } else {
+    const configuredFee = await db.ref("settings/deliveryFees/RETAIL").get();
+    if (!configuredFee.exists()) throw new HttpsError("failed-precondition", "Retail delivery fee is not configured.");
+    fee = minorUnits(configuredFee.val(), "retail delivery fee");
+  }
+  const total = subtotal + fee;
+  if (!Number.isSafeInteger(total)) throw new HttpsError("out-of-range", "Order total is too large.");
+  return { source, subtotal, fee, total, normalizedItems };
+}
+
+/** Mirrors the displayed estimate (base $2.00, $1.20/km, $4.00 minimum), rounded to cents. */
+function rideFareMinorUnits(pickupLat: number, pickupLng: number, dropoffLat: number, dropoffLng: number): number {
+  const distance = distanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
+  if (!Number.isFinite(distance) || distance < 0.05 || distance > 1000) {
+    throw new HttpsError("invalid-argument", "Ride distance is not valid.");
+  }
+  return Math.round(Math.max(4.00, 2.00 + distance * 1.20) * 100);
+}
+
+type StripeIntent = {
+  id?: string; client_secret?: string; status?: string; capture_method?: string;
+  amount?: number; amount_capturable?: number; amount_received?: number; currency?: string;
+  latest_charge?: string | { id?: string } | null; error?: { message?: string };
+};
+
+async function stripeApi<T>(
+  secretKey: string,
+  path: string,
+  form?: URLSearchParams,
+  idempotencyKey?: string
+): Promise<{ ok: boolean; data: T }> {
+  const headers: Record<string, string> = { Authorization: "Bearer " + secretKey };
+  if (form) headers["Content-Type"] = "application/x-www-form-urlencoded";
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  const response = await fetch("https://api.stripe.com/v1/" + path, { method: form ? "POST" : "GET", headers, body: form });
+  return { ok: response.ok, data: await response.json() as T };
+}
+
+async function getStripeIntent(secretKey: string, intentId: string): Promise<StripeIntent> {
+  const { ok, data } = await stripeApi<StripeIntent>(secretKey, "payment_intents/" + encodeURIComponent(intentId));
+  if (!ok || data.id !== intentId) throw new HttpsError("failed-precondition", "Stripe could not verify this payment.");
+  return data;
+}
+
+/**
+ * Cancels a Stripe PaymentIntent that has not been authorized yet, so switching method or amount
+ * can never leave two live authorizations for one order. Authorized intents are never cancelled here.
+ */
+async function cancelOpenStripeIntent(secretKey: string, intentId: string): Promise<void> {
+  const intent = await getStripeIntent(secretKey, intentId);
+  if (intent.status === "canceled") return;
+  if (!OPEN_STRIPE_INTENT_STATUSES.has(String(intent.status))) {
+    throw new HttpsError("failed-precondition", "The current Stripe payment is already authorized or processing.");
+  }
+  const cancelled = await stripeApi<StripeIntent>(
+    secretKey, "payment_intents/" + encodeURIComponent(intentId) + "/cancel", new URLSearchParams()
+  );
+  if (!cancelled.ok || cancelled.data.status !== "canceled") {
+    throw new HttpsError("failed-precondition", "Stripe could not cancel the current payment safely.");
+  }
+}
+
+/** Maps a provider-verified manual-capture PaymentIntent to the local payment state. */
+async function applyStripeIntentState(
+  orderId: string,
+  context: PaymentContext,
+  secretKey: string,
+  intentId: string,
+  expectedMinorUnits: number,
+  expectedCurrency: string,
+  cancelIfOpen: boolean
+): Promise<{ accepted: boolean; message: string }> {
+  const intent = await getStripeIntent(secretKey, intentId);
+  if (intent.amount !== expectedMinorUnits || String(intent.currency ?? "").toUpperCase() !== expectedCurrency) {
+    throw new HttpsError("failed-precondition", "The Stripe amount or currency does not match the server payment.");
+  }
+  const now = Date.now();
+  if (intent.status === "requires_capture") {
+    if (intent.amount_capturable !== expectedMinorUnits) {
+      throw new HttpsError("failed-precondition", "Stripe's authorized amount does not match the server payment.");
+    }
+    await setPaymentStatus(orderId, context, "AUTHORIZED", {
+      providerPaymentId: intentId, authorizedMinorUnits: expectedMinorUnits, authorizedAtEpochMillis: now,
+      checkoutUrl: "", expiresAtEpochMillis: 0
+    });
+    return { accepted: true, message: "Stripe authorized the payment. It is captured only after fulfilment." };
+  }
+  if (intent.status === "succeeded") {
+    if (intent.amount_received !== expectedMinorUnits) {
+      throw new HttpsError("failed-precondition", "Stripe's received amount does not match the server payment.");
+    }
+    const chargeId = typeof intent.latest_charge === "string" ? intent.latest_charge : String(intent.latest_charge?.id ?? intentId);
+    await setPaymentStatus(orderId, context, "SUCCEEDED", {
+      providerPaymentId: intentId, providerReceiptId: chargeId, verifiedAtEpochMillis: now
+    });
+    return { accepted: true, message: "Stripe confirmed the payment." };
+  }
+  if (intent.status === "processing") {
+    await setPaymentStatus(orderId, context, "PROCESSING");
+    return { accepted: true, message: "Stripe is still processing the payment." };
+  }
+  if (intent.status === "canceled") {
+    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
+    return { accepted: true, message: "The Stripe payment was cancelled." };
+  }
+  if (cancelIfOpen) {
+    await cancelOpenStripeIntent(secretKey, intentId);
+    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
+    return { accepted: true, message: "Provider confirmed no authorization; checkout was cancelled." };
+  }
+  throw new HttpsError("failed-precondition", "Stripe has not authorized this payment yet.");
+}
+
 async function getOwnedPaymentContext(orderId: string, uid: string): Promise<PaymentContext> {
   const db = getDatabase();
   const paymentSnap = await db.ref(`payments/${orderId}`).get();
@@ -778,57 +956,8 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   if (!sourceId || !dropoffLocation || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180)
     throw new HttpsError("invalid-argument", "A valid source and delivery destination are required.");
   if (!method) throw new HttpsError("invalid-argument", "Choose a supported payment method.");
-  const items = Array.isArray(body.items) ? body.items : [];
-  if (!items.length || items.length > 100) throw new HttpsError("invalid-argument", "An order must contain 1–100 items.");
-  const seen = new Set<string>();
-  for (const item of items) {
-    if (!item || typeof item.id !== "string" || !item.id.trim() || !Number.isInteger(item.quantity) ||
-        item.quantity < 1 || item.quantity > 99 || seen.has(item.id))
-      throw new HttpsError("invalid-argument", "Invalid or duplicate item/quantity.");
-    seen.add(item.id);
-  }
-
   const db = getDatabase();
-  const sourcePath = orderType === "FOOD" ? `restaurants/${sourceId}` : `shops/${sourceId}`;
-  const sourceSnap = await db.ref(sourcePath).get();
-  if (!sourceSnap.exists()) throw new HttpsError("not-found", "This store is no longer available.");
-  const source = sourceSnap.val() as Record<string, unknown>;
-  let approved = false;
-  if (orderType === "FOOD") {
-    const profile = await db.ref(`users/${sourceId}`).get();
-    approved = profile.child("foodStatus").val() === "APPROVED" || source.status === "APPROVED";
-    if (!approved || source.isOpen === false) throw new HttpsError("failed-precondition", "This restaurant is not approved or is closed.");
-  } else {
-    approved = source.status === "APPROVED";
-    if (!approved || source.isOnline === false) throw new HttpsError("failed-precondition", "This shop is not approved or is offline.");
-  }
-
-  let subtotal = 0;
-  const normalizedItems: Array<Record<string, unknown>> = [];
-  for (const item of items) {
-    const itemPath = orderType === "FOOD" ? `${sourcePath}/meals/${item.id}` : `${sourcePath}/products/${item.id}`;
-    const itemSnap = await db.ref(itemPath).get();
-    if (!itemSnap.exists()) throw new HttpsError("failed-precondition", "An item is no longer available.");
-    const catalog = itemSnap.val() as Record<string, unknown>;
-    const available = catalog.isAvailable !== false;
-    const stock = typeof catalog.stockQuantity === "number" ? catalog.stockQuantity : Number.MAX_SAFE_INTEGER;
-    if (!available || (orderType === "RETAIL" && stock < item.quantity)) throw new HttpsError("failed-precondition", "An item is unavailable or out of stock.");
-    const unit = minorUnits(orderType === "FOOD" ? catalog.basePrice : catalog.price, "item price");
-    subtotal += unit * item.quantity;
-    if (!Number.isSafeInteger(subtotal)) throw new HttpsError("out-of-range", "Order total is too large.");
-    normalizedItems.push({ id: item.id, name: typeof catalog.name === "string" ? catalog.name : "", basePrice: unit / 100, quantity: item.quantity, specialInstructions: "" });
-  }
-
-  let fee: number;
-  if (orderType === "FOOD") {
-    fee = minorUnits(source.deliveryFee ?? 0, "delivery fee");
-  } else {
-    const configuredFee = await db.ref("settings/deliveryFees/RETAIL").get();
-    if (!configuredFee.exists()) throw new HttpsError("failed-precondition", "Retail delivery fee is not configured.");
-    fee = minorUnits(configuredFee.val(), "retail delivery fee");
-  }
-  const total = subtotal + fee;
-  if (!Number.isSafeInteger(total)) throw new HttpsError("out-of-range", "Order total is too large.");
+  const { source, subtotal, fee, total, normalizedItems } = await quoteOrder(orderType, sourceId, body.items);
   const orderRef = db.ref("orders").push();
   const orderId = orderRef.key;
   if (!orderId) throw new HttpsError("internal", "Could not allocate an order ID.");
@@ -892,13 +1021,8 @@ export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) 
   }
   const method = normalizePaymentMethod(body.paymentMethod);
   if (!method) throw new HttpsError("invalid-argument", "Choose a supported payment method.");
-  const distance = distanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
-  if (!Number.isFinite(distance) || distance < 0.05 || distance > 1000) {
-    throw new HttpsError("invalid-argument", "Ride distance is not valid.");
-  }
-  // Mirrors the displayed estimate (base $2.00, $1.20/km, $4.00 minimum), but is
-  // recalculated from validated coordinates on the server and rounded to cents.
-  const fareMinorUnits = Math.round(Math.max(4.00, 2.00 + distance * 1.20) * 100);
+  // Recalculated from validated coordinates on the server; a client estimate is never used.
+  const fareMinorUnits = rideFareMinorUnits(pickupLat, pickupLng, dropoffLat, dropoffLng);
   const db = getDatabase();
   const targetDriverUid = typeof body.targetDriverUid === "string" ? body.targetDriverUid.trim() : "";
   let driverName = "";
@@ -950,8 +1074,14 @@ export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) 
 
 
 /**
- * Creates hosted provider checkout sessions from server-owned payment amounts.
- * Only the hosted URL, opaque session ID, and expiry are returned to Android.
+ * Starts provider checkout for a server-owned order or ride.
+ *
+ * Reads `orders/{id}` (or `trips/{id}` for rides), recomputes the amount from trusted RTDB data
+ * (current catalog prices, delivery fees, ride coordinates) and refuses to continue if it no longer
+ * matches the total the customer was shown. Stripe uses a PaymentIntent with manual capture, so
+ * funds are only authorized here and captured later by trusted fulfilment code; PayPal uses a
+ * hosted order approval. The result is written to `payments/{id}`. Only display-safe values are
+ * returned: the PaymentIntent client secret, the PayPal approval URL, and opaque provider IDs.
  */
 export const createPaymentSession = onCall({
   enforceAppCheck: true,
@@ -959,102 +1089,157 @@ export const createPaymentSession = onCall({
 }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in before starting checkout.");
-  const body = request.data as { orderId?: string; method?: string };
+  const body = (request.data ?? {}) as { orderId?: string; method?: string };
   const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
   const method = normalizePaymentMethod(body.method);
-  if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
+  if (!isSafeKey(orderId)) throw new HttpsError("invalid-argument", "A valid orderId is required.");
   if (method !== "STRIPE" && method !== "PAYPAL") {
-    throw new HttpsError("invalid-argument", "Hosted checkout requires Stripe or PayPal.");
+    throw new HttpsError("invalid-argument", "Online checkout requires Stripe or PayPal.");
   }
 
-  const context = await getOwnedPaymentContext(orderId, uid);
-  const payment = context.payment;
-  const currentStatus = String(payment.status ?? "PENDING");
-  if (["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(currentStatus)) {
+  const db = getDatabase();
+  const [orderSnap, paymentSnap] = await Promise.all([
+    db.ref(`orders/${orderId}`).get(),
+    db.ref(`payments/${orderId}`).get()
+  ]);
+  let rootPath: "orders" | "trips" = "orders";
+  let record: Record<string, unknown>;
+  if (orderSnap.exists()) {
+    record = orderSnap.val() as Record<string, unknown>;
+  } else {
+    const tripSnap = await db.ref(`trips/${orderId}`).get();
+    if (!tripSnap.exists()) throw new HttpsError("not-found", "Order not found.");
+    rootPath = "trips";
+    record = tripSnap.val() as Record<string, unknown>;
+  }
+  const existingPayment = paymentSnap.exists() ? paymentSnap.val() as Record<string, unknown> : null;
+  const ownerId = String((rootPath === "orders" ? record.clientId : record.passengerId) ?? "");
+  if (ownerId !== uid || (existingPayment && existingPayment.clientId !== uid)) {
+    throw new HttpsError("permission-denied", "This order does not belong to you.");
+  }
+  const recordStatus = String(record.status ?? "");
+  const payable = rootPath === "orders"
+    ? recordStatus === "PLACED"
+    : recordStatus !== "CANCELLED" && recordStatus !== "COMPLETED";
+  if (!payable) throw new HttpsError("failed-precondition", "This order can no longer be paid online.");
+
+  const currentStatus = String(existingPayment?.status ?? "PENDING");
+  if (SETTLED_PAYMENT_STATUSES.has(currentStatus)) {
     throw new HttpsError("failed-precondition", "This payment has already been settled.");
   }
-  const orderOrTrip = await getDatabase().ref(context.rootPath + "/" + orderId).get();
-  const orderOrTripStatus = String(orderOrTrip.child("status").val() ?? "");
-  if (!orderOrTrip.exists() || ["CANCELLED", "CANCELED", "DELIVERED", "COMPLETED"].includes(orderOrTripStatus)) {
-    throw new HttpsError("failed-precondition", "Checkout cannot be started for a cancelled or completed order/ride.");
+  if (currentStatus === "AUTHORIZED" || currentStatus === "PROCESSING") {
+    throw new HttpsError("failed-precondition", "This payment is already authorized or processing.");
   }
 
-  const authoritative = await recomputeAuthoritativeAmount(orderId, context);
-  const amount = payment.amount as Record<string, unknown> | undefined;
-  const amountMinorUnits = Number(amount?.minorUnits);
-  const currencyCode = String(amount?.currencyCode ?? "USD").toLowerCase();
-  if (!Number.isSafeInteger(amountMinorUnits) || amountMinorUnits <= 0 ||
-      amountMinorUnits !== authoritative.minorUnits ||
-      currencyCode.toUpperCase() !== authoritative.currencyCode.toUpperCase() ||
-      !/^[a-z]{3}$/.test(currencyCode)) {
-    throw new HttpsError("failed-precondition", "The recomputed order or ride amount does not match its payment record.");
+  // Recompute the amount from trusted data. Never use a client value or the stored payment amount.
+  const currencyCode = "USD";
+  let amountMinorUnits: number;
+  let merchantIds: Record<string, true> = {};
+  if (rootPath === "orders") {
+    const orderType = record.orderType;
+    if (orderType !== "FOOD" && orderType !== "RETAIL") {
+      throw new HttpsError("failed-precondition", "This order has an unsupported type.");
+    }
+    const sourceId = String(record.sourceId ?? "");
+    const quote = await quoteOrder(orderType, sourceId, record.items);
+    amountMinorUnits = quote.total;
+    merchantIds = merchantAccessIds(quote.source, sourceId);
+    if (amountMinorUnits !== Math.round(Number(record.totalPrice) * 100)) {
+      throw new HttpsError("failed-precondition",
+        "Prices or fees changed since this order was placed. Place the order again to see the current total.");
+    }
+  } else {
+    amountMinorUnits = rideFareMinorUnits(
+      Number(record.pickupLat), Number(record.pickupLng), Number(record.dropoffLat), Number(record.dropoffLng)
+    );
+    if (amountMinorUnits !== Math.round(Number(record.fare) * 100)) {
+      throw new HttpsError("failed-precondition", "The ride fare could not be confirmed. Request the ride again.");
+    }
+  }
+  if (!Number.isSafeInteger(amountMinorUnits) || amountMinorUnits <= 0) {
+    throw new HttpsError("failed-precondition", "The server payment amount is invalid.");
   }
 
-  const existingSessionId = String(payment.providerPaymentId ?? "");
-  const existingCheckoutUrl = String(payment.checkoutUrl ?? "");
-  const existingExpiry = Number(payment.expiresAtEpochMillis ?? 0);
-  const currentMethod = normalizePaymentMethod(payment.method);
-  if (currentStatus === "REQUIRES_ACTION" && existingSessionId && existingCheckoutUrl && existingExpiry > Date.now()) {
-    if (currentMethod !== method) {
+  const stripeKey = stripeSecretKey.value().trim();
+  const requireStripeKey = () => {
+    if (!stripeKey) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+    return stripeKey;
+  };
+  const existingMethod = normalizePaymentMethod(existingPayment?.method);
+  const existingId = String(existingPayment?.providerPaymentId ?? "");
+  const existingAmount = moneyValue(existingPayment?.amount, currencyCode);
+  const sameAmount = existingAmount.minorUnits === amountMinorUnits && existingAmount.currencyCode === currencyCode;
+  const description = rootPath === "trips" ? "Ride fare" : "Order payment";
+  const contextType = rootPath === "trips" ? "RIDE" : "ORDER";
+
+  // Reuse or retire any checkout that is still open, so one order never has two live payments.
+  if (currentStatus === "REQUIRES_ACTION" && existingId) {
+    if (existingId.startsWith("pi_")) {
+      const key = requireStripeKey();
+      const intent = await getStripeIntent(key, existingId);
+      if (method === "STRIPE" && sameAmount && OPEN_STRIPE_INTENT_STATUSES.has(String(intent.status)) &&
+          intent.capture_method === "manual" && intent.amount === amountMinorUnits &&
+          String(intent.currency ?? "").toUpperCase() === currencyCode && intent.client_secret) {
+        return {
+          orderId, provider: method, sessionId: existingId, checkoutUrl: "", clientSecret: intent.client_secret,
+          captureMethod: "MANUAL", amountMinorUnits, currencyCode, expiresAtEpochMillis: 0
+        };
+      }
+      if (intent.status !== "canceled") await cancelOpenStripeIntent(key, existingId);
+    } else if (Number(existingPayment?.expiresAtEpochMillis ?? 0) > Date.now()) {
+      const existingUrl = String(existingPayment?.checkoutUrl ?? "");
+      if (existingMethod === "PAYPAL" && method === "PAYPAL" && sameAmount && existingUrl.startsWith("https://")) {
+        return {
+          orderId, provider: method, sessionId: existingId, checkoutUrl: existingUrl, clientSecret: "",
+          captureMethod: "AUTOMATIC", amountMinorUnits, currencyCode,
+          expiresAtEpochMillis: Number(existingPayment?.expiresAtEpochMillis)
+        };
+      }
       throw new HttpsError("failed-precondition", "Finish or cancel the current checkout before changing payment methods.");
     }
-    return { orderId, sessionId: existingSessionId, checkoutUrl: existingCheckoutUrl, expiresAtEpochMillis: existingExpiry };
   }
 
-  const returnParams = "provider=" + method.toLowerCase() + "&orderId=" + encodeURIComponent(orderId);
+  // Deterministic per order/amount/previous attempt: concurrent retries reuse one provider object,
+  // while a new attempt after a cancellation gets a fresh one.
+  const idempotencyKey = ["labmda", method.toLowerCase(), orderId, String(amountMinorUnits), currencyCode, existingId || "initial"]
+    .join("-").slice(0, 100);
   let sessionId = "";
   let checkoutUrl = "";
-  let expiresAtEpochMillis = Date.now() + 30 * 60 * 1000;
+  let clientSecret = "";
+  let expiresAtEpochMillis = 0;
 
   if (method === "STRIPE") {
-    const key = stripeSecretKey.value().trim();
-    if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+    const key = requireStripeKey();
     const customerId = await getOrCreateStripeCustomer(uid, key);
     const form = new URLSearchParams();
+    form.set("amount", String(amountMinorUnits));
+    form.set("currency", currencyCode.toLowerCase());
     form.set("customer", customerId);
-    form.set("mode", "payment");
-    form.set("client_reference_id", orderId);
+    form.set("capture_method", "manual");
+    form.set("automatic_payment_methods[enabled]", "true");
+    // Keep confirmation inside the in-app payment sheet; no redirect-based methods.
+    form.set("automatic_payment_methods[allow_redirects]", "never");
+    form.set("description", description);
     form.set("metadata[orderId]", orderId);
-    form.set("metadata[contextType]", context.rootPath === "trips" ? "RIDE" : "ORDER");
-    form.set("payment_intent_data[metadata][orderId]", orderId);
-    // Stripe Checkout exposes manual capture per card payment method; limit this session
-    // to cards because not every Dashboard-enabled payment method supports authorization holds.
-    form.set("payment_method_types[0]", "card");
-    form.set("payment_method_options[card][capture_method]", "manual");
-    form.set("line_items[0][quantity]", "1");
-    form.set("line_items[0][price_data][currency]", currencyCode);
-    form.set("line_items[0][price_data][unit_amount]", String(amountMinorUnits));
-    form.set("line_items[0][price_data][product_data][name]", context.rootPath === "trips" ? "Ride fare" : "Order payment");
-    form.set("success_url", "labmda://payment-return?" + returnParams + "&sessionId={CHECKOUT_SESSION_ID}&token={CHECKOUT_SESSION_ID}");
-    form.set("cancel_url", "labmda://payment-return?" + returnParams + "&token=cancel");
-
-    const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + key,
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: form
-    });
-    const data = await response.json() as {
-      id?: string; url?: string; expires_at?: number; error?: { message?: string };
-    };
-    if (!response.ok || !data.id || !data.url || !data.url.startsWith("https://")) {
-      throw new HttpsError("failed-precondition", data.error?.message || "Stripe could not create checkout.");
+    form.set("metadata[contextType]", contextType);
+    form.set("metadata[firebaseUid]", uid);
+    const { ok, data } = await stripeApi<StripeIntent>(key, "payment_intents", form, idempotencyKey);
+    if (!ok || !data.id?.startsWith("pi_") || !data.client_secret || data.capture_method !== "manual" ||
+        data.amount !== amountMinorUnits || !OPEN_STRIPE_INTENT_STATUSES.has(String(data.status))) {
+      throw new HttpsError("failed-precondition", data.error?.message || "Stripe could not create the payment.");
     }
     sessionId = data.id;
-    checkoutUrl = data.url;
-    if (typeof data.expires_at === "number") expiresAtEpochMillis = data.expires_at * 1000;
+    clientSecret = data.client_secret;
   } else {
     const access = await getPayPalAccessToken();
-    const returnUrl = "labmda://payment-return?" + returnParams;
+    const returnUrl = "labmda://payment-return?provider=paypal&orderId=" + encodeURIComponent(orderId);
     const paypalBody = {
       intent: "AUTHORIZE",
       purchase_units: [{
         reference_id: orderId,
         custom_id: orderId,
-        description: context.rootPath === "trips" ? "Ride fare" : "Order payment",
-        amount: { currency_code: currencyCode.toUpperCase(), value: (amountMinorUnits / 100).toFixed(2) }
+        description,
+        amount: { currency_code: currencyCode, value: (amountMinorUnits / 100).toFixed(2) }
       }],
       application_context: {
         return_url: returnUrl,
@@ -1067,7 +1252,8 @@ export const createPaymentSession = onCall({
       method: "POST",
       headers: {
         Authorization: "Bearer " + access.token,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "PayPal-Request-Id": idempotencyKey
       },
       body: JSON.stringify(paypalBody)
     });
@@ -1080,6 +1266,7 @@ export const createPaymentSession = onCall({
     }
     sessionId = data.id;
     checkoutUrl = approvalLink;
+    expiresAtEpochMillis = Date.now() + 30 * 60 * 1000;
   }
 
   // Re-read immediately before storing the hosted URL. An order may be cancelled while
@@ -1102,24 +1289,46 @@ export const createPaymentSession = onCall({
   }
 
   const now = Date.now();
-  await getDatabase().ref().update({
-    ["payments/" + orderId + "/provider"]: method,
-    ["payments/" + orderId + "/providerReference"]: sessionId,
-    ["payments/" + orderId + "/method"]: method,
-    ["payments/" + orderId + "/providerPaymentId"]: sessionId,
-    ["payments/" + orderId + "/checkoutUrl"]: checkoutUrl,
-    ["payments/" + orderId + "/expiresAtEpochMillis"]: expiresAtEpochMillis,
-    ["payments/" + orderId + "/status"]: "REQUIRES_ACTION",
-    ["payments/" + orderId + "/updatedAtEpochMillis"]: now,
-    [context.rootPath + "/" + orderId + "/paymentMethod"]: method,
-    [context.rootPath + "/" + orderId + "/paymentStatus"]: "REQUIRES_ACTION",
-    [context.rootPath + "/" + orderId + "/paymentId"]: orderId
+  const money = (minor: number) => ({ minorUnits: minor, currencyCode });
+  const paymentFields: Record<string, unknown> = {
+    // Backfill the server-owned base record if it is missing (normally written by createOrder/createRideTrip).
+    ...(existingPayment ? {} : {
+      orderId, contextType, clientId: uid,
+      merchantId: rootPath === "orders" ? String(record.merchantId ?? "") : "",
+      merchantIds,
+      courierId: String((rootPath === "orders" ? record.deliveryId : record.driverId) ?? ""),
+      breakdownStatus: "UNALLOCATED",
+      breakdown: {
+        merchantShare: money(0), courierShare: money(0), platformShare: money(0), gatewayFee: money(0)
+      },
+      refundAmount: money(0)
+    }),
+    provider: method,
+    providerReference: sessionId,
+    method,
+    providerPaymentId: sessionId,
+    captureMethod: method === "STRIPE" ? "MANUAL" : "AUTOMATIC",
+    amount: money(amountMinorUnits),
+    checkoutUrl,
+    expiresAtEpochMillis,
+    status: "REQUIRES_ACTION",
+    updatedAtEpochMillis: now
+  };
+  await db.ref().update({
+    ...Object.fromEntries(Object.entries(paymentFields).map(([field, value]) => [`payments/${orderId}/${field}`, value])),
+    [`${rootPath}/${orderId}/paymentMethod`]: method,
+    [`${rootPath}/${orderId}/paymentStatus`]: "REQUIRES_ACTION",
+    [`${rootPath}/${orderId}/paymentId`]: orderId
   });
-  return { orderId, sessionId, checkoutUrl, expiresAtEpochMillis };
+  return {
+    orderId, provider: method, sessionId, checkoutUrl, clientSecret,
+    captureMethod: method === "STRIPE" ? "MANUAL" : "AUTOMATIC",
+    amountMinorUnits, currencyCode, expiresAtEpochMillis
+  };
 });
 
 /** Mark cash-on-delivery as requested, never as paid. */
-export const requestCashPayment = onCall({ enforceAppCheck: true }, async (request) => {
+export const requestCashPayment = onCall({ enforceAppCheck: true, secrets: [stripeSecretKey] }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting cash payment.");
   const body = request.data as { orderId?: string };
@@ -1127,16 +1336,19 @@ export const requestCashPayment = onCall({ enforceAppCheck: true }, async (reque
   if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
   const context = await getOwnedPaymentContext(orderId, uid);
   const status = String(context.payment.status ?? "PENDING");
-  if (["SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) {
+  if (SETTLED_PAYMENT_STATUSES.has(status)) {
     throw new HttpsError("failed-precondition", "This payment has already been settled.");
   }
-  const linkedRoot = await getDatabase().ref(context.rootPath + "/" + orderId).get();
-  if (!linkedRoot.exists() || ["CANCELLED", "CANCELED", "DELIVERED", "COMPLETED"].includes(String(linkedRoot.child("status").val() ?? ""))) {
-    throw new HttpsError("failed-precondition", "Cash payment cannot be selected for a cancelled or completed order/ride.");
+  if (status === "AUTHORIZED" || status === "PROCESSING") {
+    throw new HttpsError("failed-precondition", "An online payment is already authorized or processing for this order.");
   }
   const existingSessionId = String(context.payment.providerPaymentId ?? "");
   const existingExpiry = Number(context.payment.expiresAtEpochMillis ?? 0);
-  if (status === "REQUIRES_ACTION" && existingSessionId && existingExpiry > Date.now()) {
+  if (status === "REQUIRES_ACTION" && existingSessionId.startsWith("pi_")) {
+    const key = stripeSecretKey.value().trim();
+    if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+    await cancelOpenStripeIntent(key, existingSessionId);
+  } else if (status === "REQUIRES_ACTION" && existingSessionId && existingExpiry > Date.now()) {
     throw new HttpsError("failed-precondition", "Finish or cancel the current checkout before switching to cash.");
   }
   await setPaymentStatus(orderId, context, "PENDING", {
@@ -1180,8 +1392,86 @@ export const verifyPaymentReturn = onCall({
   if (String(payment.status ?? "") === "SUCCEEDED") {
     return { accepted: true, message: "Payment is already confirmed by the server." };
   }
-  if (String(payment.status ?? "") === "REFUNDED" || String(payment.status ?? "") === "PARTIALLY_REFUNDED") {
-    throw new HttpsError("failed-precondition", "This payment has already been refunded.");
+
+  // The cancel redirect is only a request. Query the provider before changing the state.
+  if (resultToken === "cancel") {
+    if (!recordedSessionId) {
+      await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
+      return { accepted: true, message: "Checkout was cancelled before a provider session was created." };
+    }
+    if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
+      const key = stripeSecretKey.value().trim();
+      if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+      return applyStripeIntentState(orderId, context, key, recordedSessionId, expectedMinorUnits, expectedCurrency, true);
+    }
+    if (provider === "STRIPE") {
+      const key = stripeSecretKey.value().trim();
+      if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+      const statusResponse = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(recordedSessionId), {
+        headers: { Authorization: "Bearer " + key }
+      });
+      const providerSession = await statusResponse.json() as {
+        id?: string; status?: string; payment_status?: string; amount_total?: number; currency?: string;
+        payment_intent?: string | { id?: string };
+      };
+      if (!statusResponse.ok || providerSession.id !== recordedSessionId) {
+        throw new HttpsError("failed-precondition", "Stripe could not verify the cancellation request.");
+      }
+      if (providerSession.payment_status === "paid") {
+        if (providerSession.amount_total !== expectedMinorUnits ||
+            String(providerSession.currency ?? "").toUpperCase() !== expectedCurrency) {
+          throw new HttpsError("failed-precondition", "Stripe's settled amount does not match the server payment.");
+        }
+        const intentId = typeof providerSession.payment_intent === "string"
+          ? providerSession.payment_intent : String(providerSession.payment_intent?.id ?? "");
+        await setPaymentStatus(orderId, context, "SUCCEEDED", {
+          providerPaymentId: recordedSessionId, providerReceiptId: intentId, verifiedAtEpochMillis: Date.now()
+        });
+        return { accepted: true, message: "Stripe confirmed the payment despite the return redirect." };
+      }
+      if (providerSession.status === "complete") {
+        await setPaymentStatus(orderId, context, "PROCESSING");
+        return { accepted: true, message: "The Stripe session completed; payment confirmation is still pending." };
+      }
+      if (providerSession.status === "open") {
+        const expireResponse = await fetch(
+          "https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(recordedSessionId) + "/expire",
+          { method: "POST", headers: { Authorization: "Bearer " + key } }
+        );
+        if (!expireResponse.ok) {
+          throw new HttpsError("failed-precondition", "Stripe could not close the checkout session safely.");
+        }
+      }
+    } else {
+      const access = await getPayPalAccessToken();
+      const statusResponse = await fetch(
+        access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(recordedSessionId),
+        { headers: { Authorization: "Bearer " + access.token } }
+      );
+      const providerOrder = await statusResponse.json() as {
+        id?: string; status?: string;
+        purchase_units?: Array<{ amount?: { currency_code?: string; value?: string }; payments?: { captures?: Array<{ id?: string }> } }>;
+      };
+      if (!statusResponse.ok || providerOrder.id !== recordedSessionId) {
+        throw new HttpsError("failed-precondition", "PayPal could not verify the cancellation request.");
+      }
+      if (providerOrder.status === "COMPLETED") {
+        const unit = providerOrder.purchase_units?.[0];
+        const actualCurrency = String(unit?.amount?.currency_code ?? "").toUpperCase();
+        const actualMinor = Math.round(Number(unit?.amount?.value ?? "NaN") * 100);
+        if (actualCurrency !== expectedCurrency || actualMinor !== expectedMinorUnits) {
+          throw new HttpsError("failed-precondition", "PayPal's settled amount does not match the server payment.");
+        }
+        await setPaymentStatus(orderId, context, "SUCCEEDED", {
+          providerPaymentId: recordedSessionId,
+          providerReceiptId: String(unit?.payments?.captures?.[0]?.id ?? recordedSessionId),
+          verifiedAtEpochMillis: Date.now()
+        });
+        return { accepted: true, message: "PayPal confirmed the payment despite the return redirect." };
+      }
+    }
+    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
+    return { accepted: true, message: "Provider confirmed no successful payment; checkout was cancelled." };
   }
 
   const expected = await recomputeAuthoritativeAmount(orderId, context);
@@ -1196,6 +1486,11 @@ export const verifyPaymentReturn = onCall({
     return { accepted: true, message: "Checkout return received. Payment state remains provider-webhook authoritative." };
   }
 
+  if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
+    const key = stripeSecretKey.value().trim();
+    if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+    return applyStripeIntentState(orderId, context, key, recordedSessionId, expectedMinorUnits, expectedCurrency, false);
+  }
   if (provider === "STRIPE") {
     const secret = stripeSecretKey.value().trim();
     if (!secret) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
@@ -2633,3 +2928,4 @@ export const retryPaymentSettlement = onSchedule({
     catch (error) { console.error("Settlement retry deferred for", orderId, error instanceof Error ? error.message : "unknown error"); }
   }
 });
+
