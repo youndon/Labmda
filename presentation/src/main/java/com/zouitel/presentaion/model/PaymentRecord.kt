@@ -18,6 +18,7 @@ data class PaymentRecord(
     val status: PaymentStatus = PaymentStatus.UNKNOWN,
     val amount: Money = Money(),
     val breakdown: OrderBreakdown? = null,
+    val breakdownStatus: String = "UNALLOCATED",
     val providerPaymentId: String = "",
     val refundAmount: Money = Money(),
     val updatedAtEpochMillis: Long = 0L
