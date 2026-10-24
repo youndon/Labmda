@@ -1,3 +1,10 @@
+import java.util.Properties
+
+val stripePublishableKey = providers.gradleProperty("stripePublishableKey")
+    .orElse(providers.environmentVariable("STRIPE_PUBLISHABLE_KEY"))
+    .orElse("")
+    .get()
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -18,6 +25,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"${stripePublishableKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     buildTypes {
@@ -33,6 +41,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
