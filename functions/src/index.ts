@@ -2727,11 +2727,25 @@ export const stripeWebhook = onRequest({
         ].includes(event.type)) await handleStripeIntent(orderId, object, event.type);
       } else if (event.type === "checkout.session.completed") {
         const orderId = String(object.client_reference_id ?? (object.metadata as Record<string, unknown> | undefined)?.orderId ?? "");
+        const sessionId = String(object.id ?? "");
         const intentId = typeof object.payment_intent === "string" ? object.payment_intent :
           String((object.payment_intent as Record<string, unknown> | undefined)?.id ?? "");
-        if (orderId && intentId) {
-          const intent = await stripeApi<StripeApiObject>("payment_intents/" + encodeURIComponent(intentId), stripeSecretKey.value().trim());
-          await handleStripeIntent(orderId, intent, event.type);
+        if (orderId && sessionId && intentId) {
+          const context = await loadPaymentContext(orderId);
+          const activeSessionId = String(context?.payment.providerReference || context?.payment.providerPaymentId || "");
+          if (context && normalizePaymentMethod(context.payment.provider ?? context.payment.method) === "STRIPE" &&
+              activeSessionId === sessionId) {
+            const intent = await stripeApi<StripeApiObject>("payment_intents/" + encodeURIComponent(intentId), stripeSecretKey.value().trim());
+            await handleStripeIntent(orderId, intent, event.type);
+          } else if (String(object.payment_status ?? "") === "paid") {
+            await getDatabase().ref("payments/" + orderId).update({
+              requiresAdminReconciliation: true,
+              reconciliationReason: "Stripe reported a paid checkout session that no longer matches the active payment session.",
+              staleProviderSessionId: sessionId,
+              staleProviderPaymentIntentId: intentId,
+              updatedAtEpochMillis: Date.now()
+            });
+          }
         }
       } else if (event.type === "checkout.session.expired") {
         const orderId = String(object.client_reference_id ?? (object.metadata as Record<string, unknown> | undefined)?.orderId ?? "");
