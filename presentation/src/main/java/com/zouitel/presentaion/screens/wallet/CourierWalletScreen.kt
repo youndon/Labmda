@@ -22,6 +22,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -39,6 +42,7 @@ class CourierWalletScreen : Screen {
         val wallet by model.wallet.collectAsState()
         val loading by model.isLoading.collectAsState()
         val error by model.error.collectAsState()
+        var payoutMessage by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(Unit) { model.load() }
         Scaffold(topBar = {
             TopAppBar(title = { Text("Courier wallet") }, navigationIcon = {
@@ -48,6 +52,13 @@ class CourierWalletScreen : Screen {
             Column(Modifier.fillMaxSize().padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (loading) CircularProgressIndicator()
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                payoutMessage?.let {
+                    Text(
+                        it,
+                        color = if (it.startsWith("Payout request failed")) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 wallet?.let { value ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -56,7 +67,17 @@ class CourierWalletScreen : Screen {
                             Text("Lifetime earnings: ${value.summary.lifetimeEarnings.format()}")
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { navigator?.push(PayoutAccountScreen()) }) { Text("Payout account") }
-                                Button(onClick = { model.requestPayout(value.summary.availableBalance) }) { Text("Request payout") }
+                                Button(
+                                    onClick = {
+                                        model.requestPayout(value.summary.availableBalance) { result ->
+                                            payoutMessage = result.fold(
+                                                { "Payout request accepted by the server." },
+                                                { error -> "Payout request failed: ${error.message ?: "Payouts may not be enabled yet."}" }
+                                            )
+                                        }
+                                    },
+                                    enabled = !loading && value.summary.availableBalance.minorUnits > 0L
+                                ) { Text("Request payout") }
                             }
                         }
                     }

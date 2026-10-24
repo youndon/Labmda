@@ -3,7 +3,6 @@ package com.zouitel.presentaion.di
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.screens.account.LogInScreenModel
 import com.zouitel.presentaion.screens.account.PaymentMethodsScreenModel
-import com.zouitel.presentaion.screens.wallet.MerchantEarningsScreenModel
 import com.zouitel.presentaion.screens.delivery.deliveryModule
 import com.zouitel.presentaion.screens.food.foodModule
 import com.zouitel.presentaion.screens.ride.rideModule
@@ -25,7 +24,6 @@ val presentationModule = module {
     }
     factoryOf(::LogInScreenModel)
     factoryOf(::PaymentMethodsScreenModel)
-    factoryOf(::MerchantEarningsScreenModel)
 
     single {
         Firebase.auth
