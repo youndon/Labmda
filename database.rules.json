@@ -32,7 +32,8 @@
       "$paymentId": {
         ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('merchantIds').child(auth.uid).val() === true || data.child('courierId').val() === auth.uid)",
         ".write": false
-      }
+      },
+      ".write": false
     },
     "deliveryQueue": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('deliveryServices').child('status').val() === 'APPROVED'",
@@ -43,7 +44,8 @@
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
         ".write": false
-      }
+      },
+      ".write": false
     },
     "ledger": {
       ".indexOn": [
@@ -56,7 +58,8 @@
       "$entryId": {
         ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('merchantIds').child(auth.uid).val() === true || data.child('courierId').val() === auth.uid)",
         ".write": false
-      }
+      },
+      ".write": false
     },
     "payouts": {
       ".indexOn": [
@@ -69,7 +72,8 @@
       "$payoutId": {
         ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid)",
         ".write": false
-      }
+      },
+      ".write": false
     },
     "config": {
       "commission": {
