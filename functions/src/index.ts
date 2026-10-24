@@ -460,21 +460,92 @@ export const verifyPaymentReturn = onCall({
   if (currentStatus === "REFUNDED" || currentStatus === "PARTIALLY_REFUNDED") {
     throw new HttpsError("failed-precondition", "This payment has already been refunded.");
   }
-  // A cancel redirect is not authoritative. Keep the payment pending unless the provider API
-  // separately confirms an expired/cancelled session.
-  if (resultToken === "cancel") {
-    return { accepted: true, message: "Checkout was left without a successful payment confirmation." };
-  }
-
   const recordedSessionId = String(payment.providerPaymentId ?? "");
-  if (!recordedSessionId || sessionId !== recordedSessionId || resultToken !== recordedSessionId) {
-    throw new HttpsError("permission-denied", "The returned session does not match this payment.");
-  }
   const amount = payment.amount as Record<string, unknown> | undefined;
   const expectedMinorUnits = Number(amount?.minorUnits);
   const expectedCurrency = String(amount?.currencyCode ?? "USD").toUpperCase();
   if (!Number.isSafeInteger(expectedMinorUnits) || expectedMinorUnits <= 0) {
     throw new HttpsError("failed-precondition", "The server payment amount is invalid.");
+  }
+
+  // The cancel redirect is only a request. Query the provider before changing the state.
+  if (resultToken === "cancel") {
+    if (!recordedSessionId) {
+      await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
+      return { accepted: true, message: "Checkout was cancelled before a provider session was created." };
+    }
+    if (provider === "STRIPE") {
+      const key = stripeSecretKey.value().trim();
+      if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+      const statusResponse = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(recordedSessionId), {
+        headers: { Authorization: "Bearer " + key }
+      });
+      const providerSession = await statusResponse.json() as {
+        id?: string; status?: string; payment_status?: string; amount_total?: number; currency?: string;
+        payment_intent?: string | { id?: string };
+      };
+      if (!statusResponse.ok || providerSession.id !== recordedSessionId) {
+        throw new HttpsError("failed-precondition", "Stripe could not verify the cancellation request.");
+      }
+      if (providerSession.payment_status === "paid") {
+        if (providerSession.amount_total !== expectedMinorUnits ||
+            String(providerSession.currency ?? "").toUpperCase() !== expectedCurrency) {
+          throw new HttpsError("failed-precondition", "Stripe's settled amount does not match the server payment.");
+        }
+        const intentId = typeof providerSession.payment_intent === "string"
+          ? providerSession.payment_intent : String(providerSession.payment_intent?.id ?? "");
+        await setPaymentStatus(orderId, context, "SUCCEEDED", {
+          providerPaymentId: recordedSessionId, providerReceiptId: intentId, verifiedAtEpochMillis: Date.now()
+        });
+        return { accepted: true, message: "Stripe confirmed the payment despite the return redirect." };
+      }
+      if (providerSession.status === "complete") {
+        await setPaymentStatus(orderId, context, "PROCESSING");
+        return { accepted: true, message: "The Stripe session completed; payment confirmation is still pending." };
+      }
+      if (providerSession.status === "open") {
+        const expireResponse = await fetch(
+          "https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(recordedSessionId) + "/expire",
+          { method: "POST", headers: { Authorization: "Bearer " + key } }
+        );
+        if (!expireResponse.ok) {
+          throw new HttpsError("failed-precondition", "Stripe could not close the checkout session safely.");
+        }
+      }
+    } else {
+      const access = await getPayPalAccessToken();
+      const statusResponse = await fetch(
+        access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(recordedSessionId),
+        { headers: { Authorization: "Bearer " + access.token } }
+      );
+      const providerOrder = await statusResponse.json() as {
+        id?: string; status?: string;
+        purchase_units?: Array<{ amount?: { currency_code?: string; value?: string }; payments?: { captures?: Array<{ id?: string }> } }>;
+      };
+      if (!statusResponse.ok || providerOrder.id !== recordedSessionId) {
+        throw new HttpsError("failed-precondition", "PayPal could not verify the cancellation request.");
+      }
+      if (providerOrder.status === "COMPLETED") {
+        const unit = providerOrder.purchase_units?.[0];
+        const actualCurrency = String(unit?.amount?.currency_code ?? "").toUpperCase();
+        const actualMinor = Math.round(Number(unit?.amount?.value ?? "NaN") * 100);
+        if (actualCurrency !== expectedCurrency || actualMinor !== expectedMinorUnits) {
+          throw new HttpsError("failed-precondition", "PayPal's settled amount does not match the server payment.");
+        }
+        await setPaymentStatus(orderId, context, "SUCCEEDED", {
+          providerPaymentId: recordedSessionId,
+          providerReceiptId: String(unit?.payments?.captures?.[0]?.id ?? recordedSessionId),
+          verifiedAtEpochMillis: Date.now()
+        });
+        return { accepted: true, message: "PayPal confirmed the payment despite the return redirect." };
+      }
+    }
+    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
+    return { accepted: true, message: "Provider confirmed no successful payment; checkout was cancelled." };
+  }
+
+  if (!recordedSessionId || sessionId !== recordedSessionId || resultToken !== recordedSessionId) {
+    throw new HttpsError("permission-denied", "The returned session does not match this payment.");
   }
 
   if (provider === "STRIPE") {
