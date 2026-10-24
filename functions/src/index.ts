@@ -2186,26 +2186,37 @@ async function handleOrderStatusChange(orderId: string, status: string): Promise
       await releasePaymentAuthorization(orderId, context);
       return;
     }
-    if (paymentStatus === "SUCCEEDED" && String(context.payment.breakdownStatus ?? "") !== "ALLOCATED" &&
-        normalizePaymentMethod(context.payment.provider ?? context.payment.method) !== "CASH") {
-      try {
-        const total = moneyValue(context.payment.amount);
-        const refunded = moneyValue(context.payment.refundAmount, total.currencyCode);
-        const remaining = total.minorUnits - refunded.minorUnits;
-        if (remaining > 0) await submitProviderRefund(orderId, context, remaining, "Order cancelled before settlement");
-      } catch (error) {
+    if (["SUCCEEDED", "PARTIALLY_REFUNDED"].includes(paymentStatus)) {
+      const provider = normalizePaymentMethod(context.payment.provider ?? context.payment.method);
+      const allocated = ["ALLOCATED", "ALLOCATING"].includes(String(context.payment.breakdownStatus ?? ""));
+      if (provider === "CASH") {
         await getDatabase().ref("payments/" + orderId).update({
           requiresAdminReconciliation: true,
-          reconciliationReason: error instanceof Error ? error.message.slice(0, 250) : "Automatic cancellation refund failed",
+          reconciliationReason: "Order cancelled after customer cash collection; a manual cash refund/remittance decision is required.",
           updatedAtEpochMillis: Date.now()
         });
+        return;
       }
-      return;
-    }
-    if (paymentStatus === "SUCCEEDED" && String(context.payment.breakdownStatus ?? "") === "ALLOCATED") {
+      if (!allocated) {
+        try {
+          const total = moneyValue(context.payment.amount);
+          const refunded = moneyValue(context.payment.refundAmount, total.currencyCode);
+          const remaining = total.minorUnits - refunded.minorUnits;
+          if (remaining > 0 && (context.payment.refundRequest as Record<string, unknown> | undefined)?.status !== "SUBMITTED") {
+            await submitProviderRefund(orderId, context, remaining, "Order cancelled before settlement");
+          }
+        } catch (error) {
+          await getDatabase().ref("payments/" + orderId).update({
+            requiresAdminReconciliation: true,
+            reconciliationReason: error instanceof Error ? error.message.slice(0, 250) : "Automatic cancellation refund failed",
+            updatedAtEpochMillis: Date.now()
+          });
+        }
+        return;
+      }
       await getDatabase().ref("payments/" + orderId).update({
         requiresAdminReconciliation: true,
-        reconciliationReason: "Order cancelled after wallet settlement; reversal accounting is required.",
+        reconciliationReason: "Order cancelled after wallet settlement/allocation began; reversal accounting is required.",
         updatedAtEpochMillis: Date.now()
       });
     }
