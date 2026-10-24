@@ -140,7 +140,9 @@ class PaymentRepository(
             val currency = runCatching { node.child("currencyCode").value<String>() }.getOrDefault("USD")
             return Money(minor, currency)
         }
-        val method = runCatching { PaymentMethod.valueOf(string("method")) }.getOrDefault(PaymentMethod.CASH)
+        val method = runCatching { PaymentMethod.valueOf(string("method")) }
+            .getOrElse { runCatching { PaymentMethod.valueOf(string("provider")) }.getOrDefault(PaymentMethod.CASH) }
+        val provider = runCatching { PaymentMethod.valueOf(string("provider")) }.getOrDefault(method)
         val status = runCatching { PaymentStatus.valueOf(string("status")) }.getOrDefault(PaymentStatus.UNKNOWN)
         val breakdownNode = child("breakdown")
         val breakdown = if (breakdownNode.exists) {
@@ -158,6 +160,8 @@ class PaymentRepository(
             merchantId = string("merchantId"),
             courierId = string("courierId"),
             method = method,
+            provider = provider,
+            providerReference = string("providerReference").ifBlank { string("providerPaymentId") },
             status = status,
             amount = money("amount"),
             breakdown = breakdown,
