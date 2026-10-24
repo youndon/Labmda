@@ -1,6 +1,6 @@
 # Payment Cloud Functions contracts
 
-The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. **These functions are contracts for the backend to implement; the handlers and provider webhooks are not included in this repository yet.** The client will not work end-to-end until they exist and are deployed.
+The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. The trusted `createOrder`, `updateOrderStatus`, `claimCourierOrder`, and `releaseCourierOrder` handlers are implemented in `functions/src/index.ts`. Provider checkout sessions, payment verification/webhooks, refunds, wallet accounting, and real payout execution remain unimplemented, so card payments and payouts are not production-ready.
 
 ## Security invariants
 
@@ -17,6 +17,9 @@ All property names are camelCase and currently match kotlinx.serialization DTOs 
 
 | Callable | Request | Response |
 |---|---|---|
+| `createOrder` | `{ orderType, sourceId, items: [{ id, quantity }], dropoffLocation, dropoffLat, dropoffLng, paymentMethod }` | `{ orderId, subtotalMinor, deliveryFeeMinor, totalMinor, currencyCode }` |
+| `updateOrderStatus` | `{ orderId, status }` | `{ accepted, status }` |
+| `claimCourierOrder` / `releaseCourierOrder` | `{ orderId }` | `{ accepted, orderId }` |
 | `createPaymentSession` | `{ orderId, method }`, method is `STRIPE` or `PAYPAL` | `{ orderId, sessionId, checkoutUrl, expiresAtEpochMillis }` |
 | `requestCashPayment` | `{ orderId }` | `{ accepted, message }` |
 | `verifyPaymentReturn` | `{ orderId, provider, sessionId, resultToken }` | `{ accepted, message }` |
@@ -31,7 +34,7 @@ All property names are camelCase and currently match kotlinx.serialization DTOs 
 | `adminGetCommissionSettings` | no arguments | `CommissionSettings` |
 | `adminUpdateCommissionSettings` | `CommissionSettings` | `{ accepted, message }` |
 
-The current `PaymentScreen` expects the order to already exist. Since RTDB rules intentionally deny client writes to `orders`, the production order flow must first be migrated to a trusted create-order function, for example `createOrder`, which accepts only an order type, source ID, item IDs/quantities, delivery destination, and payment method. That function must derive all amounts from server-side catalog data and return the generated order ID. Do not reopen client writes to make the existing order screens work.
+The order screens now call `createOrder`; the function derives item prices and fees from RTDB and writes `orders/{orderId}` and `payments/{orderId}` in one server-side multi-location update. Retail orders require `settings/deliveryFees/RETAIL` to be configured. The initial payment record is pending; provider sessions and verified webhook updates still need implementation. `requestPayout` intentionally fails closed even for approved accounts until transactional wallet reservation and provider payout execution exist. Do not reopen client writes to make existing screens work.
 
 ## Expected wallet response
 
@@ -65,3 +68,8 @@ Write `payments/{orderId}` as a server-owned record containing at least `orderId
 A provider redirect only triggers `verifyPaymentReturn`; it must never mark a payment successful on its own. Stripe and PayPal webhook handlers should verify signatures, update payment and wallet records atomically where possible, and use provider event IDs for replay protection.
 
 For payouts, verify the merchant/shop/restaurant or courier was approved by an administrator, check available balance and payout-account ownership on the server, and reserve/debit funds transactionally. For refunds, enforce refundable amount and provider state on the server, then record the provider refund result and wallet reversals.
+
+
+## Deployment caution
+
+`firebase.json` intentionally configures Functions only. `database.rules.json` restricts orders and payments, but this application also uses other RTDB paths (including trips, restaurants, shops, and user service records). Audit and add least-privilege rules for every existing path before deploying the database rules file; deploying the current rules as a whole would deny access to unlisted paths. No Firebase deployment was performed by this change.
