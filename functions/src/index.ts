@@ -1943,28 +1943,33 @@ export const setCommissionRules = onCall({ enforceAppCheck: true }, async reques
 
 export const confirmCashCollected = onCall({ enforceAppCheck: true }, async request => {
   const uid = request.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Sign in as the assigned courier.");
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as the assigned courier or driver.");
   const body = request.data as { orderId?: string };
   const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
   if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
   const context = await loadPaymentContext(orderId);
-  if (!context || context.rootPath !== "orders") throw new HttpsError("not-found", "Cash order was not found.");
+  if (!context) throw new HttpsError("not-found", "Cash order or ride was not found.");
   if (normalizePaymentMethod(context.payment.provider ?? context.payment.method) !== "CASH") {
-    throw new HttpsError("failed-precondition", "This order does not use cash payment.");
+    throw new HttpsError("failed-precondition", "This order or ride does not use cash payment.");
   }
-  const orderSnap = await getDatabase().ref("orders/" + orderId).get();
-  if (!orderSnap.exists()) throw new HttpsError("not-found", "Order was not found.");
-  const order = orderSnap.val() as Record<string, unknown>;
-  if (order.deliveryId !== uid || order.status !== "DELIVERED") {
-    throw new HttpsError("permission-denied", "Only the assigned courier can confirm cash after delivery.");
+  const rootRef = getDatabase().ref(context.rootPath + "/" + orderId);
+  const rootSnap = await rootRef.get();
+  if (!rootSnap.exists()) throw new HttpsError("not-found", "The linked order or ride was not found.");
+  const root = rootSnap.val() as Record<string, unknown>;
+  const assignedUid = context.rootPath === "trips" ? String(root.driverId ?? "") : String(root.deliveryId ?? "");
+  const completed = context.rootPath === "trips" ? root.status === "COMPLETED" : root.status === "DELIVERED";
+  if (assignedUid !== uid || !completed) {
+    throw new HttpsError("permission-denied", "Only the assigned courier or driver can confirm cash after completion.");
   }
   if (String(context.payment.status ?? "") === "SUCCEEDED") {
     await settleCompletedPayment(orderId);
     return { accepted: true, message: "Cash collection was already recorded." };
   }
-  if (String(context.payment.status ?? "") === "REFUNDED") throw new HttpsError("failed-precondition", "A refunded payment cannot be marked collected.");
+  if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(String(context.payment.status ?? ""))) {
+    throw new HttpsError("failed-precondition", "A refunded payment cannot be marked collected.");
+  }
   const amount = moneyValue(context.payment.amount);
-  await getDatabase().ref("payments/" + orderId).transaction(current => {
+  const transaction = await getDatabase().ref("payments/" + orderId).transaction(current => {
     if (!current || typeof current !== "object") return;
     if (String((current as Record<string, unknown>).status ?? "") === "SUCCEEDED") return;
     return {
@@ -1980,12 +1985,14 @@ export const confirmCashCollected = onCall({ enforceAppCheck: true }, async requ
   if (!after || String(after.payment.status ?? "") !== "SUCCEEDED") {
     throw new HttpsError("failed-precondition", "Cash collection status could not be committed.");
   }
-  await setPaymentStatus(orderId, after, "SUCCEEDED", {
-    provider: "CASH",
-    method: "CASH",
-    cashCollectedBy: uid,
-    cashCollectedAtEpochMillis: Date.now()
-  });
+  if (transaction.committed) {
+    await setPaymentStatus(orderId, after, "SUCCEEDED", {
+      provider: "CASH",
+      method: "CASH",
+      cashCollectedBy: uid,
+      cashCollectedAtEpochMillis: Number(after.payment.cashCollectedAtEpochMillis ?? Date.now())
+    });
+  }
   await settleCompletedPayment(orderId);
   return { accepted: true, amount, message: "Cash collection recorded and settlement attempted." };
 });
