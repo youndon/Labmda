@@ -206,43 +206,45 @@ async function applyStripeIntentState(
   if (intent.amount !== expectedMinorUnits || String(intent.currency ?? "").toUpperCase() !== expectedCurrency) {
     throw new HttpsError("failed-precondition", "The Stripe amount or currency does not match the server payment.");
   }
-  const now = Date.now();
   if (intent.status === "requires_capture") {
     if (intent.amount_capturable !== expectedMinorUnits) {
       throw new HttpsError("failed-precondition", "Stripe's authorized amount does not match the server payment.");
     }
-    await setPaymentStatus(orderId, context, "AUTHORIZED", {
-      providerPaymentId: intentId, authorizedMinorUnits: expectedMinorUnits, authorizedAtEpochMillis: now,
-      checkoutUrl: "", expiresAtEpochMillis: 0
-    });
-    return { accepted: true, message: "Stripe authorized the payment. It is captured only after fulfilment." };
+    return {
+      accepted: true,
+      message: "Stripe confirms an authorization. The signed webhook will update the payment status."
+    };
   }
   if (intent.status === "succeeded") {
     if (intent.amount_received !== expectedMinorUnits) {
       throw new HttpsError("failed-precondition", "Stripe's received amount does not match the server payment.");
     }
-    const chargeId = typeof intent.latest_charge === "string" ? intent.latest_charge : String(intent.latest_charge?.id ?? intentId);
-    await setPaymentStatus(orderId, context, "SUCCEEDED", {
-      providerPaymentId: intentId, providerReceiptId: chargeId, verifiedAtEpochMillis: now
-    });
-    return { accepted: true, message: "Stripe confirmed the payment." };
+    return {
+      accepted: true,
+      message: "Stripe reports a captured payment. The signed webhook will confirm the local payment status."
+    };
   }
   if (intent.status === "processing") {
-    await setPaymentStatus(orderId, context, "PROCESSING");
-    return { accepted: true, message: "Stripe is still processing the payment." };
+    return {
+      accepted: true,
+      message: "Stripe is still processing the payment. The signed webhook will update the local status."
+    };
   }
   if (intent.status === "canceled") {
-    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
-    return { accepted: true, message: "The Stripe payment was cancelled." };
+    return {
+      accepted: true,
+      message: "Stripe reports a canceled payment. The signed webhook will update the local status."
+    };
   }
   if (cancelIfOpen) {
     await cancelOpenStripeIntent(secretKey, intentId);
-    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
-    return { accepted: true, message: "Provider confirmed no authorization; checkout was cancelled." };
+    return {
+      accepted: true,
+      message: "A cancellation was requested at Stripe. The signed webhook will update the local payment status."
+    };
   }
   throw new HttpsError("failed-precondition", "Stripe has not authorized this payment yet.");
 }
-
 async function getOwnedPaymentContext(orderId: string, uid: string): Promise<PaymentContext> {
   const db = getDatabase();
   const paymentSnap = await db.ref(`payments/${orderId}`).get();
@@ -1422,8 +1424,7 @@ export const verifyPaymentReturn = onCall({
   // The cancel redirect is only a request. Query the provider before changing the state.
   if (resultToken === "cancel") {
     if (!recordedSessionId) {
-      await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
-      return { accepted: true, message: "Checkout was cancelled before a provider session was created." };
+      return { accepted: true, message: "No provider session is recorded. Local payment status was not changed by the return callback." };
     }
     if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
       const key = stripeSecretKey.value().trim();
@@ -1450,14 +1451,16 @@ export const verifyPaymentReturn = onCall({
         }
         const intentId = typeof providerSession.payment_intent === "string"
           ? providerSession.payment_intent : String(providerSession.payment_intent?.id ?? "");
-        await setPaymentStatus(orderId, context, "SUCCEEDED", {
-          providerPaymentId: recordedSessionId, providerReceiptId: intentId, verifiedAtEpochMillis: Date.now()
-        });
-        return { accepted: true, message: "Stripe confirmed the payment despite the return redirect." };
+        return {
+          accepted: true,
+          message: "Stripe reports the session paid. The signed webhook will confirm the local payment status."
+        };
       }
       if (providerSession.status === "complete") {
-        await setPaymentStatus(orderId, context, "PROCESSING");
-        return { accepted: true, message: "The Stripe session completed; payment confirmation is still pending." };
+        return {
+          accepted: true,
+          message: "The Stripe session completed. The signed webhook will update the local payment status."
+        };
       }
       if (providerSession.status === "open") {
         const expireResponse = await fetch(
@@ -1488,16 +1491,16 @@ export const verifyPaymentReturn = onCall({
         if (actualCurrency !== expected.currencyCode.toUpperCase() || actualMinor !== expected.minorUnits) {
           throw new HttpsError("failed-precondition", "PayPal's settled amount does not match the server payment.");
         }
-        await setPaymentStatus(orderId, context, "SUCCEEDED", {
-          providerPaymentId: recordedSessionId,
-          providerReceiptId: String(unit?.payments?.captures?.[0]?.id ?? recordedSessionId),
-          verifiedAtEpochMillis: Date.now()
-        });
-        return { accepted: true, message: "PayPal confirmed the payment despite the return redirect." };
+        return {
+          accepted: true,
+          message: "PayPal reports a completed order. The verified webhook will confirm the local payment status."
+        };
       }
     }
-    await setPaymentStatus(orderId, context, "CANCELLED", { checkoutUrl: "", expiresAtEpochMillis: 0 });
-    return { accepted: true, message: "Provider confirmed no successful payment; checkout was cancelled." };
+    return {
+      accepted: true,
+      message: "The return/cancellation was received. Local payment status remains unchanged until a verified provider webhook confirms the outcome."
+    };
   }
 
   if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
@@ -2709,9 +2712,14 @@ export const stripeWebhook = onRequest({
         }
       } else if (event.type === "checkout.session.expired") {
         const orderId = String(object.client_reference_id ?? (object.metadata as Record<string, unknown> | undefined)?.orderId ?? "");
-        if (orderId) {
+        const sessionId = String(object.id ?? "");
+        if (orderId && sessionId) {
           const context = await loadPaymentContext(orderId);
-          if (context && String(context.payment.status ?? "") !== "SUCCEEDED") {
+          const status = String(context?.payment.status ?? "");
+          const recordedSessionId = String(context?.payment.providerReference || context?.payment.providerPaymentId || "");
+          const provider = normalizePaymentMethod(context?.payment.provider ?? context?.payment.method);
+          const alreadyAdvanced = ["AUTHORIZED", "PROCESSING", "SUCCEEDED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status);
+          if (context && provider === "STRIPE" && recordedSessionId === sessionId && !alreadyAdvanced) {
             await setPaymentStatus(orderId, context, "CANCELLED", { provider: "STRIPE" });
           }
         }
@@ -2860,6 +2868,21 @@ export const paypalWebhook = onRequest({
       } else if (eventType === "PAYMENT.AUTHORIZATION.VOIDED" && located) {
         await setPaymentStatus(located.orderId, located.context, "CANCELLED", {
           provider: "PAYPAL", providerAuthorizationId: String(resource.id ?? "")
+        });
+      } else if ((eventType === "PAYMENT.CAPTURE.DENIED" || eventType === "PAYMENT.CAPTURE.PENDING") && located) {
+        const amount = moneyValue(located.context.payment.amount);
+        const captureAmount = (resource.amount as Record<string, unknown> | undefined);
+        const actualMinor = Math.round(Number(captureAmount?.value ?? "NaN") * 100);
+        const actualCurrency = String(captureAmount?.currency_code ?? "").toUpperCase();
+        if (actualMinor !== amount.minorUnits || actualCurrency !== amount.currencyCode.toUpperCase()) {
+          throw new Error("PayPal capture amount or currency does not match the server payment.");
+        }
+        const captureStatus = eventType === "PAYMENT.CAPTURE.PENDING" ? "PROCESSING" : "FAILED";
+        await setPaymentStatus(located.orderId, located.context, captureStatus, {
+          provider: "PAYPAL",
+          providerReceiptId: String(resource.id ?? ""),
+          failureMessage: eventType === "PAYMENT.CAPTURE.DENIED" ? "PayPal denied the capture." : undefined,
+          verifiedAtEpochMillis: Date.now()
         });
       } else if (eventType === "PAYMENT.CAPTURE.REFUNDED" && located) {
         const total = moneyValue(located.context.payment.amount);
