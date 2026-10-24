@@ -25,9 +25,10 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   const dropoffLocation = typeof body.dropoffLocation === "string" ? body.dropoffLocation.trim() : "";
   const lat = Number(body.dropoffLat), lng = Number(body.dropoffLng);
   const rawMethod = typeof body.paymentMethod === "string" ? body.paymentMethod.toUpperCase() : "";
-  const method = rawMethod.includes("PAYPAL") ? "PAYPAL"
-    : rawMethod.includes("STRIPE") || rawMethod.includes("CARD") ? "STRIPE"
-    : rawMethod.includes("CASH") ? "CASH" : "";
+  const normalizedMethod = rawMethod.replace(/[_-]+/g, " ").trim();
+  const method = normalizedMethod === "PAYPAL" ? "PAYPAL"
+    : normalizedMethod === "STRIPE" ? "STRIPE"
+    : normalizedMethod === "CASH" || normalizedMethod === "CASH ON DELIVERY" ? "CASH" : "";
 
   if (orderType !== "FOOD" && orderType !== "RETAIL") throw new HttpsError("invalid-argument", "orderType must be FOOD or RETAIL.");
   if (!sourceId || !dropoffLocation || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180)
@@ -200,4 +201,21 @@ export const releaseCourierOrder = onCall({ enforceAppCheck: true }, async (requ
   const order = snap.val() as Record<string, unknown>;
   await db.ref(`deliveryQueue/${orderId}`).set({ ...order, clientId: "" });
   return { accepted: true, orderId };
+});
+
+/**
+ * Payout execution deliberately fails closed until the wallet ledger and provider payout
+ * integration are implemented. This guard ensures unapproved accounts cannot start payouts.
+ */
+export const requestPayout = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting a payout.");
+  const profile = await getDatabase().ref(`users/${uid}`).get();
+  const approvedMerchant = profile.child("foodStatus").val() === "APPROVED" ||
+    profile.child("shopStatus").val() === "APPROVED";
+  const approvedCourier = profile.child("deliveryServices").child("status").val() === "APPROVED";
+  if (!approvedMerchant && !approvedCourier) {
+    throw new HttpsError("permission-denied", "Only administrator-approved merchants and couriers may request payouts.");
+  }
+  throw new HttpsError("failed-precondition", "Payouts are disabled until server-side wallet reservation and provider payout processing are configured.");
 });
