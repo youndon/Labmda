@@ -4,6 +4,11 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+val stripePublishableKey = providers.gradleProperty("stripePublishableKey")
+    .orElse(providers.environmentVariable("STRIPE_PUBLISHABLE_KEY"))
+    .orElse("")
+    .get()
+
 android {
     namespace = "com.zouitel.labmda"
     compileSdk {
@@ -18,6 +23,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"${stripePublishableKey.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     buildTypes {
@@ -33,6 +39,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

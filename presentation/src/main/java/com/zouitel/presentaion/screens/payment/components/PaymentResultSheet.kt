@@ -29,13 +29,19 @@ fun PaymentResultSheet(
         ) {
             Text("Payment status", style = MaterialTheme.typography.headlineSmall)
             Text(
-                text = when (payment?.status) {
-                    PaymentStatus.SUCCEEDED -> "Payment confirmed by the server."
-                    PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.REQUIRES_ACTION -> "Your payment is being processed."
-                    PaymentStatus.FAILED -> "The payment failed. Please try again."
-                    PaymentStatus.CANCELLED -> "Payment was cancelled."
-                    PaymentStatus.REFUNDED -> "This payment has been refunded."
-                    PaymentStatus.PARTIALLY_REFUNDED -> "This payment was partially refunded."
+                text = when {
+                    payment?.method == com.zouitel.presentaion.model.PaymentMethod.CASH &&
+                        payment?.status == PaymentStatus.PENDING ->
+                        "Cash on delivery selected. Payment remains pending until cash is collected."
+                    payment?.status == PaymentStatus.SUCCEEDED -> "Payment confirmed by the server."
+                    payment?.status == PaymentStatus.PENDING ||
+                        payment?.status == PaymentStatus.PROCESSING ||
+                        payment?.status == PaymentStatus.REQUIRES_ACTION ->
+                        "Your payment is being processed."
+                    payment?.status == PaymentStatus.FAILED -> "The payment failed. Please try again."
+                    payment?.status == PaymentStatus.CANCELLED -> "Payment was cancelled."
+                    payment?.status == PaymentStatus.REFUNDED -> "This payment has been refunded."
+                    payment?.status == PaymentStatus.PARTIALLY_REFUNDED -> "This payment was partially refunded."
                     else -> "Waiting for the payment provider to confirm the result."
                 },
                 style = MaterialTheme.typography.bodyLarge

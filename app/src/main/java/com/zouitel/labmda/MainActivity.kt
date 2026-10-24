@@ -1,8 +1,11 @@
 package com.zouitel.labmda
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.activity.enableEdgeToEdge
 import cafe.adriel.voyager.navigator.Navigator
 import coil3.ImageLoader
@@ -12,10 +15,14 @@ import com.mmk.kmpauth.google.GoogleAuthCredentials
 import com.mmk.kmpauth.google.GoogleAuthProvider
 import com.zouitel.presentaion.common.AppTheme
 import com.zouitel.presentaion.screens.account.LogInScreen
+import com.zouitel.presentaion.screens.payment.PayPalReturn
 import com.zouitel.presentaion.screens.payment.PayPalReturnHandler
 import com.zouitel.presentaion.screens.payment.PaymentScreen
 
 class MainActivity : ComponentActivity() {
+    private val incomingPaymentReturn = mutableStateOf<PayPalReturn?>(null)
+    private val returnHandler = PayPalReturnHandler()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -25,6 +32,7 @@ class MainActivity : ComponentActivity() {
             )
         )
 
+        incomingPaymentReturn.value = returnHandler.parse(intent)
         enableEdgeToEdge()
         setContent {
             AppTheme {
@@ -34,9 +42,17 @@ class MainActivity : ComponentActivity() {
                         .build()
                 }
 
-                val returnOrderId = intent?.data?.let { PayPalReturnHandler().parse(it)?.orderId }
-                Navigator(returnOrderId?.let(::PaymentScreen) ?: LogInScreen())
+                val paymentReturn = incomingPaymentReturn.value
+                key(paymentReturn) {
+                    Navigator(paymentReturn?.let { PaymentScreen(it.orderId) } ?: LogInScreen())
+                }
             }
         }
+    }
+
+    override fun onNewIntent(newIntent: Intent) {
+        super.onNewIntent(newIntent)
+        setIntent(newIntent)
+        incomingPaymentReturn.value = returnHandler.parse(newIntent)
     }
 }

@@ -29,6 +29,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
         val navigator = LocalNavigator.current
         val screenModel = rememberScreenModel { LiveOrderTrackingScreenModel(orderId) }
         val order by screenModel.order.collectAsState()
+        val payment by screenModel.payment.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
         Scaffold(
@@ -109,8 +110,22 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 Text(
-                                    text = "Payment: ${currentOrder.paymentMethod.ifBlank { "Cash on Delivery" }}",
+                                    text = "Payment method: ${currentOrder.paymentMethod.ifBlank { "Cash on Delivery" }}",
                                     style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = "Payment status: ${payment?.status?.name ?: currentOrder.paymentStatus.ifBlank { "PENDING" }}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = when (payment?.status?.name ?: currentOrder.paymentStatus) {
+                                        "FAILED", "CANCELLED" -> MaterialTheme.colorScheme.error
+                                        "SUCCEEDED" -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                                Text(
+                                    text = "Payment ID: ${payment?.orderId ?: currentOrder.paymentId.ifBlank { currentOrder.id }}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }

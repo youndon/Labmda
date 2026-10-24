@@ -24,7 +24,9 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.common.LiveOrderTrackingScreen
+import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.screens.payment.PaymentScreen
+import com.zouitel.presentaion.screens.payment.components.PaymentMethodSelector
 import kotlinx.coroutines.launch
 import android.content.Context
 import android.location.Geocoder
@@ -61,7 +63,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         var showOrderSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember { mutableStateOf("Cash on Delivery") }
+        var paymentMethod by remember { mutableStateOf(PaymentMethod.CASH) }
         var isSubmitting by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
@@ -315,12 +317,12 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             )
                         }
 
-                        OutlinedTextField(
-                            value = paymentMethod,
-                            onValueChange = { paymentMethod = it },
-                            label = { Text("Payment Method") },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
+                        Text("Payment Method", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        PaymentMethodSelector(
+                            selected = paymentMethod,
+                            onSelect = { paymentMethod = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isSubmitting
                         )
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -340,14 +342,14 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                         dropoffAddress = deliveryAddress,
                                         dropoffLat = drop.latitude,
                                         dropoffLng = drop.longitude,
-                                        paymentMethod = paymentMethod,
+                                        paymentMethod = paymentMethod.name,
                                         onSuccess = { orderId ->
                                             isSubmitting = false
                                             showOrderSheet = false
                                             cartItems.clear()
                                             dropoff = null
                                             deliveryAddress = ""
-                                            navigator?.push(LiveOrderTrackingScreen(orderId))
+                                            navigator?.push(PaymentScreen(orderId, paymentMethod))
                                         }
                                     )
                                     } catch (_: Exception) {
