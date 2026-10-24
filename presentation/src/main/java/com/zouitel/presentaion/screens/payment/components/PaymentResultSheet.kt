@@ -34,7 +34,9 @@ fun PaymentResultSheet(
                         payment?.status == PaymentStatus.PENDING ->
                         "Cash on delivery selected. Payment remains pending until cash is collected."
                     payment?.status == PaymentStatus.SUCCEEDED -> "Payment confirmed by the server."
-                    payment?.status in setOf(PaymentStatus.PENDING, PaymentStatus.PROCESSING, PaymentStatus.REQUIRES_ACTION) ->
+                    payment?.status == PaymentStatus.PENDING ||
+                        payment?.status == PaymentStatus.PROCESSING ||
+                        payment?.status == PaymentStatus.REQUIRES_ACTION ->
                         "Your payment is being processed."
                     payment?.status == PaymentStatus.FAILED -> "The payment failed. Please try again."
                     payment?.status == PaymentStatus.CANCELLED -> "Payment was cancelled."
