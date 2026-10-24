@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 data class WalletSummary(
     val availableBalance: Money = Money(),
     val pendingBalance: Money = Money(),
+    val cashOwed: Money = Money(),
     val lifetimeEarnings: Money = Money(),
     val updatedAtEpochMillis: Long = 0L
 )
