@@ -463,6 +463,25 @@ async function loadPaymentContext(orderId: string): Promise<PaymentContext | nul
   return { payment, rootPath: String(payment.contextType ?? "") === "RIDE" ? "trips" : "orders" };
 }
 
+type StripeApiObject = Record<string, unknown> & {
+  id?: string;
+  status?: string;
+  amount?: number;
+  amount_capturable?: number;
+  amount_received?: number;
+  capture_method?: string;
+  currency?: string;
+  fee?: number;
+  latest_charge?: string | {
+    id?: string;
+    balance_transaction?: string | { fee?: number; currency?: string } | null;
+  } | null;
+  balance_transaction?: string | { fee?: number; currency?: string } | null;
+  payment_intent?: string | { id?: string };
+  metadata?: Record<string, unknown>;
+  payouts_enabled?: boolean;
+};
+
 async function stripeApi<T extends Record<string, unknown>>(
   path: string,
   secretKey: string,
@@ -489,20 +508,20 @@ async function stripeApi<T extends Record<string, unknown>>(
 async function stripeGatewayFee(payment: Record<string, unknown>, secretKey: string): Promise<number | null> {
   const intentId = String(payment.providerPaymentIntentId ?? "");
   if (!intentId) return null;
-  const intent = await stripeApi<Record<string, unknown>>(
+  const intent = await stripeApi<StripeApiObject>(
     "payment_intents/" + encodeURIComponent(intentId) + "?expand%5B%5D=latest_charge.balance_transaction",
     secretKey
   );
   let charge = intent.latest_charge;
   if (!charge) return null;
   if (typeof charge === "string") {
-    charge = await stripeApi<Record<string, unknown>>(
+    charge = await stripeApi<StripeApiObject>(
       "charges/" + encodeURIComponent(charge) + "?expand%5B%5D=balance_transaction", secretKey
     );
   }
   if (!charge || typeof charge !== "object") return null;
   let balance = (charge as Record<string, unknown>).balance_transaction;
-  if (typeof balance === "string") balance = await stripeApi<Record<string, unknown>>("balance_transactions/" + encodeURIComponent(balance), secretKey);
+  if (typeof balance === "string") balance = await stripeApi<StripeApiObject>("balance_transactions/" + encodeURIComponent(balance), secretKey);
   if (!balance || typeof balance !== "object") return null;
   const balanceRecord = balance as Record<string, unknown>;
   const fee = Number(balanceRecord.fee);
@@ -679,10 +698,10 @@ async function captureAuthorizedPayment(orderId: string, context: PaymentContext
     const intentId = String(payment.providerPaymentIntentId ?? "");
     if (!intentId) return; // The authorization webhook will retry capture after it records the intent.
     const key = stripeSecretKey.value().trim();
-    const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), key);
+    const intent = await stripeApi<StripeApiObject>("payment_intents/" + encodeURIComponent(intentId), key);
     if (intent.status === "succeeded") return;
     if (intent.status !== "requires_capture") return;
-    await stripeApi<Record<string, unknown>>(
+    await stripeApi<StripeApiObject>(
       "payment_intents/" + encodeURIComponent(intentId) + "/capture", key, "POST",
       new URLSearchParams(), "labmda-capture-" + orderId
     );
@@ -719,9 +738,9 @@ async function releasePaymentAuthorization(orderId: string, context: PaymentCont
     const key = stripeSecretKey.value().trim();
     const intentId = String(payment.providerPaymentIntentId ?? "");
     if (intentId) {
-      const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), key);
+      const intent = await stripeApi<StripeApiObject>("payment_intents/" + encodeURIComponent(intentId), key);
       if (intent.status === "requires_capture") {
-        await stripeApi<Record<string, unknown>>(
+        await stripeApi<StripeApiObject>(
           "payment_intents/" + encodeURIComponent(intentId) + "/cancel", key, "POST",
           new URLSearchParams(), "labmda-cancel-" + orderId
         );
@@ -735,9 +754,9 @@ async function releasePaymentAuthorization(orderId: string, context: PaymentCont
     }
     const sessionId = String(payment.providerReference || payment.providerPaymentId || "");
     if (sessionId.startsWith("cs_")) {
-      const session = await stripeApi<Record<string, unknown>>("checkout/sessions/" + encodeURIComponent(sessionId), key);
+      const session = await stripeApi<StripeApiObject>("checkout/sessions/" + encodeURIComponent(sessionId), key);
       if (session.status === "open") {
-        await stripeApi<Record<string, unknown>>(
+        await stripeApi<StripeApiObject>(
           "checkout/sessions/" + encodeURIComponent(sessionId) + "/expire", key, "POST",
           new URLSearchParams(), "labmda-expire-" + orderId
         );
@@ -750,10 +769,10 @@ async function releasePaymentAuthorization(orderId: string, context: PaymentCont
       const linkedIntent = typeof session.payment_intent === "string" ? session.payment_intent :
         String((session.payment_intent as Record<string, unknown> | undefined)?.id ?? "");
       if (linkedIntent) {
-        const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(linkedIntent), key);
+        const intent = await stripeApi<StripeApiObject>("payment_intents/" + encodeURIComponent(linkedIntent), key);
         await getDatabase().ref("payments/" + orderId).update({ providerPaymentIntentId: linkedIntent });
         if (intent.status === "requires_capture") {
-          await stripeApi<Record<string, unknown>>(
+          await stripeApi<StripeApiObject>(
             "payment_intents/" + encodeURIComponent(linkedIntent) + "/cancel", key, "POST",
             new URLSearchParams(), "labmda-cancel-" + orderId
           );
@@ -1279,7 +1298,7 @@ export const createPaymentSession = onCall({
       String(latestPayment?.status ?? "") === "CANCELLED") {
     if (method === "STRIPE") {
       try {
-        await stripeApi<Record<string, unknown>>(
+        await stripeApi<StripeApiObject>(
           "checkout/sessions/" + encodeURIComponent(sessionId) + "/expire",
           stripeSecretKey.value().trim(), "POST", new URLSearchParams(), "labmda-cancel-session-" + orderId
         );
@@ -2119,7 +2138,7 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
     if (account.provider === "STRIPE") {
       const secret = stripeSecretKey.value().trim();
       const acct = String(account.providerAccountId);
-      const accountInfo = await stripeApi<Record<string, unknown>>("accounts/" + encodeURIComponent(acct), secret);
+      const accountInfo = await stripeApi<StripeApiObject>("accounts/" + encodeURIComponent(acct), secret);
       const metadata = accountInfo.metadata as Record<string, unknown> | undefined;
       if (accountInfo.id !== acct || metadata?.firebaseUid !== payout.uid || accountInfo.payouts_enabled !== true) {
         throw new Error("Stripe connected account is not verified for this user or cannot receive payouts.");
@@ -2132,7 +2151,7 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
         transferBody.set("transfer_group", payoutId);
         transferBody.set("metadata[payoutId]", payoutId);
         transferBody.set("metadata[firebaseUid]", String(payout.uid));
-        const transfer = await stripeApi<Record<string, unknown>>(
+        const transfer = await stripeApi<StripeApiObject>(
           "transfers", secret, "POST", transferBody, "labmda-transfer-" + payoutId
         );
         if (typeof transfer.id !== "string") throw new Error("Stripe transfer response did not contain an ID.");
@@ -2144,7 +2163,7 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
       payoutBody.set("currency", amount.currencyCode.toLowerCase());
       payoutBody.set("metadata[payoutId]", payoutId);
       payoutBody.set("metadata[firebaseUid]", String(payout.uid));
-      const result = await stripeApi<Record<string, unknown>>(
+      const result = await stripeApi<StripeApiObject>(
         "payouts", secret, "POST", payoutBody, "labmda-payout-" + payoutId, acct
       );
       if (typeof result.id !== "string") throw new Error("Stripe payout response did not contain an ID.");
@@ -2270,7 +2289,7 @@ async function submitProviderRefund(orderId: string, context: PaymentContext, am
     form.set("amount", String(amountMinorUnits));
     form.set("metadata[orderId]", orderId);
     form.set("metadata[reason]", reason.slice(0, 200));
-    const result = await stripeApi<Record<string, unknown>>(
+    const result = await stripeApi<StripeApiObject>(
       "refunds", secret, "POST", form, "labmda-refund-" + orderId + "-" + (refunded.minorUnits + amountMinorUnits)
     );
     refundId = String(result.id ?? "");
@@ -2685,7 +2704,7 @@ export const stripeWebhook = onRequest({
         const intentId = typeof object.payment_intent === "string" ? object.payment_intent :
           String((object.payment_intent as Record<string, unknown> | undefined)?.id ?? "");
         if (orderId && intentId) {
-          const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), stripeSecretKey.value().trim());
+          const intent = await stripeApi<StripeApiObject>("payment_intents/" + encodeURIComponent(intentId), stripeSecretKey.value().trim());
           await handleStripeIntent(orderId, intent, event.type);
         }
       } else if (event.type === "checkout.session.expired") {
