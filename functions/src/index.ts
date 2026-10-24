@@ -2425,9 +2425,12 @@ export const stripeWebhook = onRequest({
             id: "refund_" + located.orderId + "_" + refundedMinor,
             orderId: located.orderId, entryType: "PROVIDER_REFUND_CONFIRMED",
             amount: { minorUnits: refundedMinor, currencyCode: total.currencyCode }, status: "CONFIRMED",
-            affectsWallet: false, requiresReversal: String(located.context.payment.breakdownStatus ?? "") === "ALLOCATED",
+            affectsWallet: false,
+            requiresReversal: String(located.context.payment.breakdownStatus ?? "") === "ALLOCATED" ||
+              (status === "PARTIALLY_REFUNDED" && String(located.context.payment.breakdownStatus ?? "") !== "ALLOCATED"),
             createdAtEpochMillis: Date.now()
           });
+          await handleCaptureAfterCancellation(located.orderId);
         }
       } else if (event.type === "payout.paid" || event.type === "payout.failed") {
         const payoutId = String((object.metadata as Record<string, unknown> | undefined)?.payoutId ?? "");
@@ -2555,13 +2558,16 @@ export const paypalWebhook = onRequest({
         const refund = Math.round(Number((resource.amount as Record<string, unknown> | undefined)?.value ?? "NaN") * 100);
         if (!Number.isSafeInteger(refund) || refund <= 0) throw new Error("PayPal refund amount is invalid.");
         const cumulative = Math.min(total.minorUnits, previous.minorUnits + refund);
+        const refundStatus = cumulative >= total.minorUnits ? "REFUNDED" : "PARTIALLY_REFUNDED";
         await getDatabase().ref("payments/" + located.orderId).update({
-          status: cumulative >= total.minorUnits ? "REFUNDED" : "PARTIALLY_REFUNDED",
+          status: refundStatus,
           refundAmount: { minorUnits: cumulative, currencyCode: total.currencyCode },
           refundRequest: { ...(located.context.payment.refundRequest as Record<string, unknown> ?? {}), status: "COMPLETED", updatedAtEpochMillis: Date.now() },
-          requiresAdminReconciliation: String(located.context.payment.breakdownStatus ?? "") === "ALLOCATED",
+          requiresAdminReconciliation: String(located.context.payment.breakdownStatus ?? "") === "ALLOCATED" ||
+            (refundStatus === "PARTIALLY_REFUNDED" && String(located.context.payment.breakdownStatus ?? "") !== "ALLOCATED"),
           updatedAtEpochMillis: Date.now()
         });
+        await handleCaptureAfterCancellation(located.orderId);
       } else if (eventType === "PAYMENT.PAYOUTS-ITEM.SUCCEEDED" || eventType === "PAYMENT.PAYOUTS-ITEM.FAILED") {
         const payoutItem = resource;
         const payoutId = String(payoutItem.sender_item_id ?? (payoutItem.payout_item as Record<string, unknown> | undefined)?.sender_item_id ?? "");
