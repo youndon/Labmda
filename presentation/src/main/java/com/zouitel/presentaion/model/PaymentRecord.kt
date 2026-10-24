@@ -2,27 +2,21 @@ package com.zouitel.presentaion.model
 
 import kotlinx.serialization.Serializable
 
-@Serializable
-enum class PaymentStatus {
-    PENDING,
-    PROCESSING,
-    REQUIRES_ACTION,
-    SUCCEEDED,
-    FAILED,
-    CANCELLED,
-    REFUNDED,
-    PARTIALLY_REFUNDED
-}
-
+/**
+ * Server-owned payment ledger projection. Amounts and splits are represented in
+ * currency minor units and must never be used as client-authored settlement values.
+ */
 @Serializable
 data class PaymentRecord(
-    val id: String = "",
+    val orderId: String = "",
     val clientId: String = "",
     val merchantId: String = "",
-    val orderId: String = "",
-    val amount: Double = 0.0,
-    val currency: String = "USD",
-    val status: PaymentStatus = PaymentStatus.PENDING,
-    val paymentMethodId: String = "",
-    val createdAtTimestamp: Long = 0L
+    val courierId: String = "",
+    val method: PaymentMethod = PaymentMethod.CASH,
+    val status: PaymentStatus = PaymentStatus.UNKNOWN,
+    val amount: Money = Money(),
+    val breakdown: OrderBreakdown? = null,
+    val providerPaymentId: String = "",
+    val refundAmount: Money = Money(),
+    val updatedAtEpochMillis: Long = 0L
 )
