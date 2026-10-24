@@ -628,7 +628,11 @@ async function maybeCaptureAfterAuthorization(orderId: string): Promise<void> {
   const root = await getDatabase().ref(context.rootPath + "/" + orderId).get();
   if (!root.exists()) return;
   const status = String(root.child("status").val() ?? "");
-  const shouldCapture = context.rootPath === "trips" ? status === "COMPLETED" : status === "ACCEPTED";
+  // Handle delayed/reordered provider events: if acceptance has already advanced the
+  // order before the authorization webhook arrives, still capture the valid authorization.
+  const shouldCapture = context.rootPath === "trips"
+    ? status === "COMPLETED"
+    : ["ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED"].includes(status);
   if (shouldCapture && String(context.payment.status ?? "") === "AUTHORIZED") {
     await captureAuthorizedPayment(orderId, context);
   } else if (context.rootPath === "orders" && status === "DELIVERED" && String(context.payment.status ?? "") === "SUCCEEDED") {
@@ -2020,6 +2024,12 @@ export const confirmCashCollected = onCall({ enforceAppCheck: true }, async requ
     throw new HttpsError("permission-denied", "Only the assigned courier or driver can confirm cash after completion.");
   }
   if (String(context.payment.status ?? "") === "SUCCEEDED") {
+    await setPaymentStatus(orderId, context, "SUCCEEDED", {
+      provider: "CASH",
+      method: "CASH",
+      cashCollectedBy: String(context.payment.cashCollectedBy ?? uid),
+      cashCollectedAtEpochMillis: Number(context.payment.cashCollectedAtEpochMillis ?? Date.now())
+    });
     await settleCompletedPayment(orderId);
     return { accepted: true, message: "Cash collection was already recorded." };
   }
@@ -2156,9 +2166,12 @@ async function handleStripeIntent(orderId: string, intent: Record<string, unknow
     throw new Error("Stripe event does not match the payment provider.");
   }
   const expected = moneyValue(context.payment.amount);
-  const actualAmount = eventType === "payment_intent.amount_capturable_updated" || intent.status === "requires_capture"
-    ? Number(intent.amount_capturable ?? 0)
-    : Number(intent.amount_received ?? intent.amount ?? 0);
+  const actualAmount =
+    eventType === "payment_intent.amount_capturable_updated" || intent.status === "requires_capture"
+      ? Number(intent.amount_capturable ?? 0)
+      : eventType === "payment_intent.succeeded" || intent.status === "succeeded"
+        ? Number(intent.amount_received ?? intent.amount ?? 0)
+        : Number(intent.amount ?? 0);
   const actualCurrency = String(intent.currency ?? "").toUpperCase();
   if (actualAmount !== expected.minorUnits || actualCurrency !== expected.currencyCode.toUpperCase()) {
     throw new Error("Stripe amount or currency mismatch for payment " + orderId);
