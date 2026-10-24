@@ -1,4 +1,7 @@
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { onValueUpdated } from "firebase-functions/v2/database";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
 import { defineSecret, defineString } from "firebase-functions/params";
@@ -10,6 +13,9 @@ const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
 const paypalClientId = defineSecret("PAYPAL_CLIENT_ID");
 const paypalClientSecret = defineSecret("PAYPAL_CLIENT_SECRET");
 const paypalEnvironment = defineString("PAYPAL_ENVIRONMENT", { default: "sandbox" });
+const stripeWebhookSecret = defineSecret("STRIPE_WEBHOOK_SECRET");
+const paypalWebhookId = defineString("PAYPAL_WEBHOOK_ID", { default: "" });
+const payoutsEnabled = defineString("PAYOUTS_ENABLED", { default: "false" });
 
 type OrderType = "FOOD" | "RETAIL";
 type ItemRequest = { id: string; quantity: number };
@@ -182,6 +188,430 @@ async function getPayPalAccessToken(): Promise<{ baseUrl: string; token: string 
     throw new HttpsError("internal", "PayPal authentication failed. Check server credentials and environment.");
   }
   return { baseUrl, token: json.access_token };
+}
+
+
+type AuthoritativeAmount = { minorUnits: number; currencyCode: string };
+
+async function recomputeAuthoritativeAmount(orderId: string, context: PaymentContext): Promise<AuthoritativeAmount> {
+  const db = getDatabase();
+  const paymentAmount = moneyValue(context.payment.amount);
+  if (context.rootPath === "trips") {
+    const snapshot = await db.ref("trips/" + orderId).get();
+    if (!snapshot.exists()) throw new HttpsError("not-found", "The ride was not found.");
+    const trip = snapshot.val() as Record<string, unknown>;
+    const lat1 = Number(trip.pickupLat), lng1 = Number(trip.pickupLng);
+    const lat2 = Number(trip.dropoffLat), lng2 = Number(trip.dropoffLng);
+    if (![lat1, lng1, lat2, lng2].every(Number.isFinite)) {
+      throw new HttpsError("failed-precondition", "Ride coordinates are invalid.");
+    }
+    const distance = distanceKm(lat1, lng1, lat2, lng2);
+    if (!Number.isFinite(distance) || distance < 0.05 || distance > 1000) {
+      throw new HttpsError("failed-precondition", "The stored ride distance is invalid.");
+    }
+    const expected = Math.round(Math.max(4, 2 + distance * 1.2) * 100);
+    const storedFare = minorUnits(trip.fare, "stored ride fare");
+    if (storedFare !== expected || paymentAmount.minorUnits !== expected) {
+      throw new HttpsError("failed-precondition", "The ride fare changed or the payment record is inconsistent. Recreate the ride before checkout.");
+    }
+    return { minorUnits: expected, currencyCode: paymentAmount.currencyCode.toUpperCase() || "USD" };
+  }
+
+  const orderSnap = await db.ref("orders/" + orderId).get();
+  if (!orderSnap.exists()) throw new HttpsError("not-found", "The order was not found.");
+  const order = orderSnap.val() as Record<string, unknown>;
+  const orderType = String(order.orderType ?? "");
+  const sourceId = String(order.sourceId ?? "");
+  if ((orderType !== "FOOD" && orderType !== "RETAIL") || !sourceId) {
+    throw new HttpsError("failed-precondition", "The stored order type or source is invalid.");
+  }
+  const sourcePath = orderType === "FOOD" ? "restaurants/" + sourceId : "shops/" + sourceId;
+  const sourceSnap = await db.ref(sourcePath).get();
+  if (!sourceSnap.exists()) throw new HttpsError("failed-precondition", "The order source is no longer available.");
+  const source = sourceSnap.val() as Record<string, unknown>;
+  if (orderType === "FOOD") {
+    const profile = await db.ref("users/" + sourceId).get();
+    if ((profile.child("foodStatus").val() !== "APPROVED" && source.status !== "APPROVED") || source.isOpen === false) {
+      throw new HttpsError("failed-precondition", "The restaurant is no longer approved or open.");
+    }
+  } else if (source.status !== "APPROVED" || source.isOnline === false) {
+    throw new HttpsError("failed-precondition", "The shop is no longer approved or online.");
+  }
+
+  const items = Array.isArray(order.items) ? order.items as Array<Record<string, unknown>> : [];
+  if (!items.length || items.length > 100) throw new HttpsError("failed-precondition", "The stored order items are invalid.");
+  let subtotal = 0;
+  for (const item of items) {
+    const itemId = typeof item.id === "string" ? item.id.trim() : "";
+    const quantity = Number(item.quantity);
+    if (!itemId || !Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
+      throw new HttpsError("failed-precondition", "A stored order item or quantity is invalid.");
+    }
+    const itemPath = sourcePath + (orderType === "FOOD" ? "/meals/" : "/products/") + itemId;
+    const itemSnap = await db.ref(itemPath).get();
+    if (!itemSnap.exists()) throw new HttpsError("failed-precondition", "An item is no longer available.");
+    const catalog = itemSnap.val() as Record<string, unknown>;
+    if (catalog.isAvailable === false) throw new HttpsError("failed-precondition", "An order item is no longer available.");
+    const stock = typeof catalog.stockQuantity === "number" ? catalog.stockQuantity : Number.MAX_SAFE_INTEGER;
+    if (orderType === "RETAIL" && stock < quantity) throw new HttpsError("failed-precondition", "An order item is out of stock.");
+    const unitMinor = minorUnits(orderType === "FOOD" ? catalog.basePrice : catalog.price, "current catalog price");
+    subtotal += unitMinor * quantity;
+    if (!Number.isSafeInteger(subtotal)) throw new HttpsError("out-of-range", "The order total is too large.");
+  }
+  let deliveryFee = 0;
+  if (orderType === "FOOD") {
+    deliveryFee = minorUnits(source.deliveryFee ?? 0, "current delivery fee");
+  } else {
+    const configuredFee = await db.ref("settings/deliveryFees/RETAIL").get();
+    if (!configuredFee.exists()) throw new HttpsError("failed-precondition", "Retail delivery fee is not configured.");
+    deliveryFee = minorUnits(configuredFee.val(), "current retail delivery fee");
+  }
+  const total = subtotal + deliveryFee;
+  const storedSubtotal = minorUnits(order.subtotal, "stored subtotal");
+  const storedDeliveryFee = minorUnits(order.deliveryFee, "stored delivery fee");
+  const storedTotal = minorUnits(order.totalPrice, "stored order total");
+  if (subtotal !== storedSubtotal || deliveryFee !== storedDeliveryFee || total !== storedTotal ||
+      total !== paymentAmount.minorUnits) {
+    throw new HttpsError("failed-precondition", "Prices or fees changed since this order was created. Review and place a new order before checkout.");
+  }
+  return { minorUnits: total, currencyCode: paymentAmount.currencyCode.toUpperCase() || "USD" };
+}
+
+async function loadPaymentContext(orderId: string): Promise<PaymentContext | null> {
+  const snapshot = await getDatabase().ref("payments/" + orderId).get();
+  if (!snapshot.exists()) return null;
+  const payment = snapshot.val() as Record<string, unknown>;
+  return { payment, rootPath: String(payment.contextType ?? "") === "RIDE" ? "trips" : "orders" };
+}
+
+async function stripeApi<T extends Record<string, unknown>>(
+  path: string,
+  secretKey: string,
+  method = "GET",
+  body?: URLSearchParams,
+  idempotencyKey?: string,
+  accountId?: string
+): Promise<T> {
+  const headers: Record<string, string> = { Authorization: "Bearer " + secretKey };
+  if (body) headers["Content-Type"] = "application/x-www-form-urlencoded";
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
+  if (accountId) headers["Stripe-Account"] = accountId;
+  const response = await fetch("https://api.stripe.com/v1/" + path, {
+    method, headers, body: body ? body.toString() : undefined
+  });
+  const data = await response.json() as T & { error?: { message?: string } };
+  if (!response.ok) {
+    throw new Error("Stripe API " + method + " " + path + " failed (" + response.status + "): " +
+      String(data.error?.message ?? "provider request failed"));
+  }
+  return data;
+}
+
+async function stripeGatewayFee(payment: Record<string, unknown>, secretKey: string): Promise<number | null> {
+  const intentId = String(payment.providerPaymentIntentId ?? "");
+  if (!intentId) return null;
+  const intent = await stripeApi<Record<string, unknown>>(
+    "payment_intents/" + encodeURIComponent(intentId) + "?expand%5B%5D=latest_charge.balance_transaction",
+    secretKey
+  );
+  let charge = intent.latest_charge;
+  if (!charge) return null;
+  if (typeof charge === "string") {
+    charge = await stripeApi<Record<string, unknown>>(
+      "charges/" + encodeURIComponent(charge) + "?expand%5B%5D=balance_transaction", secretKey
+    );
+  }
+  if (!charge || typeof charge !== "object") return null;
+  let balance = (charge as Record<string, unknown>).balance_transaction;
+  if (typeof balance === "string") balance = await stripeApi<Record<string, unknown>>("balance_transactions/" + encodeURIComponent(balance), secretKey);
+  if (!balance || typeof balance !== "object") return null;
+  const fee = Number((balance as Record<string, unknown>).fee);
+  return Number.isSafeInteger(fee) && fee >= 0 ? fee : null;
+}
+
+async function postWalletSettlement(
+  uid: string,
+  postingId: string,
+  orderId: string,
+  role: string,
+  creditMinorUnits: number,
+  cashOwedDelta: number,
+  currencyCode: string,
+  provider: string
+): Promise<void> {
+  if (!uid || (creditMinorUnits <= 0 && cashOwedDelta <= 0)) return;
+  const walletRef = getDatabase().ref("wallets/" + uid);
+  await walletRef.transaction((current) => {
+    const wallet = current && typeof current === "object" ? current as Record<string, unknown> : {};
+    const applied = wallet.appliedLedgerIds && typeof wallet.appliedLedgerIds === "object"
+      ? wallet.appliedLedgerIds as Record<string, unknown> : {};
+    if (applied[postingId] === true) return;
+    const available = moneyValue(wallet.available, currencyCode);
+    const cashOwed = moneyValue(wallet.cashOwed, currencyCode);
+    const lifetime = moneyValue(wallet.lifetimeEarnings, currencyCode);
+    return {
+      ...wallet,
+      available: { minorUnits: available.minorUnits + creditMinorUnits, currencyCode },
+      cashOwed: { minorUnits: cashOwed.minorUnits + cashOwedDelta, currencyCode },
+      lifetimeEarnings: { minorUnits: lifetime.minorUnits + creditMinorUnits, currencyCode },
+      appliedLedgerIds: { ...applied, [postingId]: true },
+      updatedAtEpochMillis: Date.now()
+    };
+  });
+  const appliedSnapshot = await walletRef.child("appliedLedgerIds/" + postingId).get();
+  if (appliedSnapshot.val() !== true) throw new Error("Wallet ledger posting did not commit: " + postingId);
+  const now = Date.now();
+  await getDatabase().ref("ledger/" + postingId).set({
+    id: postingId,
+    uid,
+    orderId,
+    type: role === "COURIER" && cashOwedDelta > 0 ? "EARNING_AND_CASH_REMITTANCE_DUE" : "EARNING",
+    status: "POSTED",
+    amount: { minorUnits: creditMinorUnits, currencyCode },
+    cashOwedDelta: { minorUnits: cashOwedDelta, currencyCode },
+    provider,
+    affectsWallet: true,
+    createdAtEpochMillis: now,
+    updatedAtEpochMillis: now
+  });
+}
+
+async function settleCompletedPayment(orderId: string): Promise<void> {
+  const context = await loadPaymentContext(orderId);
+  if (!context) return;
+  const payment = context.payment;
+  if (String(payment.status ?? "") !== "SUCCEEDED") return;
+  if (String(payment.breakdownStatus ?? "") === "ALLOCATED") return;
+  const rootSnap = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+  if (!rootSnap.exists()) return;
+  const root = rootSnap.val() as Record<string, unknown>;
+  const terminal = context.rootPath === "trips"
+    ? String(root.status ?? "") === "COMPLETED"
+    : String(root.status ?? "") === "DELIVERED";
+  if (!terminal) return;
+
+  const amount = moneyValue(payment.amount);
+  const provider = normalizePaymentMethod(payment.provider ?? payment.method);
+  let gatewayFee: number | null = null;
+  if (provider === "CASH") {
+    gatewayFee = 0;
+  } else if (payment.gatewayFeeVerified === true) {
+    gatewayFee = moneyValue(payment.breakdown && (payment.breakdown as Record<string, unknown>).gatewayFee, amount.currencyCode).minorUnits;
+  } else if (provider === "STRIPE") {
+    try { gatewayFee = await stripeGatewayFee(payment, stripeSecretKey.value().trim()); } catch { gatewayFee = null; }
+  } else if (provider === "PAYPAL" && typeof payment.gatewayFeeMinorUnits === "number") {
+    gatewayFee = Number(payment.gatewayFeeMinorUnits);
+  }
+  if (gatewayFee === null || !Number.isSafeInteger(gatewayFee) || gatewayFee < 0) {
+    await getDatabase().ref("payments/" + orderId).update({ breakdownStatus: "AWAITING_GATEWAY_FEE", updatedAtEpochMillis: Date.now() });
+    return;
+  }
+
+  const settingsSnap = await getDatabase().ref("config/commission").get();
+  const settings = (settingsSnap.val() ?? {}) as Record<string, unknown>;
+  const platformBps = Number(settings.platformCommissionBps ?? 1000);
+  const courierBps = Number(settings.courierShareBps ?? 0);
+  if (!Number.isInteger(platformBps) || platformBps < 0 || platformBps > 10000 ||
+      !Number.isInteger(courierBps) || courierBps < 0 || courierBps > 10000 ||
+      platformBps + courierBps > 10000) {
+    throw new Error("Commission configuration is invalid; refusing wallet settlement.");
+  }
+  const currencyCode = amount.currencyCode.toUpperCase();
+  if (typeof settings.currencyCode === "string" && settings.currencyCode.toUpperCase() !== currencyCode) {
+    throw new Error("Payment currency does not match commission configuration; refusing settlement.");
+  }
+
+  let merchantShare = 0;
+  let courierShare = 0;
+  let platformShare = 0;
+  const courierId = String(payment.courierId ?? (context.rootPath === "trips" ? root.driverId ?? "" : root.deliveryId ?? ""));
+  if (context.rootPath === "trips") {
+    if (!courierId) throw new Error("Completed ride has no assigned driver; refusing wallet settlement.");
+    platformShare = Math.floor(amount.minorUnits * platformBps / 10000);
+    courierShare = amount.minorUnits - platformShare - gatewayFee;
+  } else {
+    const subtotal = minorUnits(root.subtotal, "order subtotal");
+    const deliveryFee = minorUnits(root.deliveryFee, "order delivery fee");
+    const commission = Math.floor(subtotal * platformBps / 10000);
+    merchantShare = subtotal - commission;
+    courierShare = courierId ? Math.floor(deliveryFee * courierBps / 10000) : 0;
+    platformShare = amount.minorUnits - merchantShare - courierShare - gatewayFee;
+  }
+  if ([merchantShare, courierShare, platformShare].some(value => !Number.isSafeInteger(value) || value < 0) ||
+      merchantShare + courierShare + platformShare + gatewayFee !== amount.minorUnits) {
+    throw new Error("Computed settlement split is invalid; refusing wallet settlement.");
+  }
+
+  await getDatabase().ref("payments/" + orderId).update({ breakdownStatus: "ALLOCATING", updatedAtEpochMillis: Date.now() });
+  const merchantId = String(payment.merchantId ?? "");
+  if (merchantId && merchantShare > 0) {
+    await postWalletSettlement(merchantId, "settlement_" + orderId + "_merchant", orderId, "MERCHANT", merchantShare, 0, currencyCode, provider);
+  }
+  if (courierId && (courierShare > 0 || (provider === "CASH" && amount.minorUnits - courierShare > 0))) {
+    const cashOwed = provider === "CASH" ? amount.minorUnits - courierShare : 0;
+    await postWalletSettlement(courierId, "settlement_" + orderId + "_courier", orderId, "COURIER", courierShare, cashOwed, currencyCode, provider);
+  }
+  if (platformShare > 0) {
+    await postWalletSettlement("platform", "settlement_" + orderId + "_platform", orderId, "PLATFORM", platformShare, 0, currencyCode, provider);
+  }
+  const breakdown = {
+    merchantShare: { minorUnits: merchantShare, currencyCode },
+    courierShare: { minorUnits: courierShare, currencyCode },
+    platformShare: { minorUnits: platformShare, currencyCode },
+    gatewayFee: { minorUnits: gatewayFee, currencyCode }
+  };
+  await getDatabase().ref("payments/" + orderId).update({
+    breakdown,
+    breakdownStatus: "ALLOCATED",
+    gatewayFeeVerified: true,
+    settledAtEpochMillis: Date.now(),
+    updatedAtEpochMillis: Date.now()
+  });
+  await getDatabase().ref("ledger/settlement_" + orderId + "_summary").set({
+    id: "settlement_" + orderId + "_summary",
+    orderId,
+    entryType: "PAYMENT_SPLIT_ALLOCATED",
+    clientId: payment.clientId ?? "",
+    merchantId,
+    courierId,
+    provider,
+    status: "POSTED",
+    amount,
+    breakdown,
+    breakdownStatus: "ALLOCATED",
+    affectsWallet: false,
+    createdAtEpochMillis: Date.now()
+  });
+}
+
+async function captureAuthorizedPayment(orderId: string, context: PaymentContext): Promise<void> {
+  const payment = context.payment;
+  const provider = normalizePaymentMethod(payment.provider ?? payment.method);
+  if (provider === "STRIPE") {
+    const intentId = String(payment.providerPaymentIntentId ?? "");
+    if (!intentId) return; // The authorization webhook will retry capture after it records the intent.
+    const key = stripeSecretKey.value().trim();
+    const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), key);
+    if (intent.status === "succeeded") return;
+    if (intent.status !== "requires_capture") return;
+    await stripeApi<Record<string, unknown>>(
+      "payment_intents/" + encodeURIComponent(intentId) + "/capture", key, "POST",
+      new URLSearchParams(), "labmda-capture-" + orderId
+    );
+  } else if (provider === "PAYPAL") {
+    const authorizationId = String(payment.providerAuthorizationId ?? "");
+    if (!authorizationId) return;
+    const access = await getPayPalAccessToken();
+    const statusResponse = await fetch(access.baseUrl + "/v2/payments/authorizations/" + encodeURIComponent(authorizationId), {
+      headers: { Authorization: "Bearer " + access.token }
+    });
+    const authorization = await statusResponse.json() as { id?: string; status?: string };
+    if (!statusResponse.ok || authorization.id !== authorizationId) throw new Error("PayPal authorization lookup failed.");
+    if (authorization.status === "CAPTURED") return;
+    if (authorization.status !== "CREATED") return;
+    const captureResponse = await fetch(access.baseUrl + "/v2/payments/authorizations/" + encodeURIComponent(authorizationId) + "/capture", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + access.token, "Content-Type": "application/json", "PayPal-Request-Id": "labmda-capture-" + orderId },
+      body: "{}"
+    });
+    const capture = await captureResponse.json() as { id?: string; status?: string };
+    if (!captureResponse.ok) throw new Error("PayPal authorization capture failed.");
+    // Payment status is set by the verified capture webhook, not by this request response.
+  }
+}
+
+async function releasePaymentAuthorization(orderId: string, context: PaymentContext): Promise<void> {
+  const payment = context.payment;
+  const provider = normalizePaymentMethod(payment.provider ?? payment.method);
+  if (provider === "CASH") {
+    await setPaymentStatus(orderId, context, "CANCELLED", { cancelReason: "ORDER_CANCELLED" });
+    return;
+  }
+  if (provider === "STRIPE") {
+    const intentId = String(payment.providerPaymentIntentId ?? "");
+    if (!intentId) return;
+    const key = stripeSecretKey.value().trim();
+    const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(intentId), key);
+    if (intent.status === "requires_capture") {
+      await stripeApi<Record<string, unknown>>(
+        "payment_intents/" + encodeURIComponent(intentId) + "/cancel", key, "POST",
+        new URLSearchParams(), "labmda-cancel-" + orderId
+      );
+    }
+  } else if (provider === "PAYPAL") {
+    const authorizationId = String(payment.providerAuthorizationId ?? "");
+    if (!authorizationId) return;
+    const access = await getPayPalAccessToken();
+    const response = await fetch(access.baseUrl + "/v2/payments/authorizations/" + encodeURIComponent(authorizationId) + "/void", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + access.token, "PayPal-Request-Id": "labmda-void-" + orderId }
+    });
+    if (!response.ok) throw new Error("PayPal authorization void failed.");
+  }
+}
+
+async function maybeCaptureAfterAuthorization(orderId: string): Promise<void> {
+  const context = await loadPaymentContext(orderId);
+  if (!context) return;
+  const root = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+  if (!root.exists()) return;
+  const status = String(root.child("status").val() ?? "");
+  const shouldCapture = context.rootPath === "trips" ? status === "COMPLETED" : status === "ACCEPTED";
+  if (shouldCapture && String(context.payment.status ?? "") === "AUTHORIZED") {
+    await captureAuthorizedPayment(orderId, context);
+  } else if (context.rootPath === "orders" && status === "DELIVERED" && String(context.payment.status ?? "") === "SUCCEEDED") {
+    await settleCompletedPayment(orderId);
+  } else if (context.rootPath === "trips" && status === "COMPLETED" && String(context.payment.status ?? "") === "SUCCEEDED") {
+    await settleCompletedPayment(orderId);
+  }
+}
+
+async function findPaymentByProviderReference(reference: string): Promise<{ orderId: string; context: PaymentContext } | null> {
+  if (!reference) return null;
+  const snapshot = await getDatabase().ref("payments").orderByChild("providerReference").equalTo(reference).limitToFirst(2).get();
+  const raw = snapshot.val() as Record<string, unknown> | null;
+  const entries = Object.entries(raw ?? {});
+  if (entries.length !== 1) return null;
+  const orderId = entries[0][0];
+  const payment = entries[0][1] as Record<string, unknown>;
+  return { orderId, context: { payment, rootPath: String(payment.contextType ?? "") === "RIDE" ? "trips" : "orders" } };
+}
+
+function stripeSignatureValid(rawBody: Buffer, signatureHeader: string, secret: string): boolean {
+  const parts = signatureHeader.split(",").map(part => part.trim());
+  const timestamp = parts.find(part => part.startsWith("t="))?.slice(2) ?? "";
+  const signatures = parts.filter(part => part.startsWith("v1=")).map(part => part.slice(3));
+  const seconds = Number(timestamp);
+  if (!timestamp || !Number.isFinite(seconds) || Math.abs(Date.now() / 1000 - seconds) > 300 || signatures.length === 0) return false;
+  const expected = createHmac("sha256", secret).update(timestamp + "." + rawBody.toString("utf8")).digest();
+  return signatures.some(signature => {
+    try {
+      const received = Buffer.from(signature, "hex");
+      return received.length === expected.length && timingSafeEqual(received, expected);
+    } catch { return false; }
+  });
+}
+
+async function verifyPayPalWebhook(event: Record<string, unknown>, headers: Record<string, string | string[] | undefined>): Promise<boolean> {
+  const webhookId = paypalWebhookId.value().trim();
+  if (!webhookId) return false;
+  const access = await getPayPalAccessToken();
+  const payload = {
+    auth_algo: headers["paypal-auth-algo"],
+    cert_url: headers["paypal-cert-url"],
+    transmission_id: headers["paypal-transmission-id"],
+    transmission_sig: headers["paypal-transmission-sig"],
+    transmission_time: headers["paypal-transmission-time"],
+    webhook_id: webhookId,
+    webhook_event: event
+  };
+  const response = await fetch(access.baseUrl + "/v1/notifications/verify-webhook-signature", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + access.token, "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json() as { verification_status?: string };
+  return response.ok && result.verification_status === "SUCCESS";
 }
 
 async function setPaymentStatus(
