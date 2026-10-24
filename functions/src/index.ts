@@ -34,6 +34,22 @@ function normalizePaymentMethod(value: unknown): "CASH" | "STRIPE" | "PAYPAL" | 
   return "";
 }
 
+function merchantAccessIds(source: Record<string, unknown>, fallbackId: string): Record<string, true> {
+  const ids = new Set<string>();
+  for (const candidate of [source.ownerUid, source.ownerId, source.merchantId, fallbackId]) {
+    if (typeof candidate === "string" && candidate.trim()) ids.add(candidate.trim());
+  }
+  const managers = source.managers;
+  if (Array.isArray(managers)) {
+    for (const manager of managers) if (typeof manager === "string" && manager.trim()) ids.add(manager.trim());
+  } else if (managers && typeof managers === "object") {
+    for (const [uid, allowed] of Object.entries(managers as Record<string, unknown>)) {
+      if (allowed === true && uid.trim()) ids.add(uid.trim());
+    }
+  }
+  return Object.fromEntries([...ids].map(uid => [uid, true])) as Record<string, true>;
+}
+
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const radians = (degrees: number) => degrees * Math.PI / 180;
   const dLat = radians(lat2 - lat1);
@@ -57,6 +73,91 @@ async function getOwnedPaymentContext(orderId: string, uid: string): Promise<Pay
   if (!tripExists && !orderExists) throw new HttpsError("not-found", "The linked order or trip was not found.");
   const rootPath = tripExists ? "trips" : "orders";
   return { payment, rootPath };
+}
+
+function moneyValue(value: unknown, currencyCode = "USD"): { minorUnits: number; currencyCode: string } {
+  if (!value || typeof value !== "object") return { minorUnits: 0, currencyCode };
+  const money = value as Record<string, unknown>;
+  const amount = Number(money.minorUnits ?? 0);
+  return {
+    minorUnits: Number.isSafeInteger(amount) ? amount : 0,
+    currencyCode: typeof money.currencyCode === "string" ? money.currencyCode : currencyCode
+  };
+}
+
+/**
+ * Create wallet schema only through trusted code. Balance postings are deliberately not
+ * inferred from checkout redirects: ledger accounting must allocate verified amounts first.
+ */
+async function ensureWallet(uid: string, currencyCode = "USD"): Promise<Record<string, unknown>> {
+  if (!uid) throw new HttpsError("invalid-argument", "A wallet owner is required.");
+  const ref = getDatabase().ref(`wallets/${uid}`);
+  const zero = { minorUnits: 0, currencyCode };
+  const result = await ref.transaction((current) => {
+    const wallet = current && typeof current === "object"
+      ? current as Record<string, unknown>
+      : {};
+    return {
+      ...wallet,
+      available: moneyValue(wallet.available, currencyCode),
+      pending: moneyValue(wallet.pending, currencyCode),
+      cashOwed: moneyValue(wallet.cashOwed, currencyCode),
+      lifetimeEarnings: moneyValue(wallet.lifetimeEarnings, currencyCode),
+      currencyCode: typeof wallet.currencyCode === "string" ? wallet.currencyCode : currencyCode,
+      updatedAtEpochMillis: typeof wallet.updatedAtEpochMillis === "number"
+        ? wallet.updatedAtEpochMillis : Date.now()
+    };
+  });
+  return (result.snapshot.val() ?? { available: zero, pending: zero, cashOwed: zero, lifetimeEarnings: zero }) as Record<string, unknown>;
+}
+
+function walletSnapshot(wallet: Record<string, unknown>, currencyCode = "USD"): Record<string, unknown> {
+  return {
+    summary: {
+      availableBalance: moneyValue(wallet.available, currencyCode),
+      pendingBalance: moneyValue(wallet.pending, currencyCode),
+      cashOwed: moneyValue(wallet.cashOwed, currencyCode),
+      lifetimeEarnings: moneyValue(wallet.lifetimeEarnings, currencyCode),
+      updatedAtEpochMillis: Number(wallet.updatedAtEpochMillis ?? 0)
+    },
+    transactions: [],
+    payoutAccount: null
+  };
+}
+
+async function getOrCreateStripeCustomer(uid: string, secretKey: string): Promise<string> {
+  const db = getDatabase();
+  const ref = db.ref(`paymentCustomers/${uid}`);
+  const stored = await ref.get();
+  const storedValue = stored.val() as unknown;
+  // Accept the earlier object form if present, but write the canonical value as the provider ID
+  // string at paymentCustomers/{uid}, keeping the schema small and outside users/{uid}.
+  const existingId = typeof storedValue === "string"
+    ? storedValue
+    : storedValue && typeof storedValue === "object"
+      ? String((storedValue as Record<string, unknown>).stripeCustomerId ?? "")
+      : "";
+  if (existingId.startsWith("cus_")) return existingId;
+
+  // A stable idempotency key prevents concurrent first checkouts from creating duplicate
+  // Stripe customers. Contact fields are intentionally not copied into the customer node.
+  const form = new URLSearchParams();
+  form.set("metadata[firebaseUid]", uid);
+  const response = await fetch("https://api.stripe.com/v1/customers", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + secretKey,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Idempotency-Key": "labmda-customer-" + uid
+    },
+    body: form
+  });
+  const customer = await response.json() as { id?: string; error?: { message?: string } };
+  if (!response.ok || !customer.id || !customer.id.startsWith("cus_")) {
+    throw new HttpsError("failed-precondition", customer.error?.message || "Stripe could not create a customer.");
+  }
+  await ref.set(customer.id);
+  return customer.id;
 }
 
 async function getPayPalAccessToken(): Promise<{ baseUrl: string; token: string }> {
@@ -94,11 +195,51 @@ async function setPaymentStatus(
     [`payments/${orderId}/status`]: status,
     [`payments/${orderId}/updatedAtEpochMillis`]: now,
     ...Object.fromEntries(Object.entries(extraPaymentFields).map(([key, value]) => [`payments/${orderId}/${key}`, value])),
+    [`payments/${orderId}/provider`]:
+      typeof extraPaymentFields.provider === "string" ? extraPaymentFields.provider :
+      typeof extraPaymentFields.method === "string" ? extraPaymentFields.method :
+      String(context.payment.provider ?? context.payment.method ?? "CASH"),
+    [`payments/${orderId}/providerReference`]:
+      typeof extraPaymentFields.providerReference === "string" ? extraPaymentFields.providerReference :
+      typeof extraPaymentFields.providerPaymentId === "string" ? extraPaymentFields.providerPaymentId :
+      String(context.payment.providerReference ?? context.payment.providerPaymentId ?? ""),
     [`${context.rootPath}/${orderId}/paymentStatus`]: status,
     [`${context.rootPath}/${orderId}/paymentId`]: orderId,
     [`${context.rootPath}/${orderId}/paymentMethod`]:
-      typeof extraPaymentFields.method === "string" ? extraPaymentFields.method : String(context.payment.method ?? "CASH")
+      typeof extraPaymentFields.provider === "string" ? extraPaymentFields.provider :
+      typeof extraPaymentFields.method === "string" ? extraPaymentFields.method : String(context.payment.provider ?? context.payment.method ?? "CASH")
   });
+
+  if (status === "SUCCEEDED") {
+    // Deterministic ledger key makes repeated verification idempotent. This records the gross
+    // provider confirmation only; it explicitly does not post any wallet balance until the
+    // final shares and actual gateway fee are allocated by the trusted accounting flow.
+    const ledgerId = "payment_" + orderId + "_settled";
+    const paymentProvider = String(extraPaymentFields.provider ?? context.payment.provider ?? context.payment.method ?? "CASH");
+    const providerReference = String(
+      extraPaymentFields.providerReference ??
+      extraPaymentFields.providerPaymentId ??
+      context.payment.providerReference ??
+      context.payment.providerPaymentId ?? ""
+    );
+    await getDatabase().ref("ledger/" + ledgerId).set({
+      id: ledgerId,
+      entryType: "PAYMENT_CONFIRMED_GROSS",
+      orderId,
+      clientId: context.payment.clientId ?? "",
+      merchantId: context.payment.merchantId ?? "",
+      merchantIds: context.payment.merchantIds ?? {},
+      courierId: context.payment.courierId ?? "",
+      provider: paymentProvider,
+      providerReference,
+      status: "SUCCEEDED",
+      amount: context.payment.amount ?? { minorUnits: 0, currencyCode: "USD" },
+      breakdown: context.payment.breakdown ?? {},
+      breakdownStatus: String(context.payment.breakdownStatus ?? "UNALLOCATED"),
+      affectsWallet: false,
+      createdAtEpochMillis: now
+    });
+  }
 }
 
 export const createOrder = onCall({ enforceAppCheck: true }, async (request) => {
@@ -176,7 +317,8 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   const orderRef = db.ref("orders").push();
   const orderId = orderRef.key;
   if (!orderId) throw new HttpsError("internal", "Could not allocate an order ID.");
-  const merchantId = orderType === "FOOD" ? sourceId : String(source.ownerUid ?? sourceId);
+  const accessMerchantIds = merchantAccessIds(source, sourceId);
+  const merchantId = String(source.ownerUid ?? source.ownerId ?? source.merchantId ?? sourceId);
   const now = Date.now();
   const order = {
     id: orderId, clientId: uid, merchantId, orderType, sourceId,
@@ -189,14 +331,23 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     deliveryId: "", deliveryName: "", deliveryPhone: ""
   };
   const payment = {
-    orderId, contextType: "ORDER", clientId: uid, merchantId, courierId: "", method, status: "PENDING",
+    orderId, contextType: "ORDER", clientId: uid, merchantId, merchantIds: accessMerchantIds,
+    courierId: "", provider: method, providerReference: "", method, status: "PENDING",
     amount: { minorUnits: total, currencyCode: "USD" },
-    // Settlement splits are intentionally omitted until trusted commission and gateway-fee
-    // settings are configured; never invent payout shares at order creation time.
+    // Keep the schema explicit, but zero shares mean "not allocated yet". Trusted settlement
+    // must replace this only after commission settings and provider fees are verified.
+    breakdownStatus: "UNALLOCATED",
+    breakdown: {
+      merchantShare: { minorUnits: 0, currencyCode: "USD" },
+      courierShare: { minorUnits: 0, currencyCode: "USD" },
+      platformShare: { minorUnits: 0, currencyCode: "USD" },
+      gatewayFee: { minorUnits: 0, currencyCode: "USD" }
+    },
     providerPaymentId: "", checkoutUrl: "", expiresAtEpochMillis: 0,
     refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
   };
   await db.ref().update({ [`orders/${orderId}`]: order, [`payments/${orderId}`]: payment });
+  await ensureWallet(merchantId, "USD");
   return { orderId, subtotalMinor: subtotal, deliveryFeeMinor: fee, totalMinor: total, currencyCode: "USD" };
 });
 
@@ -264,13 +415,21 @@ export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) 
     paymentMethod: method, paymentStatus: "PENDING", paymentId: tripId
   };
   const payment = {
-    orderId: tripId, contextType: "RIDE", clientId: uid, merchantId: "",
-    courierId: targetDriverUid, method, status: "PENDING",
+    orderId: tripId, contextType: "RIDE", clientId: uid, merchantId: "", merchantIds: {},
+    courierId: targetDriverUid, provider: method, providerReference: "", method, status: "PENDING",
     amount: { minorUnits: fareMinorUnits, currencyCode: "USD" },
+    breakdownStatus: "UNALLOCATED",
+    breakdown: {
+      merchantShare: { minorUnits: 0, currencyCode: "USD" },
+      courierShare: { minorUnits: 0, currencyCode: "USD" },
+      platformShare: { minorUnits: 0, currencyCode: "USD" },
+      gatewayFee: { minorUnits: 0, currencyCode: "USD" }
+    },
     providerPaymentId: "", checkoutUrl: "", expiresAtEpochMillis: 0,
     refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
   };
   await db.ref().update({ [`trips/${tripId}`]: trip, [`payments/${tripId}`]: payment });
+  if (targetDriverUid) await ensureWallet(targetDriverUid, "USD");
   return { tripId, fareMinorUnits, currencyCode: "USD" };
 });
 
@@ -326,7 +485,9 @@ export const createPaymentSession = onCall({
   if (method === "STRIPE") {
     const key = stripeSecretKey.value().trim();
     if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+    const customerId = await getOrCreateStripeCustomer(uid, key);
     const form = new URLSearchParams();
+    form.set("customer", customerId);
     form.set("mode", "payment");
     form.set("client_reference_id", orderId);
     form.set("metadata[orderId]", orderId);
@@ -395,6 +556,8 @@ export const createPaymentSession = onCall({
 
   const now = Date.now();
   await getDatabase().ref().update({
+    ["payments/" + orderId + "/provider"]: method,
+    ["payments/" + orderId + "/providerReference"]: sessionId,
     ["payments/" + orderId + "/method"]: method,
     ["payments/" + orderId + "/providerPaymentId"]: sessionId,
     ["payments/" + orderId + "/checkoutUrl"]: checkoutUrl,
@@ -426,6 +589,8 @@ export const requestCashPayment = onCall({ enforceAppCheck: true }, async (reque
     throw new HttpsError("failed-precondition", "Finish or cancel the current checkout before switching to cash.");
   }
   await setPaymentStatus(orderId, context, "PENDING", {
+    provider: "CASH",
+    providerReference: "",
     method: "CASH",
     providerPaymentId: "",
     checkoutUrl: "",
@@ -692,6 +857,8 @@ export const claimCourierOrder = onCall({ enforceAppCheck: true }, async (reques
     return current;
   });
   if (!transaction.committed) throw new HttpsError("failed-precondition", "This delivery has already been claimed.");
+  await db.ref(`payments/${orderId}/courierId`).set(uid);
+  await ensureWallet(uid, "USD");
   await db.ref(`deliveryQueue/${orderId}`).remove();
   return { accepted: true, orderId };
 });
@@ -714,8 +881,135 @@ export const releaseCourierOrder = onCall({ enforceAppCheck: true }, async (requ
   if (!transaction.committed) throw new HttpsError("permission-denied", "You cannot release this delivery.");
   const snap = await orderRef.get();
   const order = snap.val() as Record<string, unknown>;
+  await db.ref(`payments/${orderId}/courierId`).set("");
   await db.ref(`deliveryQueue/${orderId}`).set({ ...order, clientId: "" });
   return { accepted: true, orderId };
+});
+
+
+async function requireAdmin(uid: string): Promise<void> {
+  const profile = await getDatabase().ref("users/" + uid).get();
+  if (profile.child("role").val() !== "ADMIN") {
+    throw new HttpsError("permission-denied", "Administrator access is required.");
+  }
+}
+
+function walletTransactions(raw: unknown, uid: string): Array<Record<string, unknown>> {
+  if (!raw || typeof raw !== "object") return [];
+  return Object.entries(raw as Record<string, unknown>)
+    .map(([id, value]) => {
+      const entry = value && typeof value === "object" ? value as Record<string, unknown> : {};
+      return { ...entry, id } as Record<string, unknown>;
+    })
+    .filter(entry => entry.uid === uid && entry.amount !== undefined)
+    .sort((a, b) => Number(b.createdAtEpochMillis ?? 0) - Number(a.createdAtEpochMillis ?? 0))
+    .slice(0, 50);
+}
+
+/** Only approved merchants can read their own server-calculated wallet snapshot. */
+export const getMerchantWallet = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to view your wallet.");
+  const profile = await getDatabase().ref("users/" + uid).get();
+  const approved = profile.child("foodStatus").val() === "APPROVED" ||
+    profile.child("shopStatus").val() === "APPROVED";
+  if (!approved) throw new HttpsError("permission-denied", "Administrator-approved merchant access is required.");
+  const wallet = await ensureWallet(uid, "USD");
+  const transactionSnap = await getDatabase().ref("ledger").orderByChild("uid").equalTo(uid).limitToLast(50).get();
+  return {
+    ...walletSnapshot(wallet, "USD"),
+    transactions: walletTransactions(transactionSnap.val(), uid)
+  };
+});
+
+/** Only approved couriers can read their own server-calculated wallet snapshot. */
+export const getCourierWallet = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to view your wallet.");
+  const profile = await getDatabase().ref("users/" + uid).get();
+  if (profile.child("deliveryServices").child("status").val() !== "APPROVED") {
+    throw new HttpsError("permission-denied", "Administrator-approved courier access is required.");
+  }
+  const wallet = await ensureWallet(uid, "USD");
+  const transactionSnap = await getDatabase().ref("ledger").orderByChild("uid").equalTo(uid).limitToLast(50).get();
+  return {
+    ...walletSnapshot(wallet, "USD"),
+    transactions: walletTransactions(transactionSnap.val(), uid)
+  };
+});
+
+/** Read the current server-owned commission policy, initializing safe defaults on first access. */
+export const adminGetCommissionSettings = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const ref = getDatabase().ref("config/commission");
+  const defaults = {
+    currencyCode: "USD",
+    platformCommissionBps: 1000,
+    courierShareBps: 0,
+    updatedAtEpochMillis: Date.now()
+  };
+  await ref.transaction(current => current ?? defaults);
+  const snapshot = await ref.get();
+  return snapshot.val() ?? defaults;
+});
+
+/** Only an administrator callable can write config/commission; direct client writes are denied. */
+export const adminUpdateCommissionSettings = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const body = request.data as {
+    currencyCode?: string; platformCommissionBps?: number; courierShareBps?: number;
+  };
+  const currencyCode = typeof body.currencyCode === "string" ? body.currencyCode.trim().toUpperCase() : "";
+  const platformCommissionBps = Number(body.platformCommissionBps);
+  const courierShareBps = Number(body.courierShareBps);
+  if (!/^[A-Z]{3}$/.test(currencyCode) ||
+      !Number.isInteger(platformCommissionBps) || platformCommissionBps < 0 || platformCommissionBps > 10000 ||
+      !Number.isInteger(courierShareBps) || courierShareBps < 0 || courierShareBps > 10000 ||
+      platformCommissionBps + courierShareBps > 10000) {
+    throw new HttpsError("invalid-argument", "Currency or commission basis points are invalid.");
+  }
+  await getDatabase().ref("config/commission").set({
+    currencyCode,
+    platformCommissionBps,
+    courierShareBps,
+    updatedAtEpochMillis: Date.now()
+  });
+  return { accepted: true, message: "Commission settings saved." };
+});
+
+/** Server-side admin listing; ordinary clients have no direct payment-list access. */
+export const adminListPayments = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const body = request.data as { cursor?: string | null };
+  const db = getDatabase();
+  let query = db.ref("payments").orderByChild("updatedAtEpochMillis");
+  if (typeof body.cursor === "string" && body.cursor.trim()) {
+    const cursor = Number(body.cursor);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new HttpsError("invalid-argument", "Payment cursor is invalid.");
+    }
+    query = query.endAt(Math.max(0, cursor - 1));
+  }
+  const snapshot = await query.limitToLast(51).get();
+  const raw = snapshot.val() as Record<string, unknown> | null;
+  const all = Object.entries(raw ?? {})
+    .map(([key, value]) => {
+      const payment = value && typeof value === "object" ? value as Record<string, unknown> : {};
+      return { ...payment, orderId: String(payment.orderId ?? key) } as Record<string, unknown>;
+    })
+    .sort((a, b) => Number(b.updatedAtEpochMillis ?? 0) - Number(a.updatedAtEpochMillis ?? 0));
+  const hasMore = all.length > 50;
+  const payments = all.slice(0, 50);
+  const nextCursor = hasMore && payments.length
+    ? String(payments[payments.length - 1].updatedAtEpochMillis ?? 0)
+    : null;
+  return { payments, nextCursor };
 });
 
 /**
@@ -725,12 +1019,38 @@ export const releaseCourierOrder = onCall({ enforceAppCheck: true }, async (requ
 export const requestPayout = onCall({ enforceAppCheck: true }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting a payout.");
-  const profile = await getDatabase().ref(`users/${uid}`).get();
+  const body = request.data as { amount?: { minorUnits?: number; currencyCode?: string } };
+  const minorUnitsRequested = Number(body.amount?.minorUnits);
+  const currencyCode = typeof body.amount?.currencyCode === "string"
+    ? body.amount.currencyCode.toUpperCase() : "";
+  if (!Number.isSafeInteger(minorUnitsRequested) || minorUnitsRequested <= 0 ||
+      !/^[A-Z]{3}$/.test(currencyCode)) {
+    throw new HttpsError("invalid-argument", "A positive payout amount and currency are required.");
+  }
+  const db = getDatabase();
+  const profile = await db.ref("users/" + uid).get();
   const approvedMerchant = profile.child("foodStatus").val() === "APPROVED" ||
     profile.child("shopStatus").val() === "APPROVED";
   const approvedCourier = profile.child("deliveryServices").child("status").val() === "APPROVED";
   if (!approvedMerchant && !approvedCourier) {
     throw new HttpsError("permission-denied", "Only administrator-approved merchants and couriers may request payouts.");
   }
+
+  // Keep a server-owned audit record of the rejected attempt, but do not reserve or change
+  // balances until a transactional payout processor is configured.
+  const payoutRef = db.ref("payouts").push();
+  const now = Date.now();
+  await payoutRef.set({
+    id: payoutRef.key ?? "",
+    uid,
+    merchantId: approvedMerchant ? uid : "",
+    courierId: approvedCourier ? uid : "",
+    amount: { minorUnits: minorUnitsRequested, currencyCode },
+    status: "REJECTED_DISABLED",
+    rejectionReason: "PAYOUT_EXECUTION_NOT_CONFIGURED",
+    providerReference: "",
+    createdAtEpochMillis: now,
+    updatedAtEpochMillis: now
+  });
   throw new HttpsError("failed-precondition", "Payouts are disabled until server-side wallet reservation and provider payout processing are configured.");
 });
