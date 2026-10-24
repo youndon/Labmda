@@ -77,17 +77,13 @@ Basis-point values must be integers from 0 through 10,000 and their sum cannot e
 
 ## `paymentCustomers/{uid}`
 
-Stripe customer references are stored separately from `users/{uid}`:
+The node value is the provider-issued Stripe customer ID string, for example:
 
 ```json
-{
-  "stripeCustomerId": "cus_provider-issued-id",
-  "provider": "STRIPE",
-  "updatedAtEpochMillis": 0
-}
+"cus_provider-issued-id"
 ```
 
-Only trusted Functions can read or write this path. It has no client read/write rule; the customer ID is never copied into `users/` or returned in a client response.
+The value is stored at `paymentCustomers/{uid}`, not at `users/{uid}/stripeCustomerId`. Only trusted Functions can read or write this path. It has no client read/write rule, and the ID is never returned in a client response. The function can read the earlier object-shaped representation for migration compatibility, but new writes use the string value.
 
 ## Deployment caution
 
