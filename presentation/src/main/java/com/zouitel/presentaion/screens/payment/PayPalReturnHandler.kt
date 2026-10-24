@@ -18,8 +18,9 @@ class PayPalReturnHandler {
         if (uri.scheme != "labmda" || uri.host != "payment-return") return null
         val provider = uri.getQueryParameter("provider")?.lowercase()?.takeIf { it == "paypal" || it == "stripe" } ?: return null
         val orderId = uri.getQueryParameter("orderId")?.takeIf(String::isNotBlank) ?: return null
-        val sessionId = uri.getQueryParameter("sessionId")?.takeIf(String::isNotBlank) ?: return null
         val token = uri.getQueryParameter("token")?.takeIf(String::isNotBlank) ?: return null
+        val sessionId = uri.getQueryParameter("sessionId")?.takeIf(String::isNotBlank)
+            ?: token.takeIf { it != "cancel" }.orEmpty()
         return PayPalReturn(orderId, sessionId, token, provider)
     }
 }
