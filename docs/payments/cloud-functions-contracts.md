@@ -34,7 +34,7 @@ All property names are camelCase and currently match kotlinx.serialization DTOs 
 | `adminGetCommissionSettings` | no arguments | `CommissionSettings` |
 | `adminUpdateCommissionSettings` | `CommissionSettings` | `{ accepted, message }` |
 
-The order screens now call `createOrder`; the function derives item prices and fees from RTDB and writes `orders/{orderId}` and `payments/{orderId}` in one server-side multi-location update. Retail orders require `settings/deliveryFees/RETAIL` to be configured. The initial payment record is pending; provider sessions and verified webhook updates still need implementation. `requestPayout` intentionally fails closed even for approved accounts until transactional wallet reservation and provider payout execution exist. Do not reopen client writes to make existing screens work.
+The order screens now call `createOrder`; the function derives item prices and fees from RTDB and writes `orders/{orderId}` and `payments/{orderId}` in one server-side multi-location update. Retail orders require `settings/deliveryFees/RETAIL` to be configured. The initial payment record is pending and intentionally omits settlement splits until trusted commission and gateway-fee settings are available; provider sessions and verified webhook updates still need implementation. `requestPayout` intentionally fails closed even for approved accounts until transactional wallet reservation and provider payout execution exist. Do not reopen client writes to make existing screens work.
 
 ## Expected wallet response
 
