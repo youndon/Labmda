@@ -204,6 +204,36 @@ async function setPaymentStatus(
       typeof extraPaymentFields.provider === "string" ? extraPaymentFields.provider :
       typeof extraPaymentFields.method === "string" ? extraPaymentFields.method : String(context.payment.provider ?? context.payment.method ?? "CASH")
   });
+
+  if (status === "SUCCEEDED") {
+    // Deterministic ledger key makes repeated verification idempotent. This records the gross
+    // provider confirmation only; it explicitly does not post any wallet balance until the
+    // final shares and actual gateway fee are allocated by the trusted accounting flow.
+    const ledgerId = "payment_" + orderId + "_settled";
+    const paymentProvider = String(extraPaymentFields.provider ?? context.payment.provider ?? context.payment.method ?? "CASH");
+    const providerReference = String(
+      extraPaymentFields.providerReference ??
+      extraPaymentFields.providerPaymentId ??
+      context.payment.providerReference ??
+      context.payment.providerPaymentId ?? ""
+    );
+    await getDatabase().ref("ledger/" + ledgerId).set({
+      id: ledgerId,
+      entryType: "PAYMENT_CONFIRMED_GROSS",
+      orderId,
+      clientId: context.payment.clientId ?? "",
+      merchantId: context.payment.merchantId ?? "",
+      courierId: context.payment.courierId ?? "",
+      provider: paymentProvider,
+      providerReference,
+      status: "SUCCEEDED",
+      amount: context.payment.amount ?? { minorUnits: 0, currencyCode: "USD" },
+      breakdown: context.payment.breakdown ?? {},
+      breakdownStatus: String(context.payment.breakdownStatus ?? "UNALLOCATED"),
+      affectsWallet: false,
+      createdAtEpochMillis: now
+    });
+  }
 }
 
 export const createOrder = onCall({ enforceAppCheck: true }, async (request) => {
