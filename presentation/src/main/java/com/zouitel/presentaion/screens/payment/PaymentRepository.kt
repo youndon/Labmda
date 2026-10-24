@@ -165,6 +165,7 @@ class PaymentRepository(
             status = status,
             amount = money("amount"),
             breakdown = breakdown,
+            breakdownStatus = string("breakdownStatus").ifBlank { if (breakdown == null) "UNALLOCATED" else "ALLOCATED" },
             providerPaymentId = string("providerPaymentId"),
             refundAmount = money("refundAmount"),
             updatedAtEpochMillis = long("updatedAtEpochMillis")
