@@ -1,8 +1,14 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { initializeApp } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
+import { defineSecret, defineString } from "firebase-functions/params";
 
 initializeApp();
+
+const stripeSecretKey = defineSecret("STRIPE_SECRET_KEY");
+const paypalClientId = defineSecret("PAYPAL_CLIENT_ID");
+const paypalClientSecret = defineSecret("PAYPAL_CLIENT_SECRET");
+const paypalEnvironment = defineString("PAYPAL_ENVIRONMENT", { default: "sandbox" });
 
 type OrderType = "FOOD" | "RETAIL";
 type ItemRequest = { id: string; quantity: number };
@@ -11,6 +17,85 @@ function minorUnits(value: unknown, label: string): number {
   const amount = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(amount) || amount < 0) throw new HttpsError("failed-precondition", `Invalid ${label} in catalog.`);
   return Math.round(amount * 100);
+}
+
+
+type PaymentContext = {
+  payment: Record<string, unknown>;
+  rootPath: "orders" | "trips";
+};
+
+function normalizePaymentMethod(value: unknown): "CASH" | "STRIPE" | "PAYPAL" | "" {
+  const raw = typeof value === "string" ? value.toUpperCase().replace(/[_-]+/g, " ").trim() : "";
+  if (raw === "CASH" || raw === "CASH ON DELIVERY") return "CASH";
+  if (raw === "STRIPE") return "STRIPE";
+  if (raw === "PAYPAL") return "PAYPAL";
+  return "";
+}
+
+function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const dLat = radians(lat2 - lat1);
+  const dLon = radians(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+}
+
+async function getOwnedPaymentContext(orderId: string, uid: string): Promise<PaymentContext> {
+  const db = getDatabase();
+  const paymentSnap = await db.ref(`payments/${orderId}`).get();
+  if (!paymentSnap.exists()) throw new HttpsError("not-found", "Payment record not found.");
+  const payment = paymentSnap.val() as Record<string, unknown>;
+  if (payment.clientId !== uid) throw new HttpsError("permission-denied", "This payment does not belong to you.");
+  const declaredContext = String(payment.contextType ?? "");
+  const tripSnap = declaredContext === "RIDE" ? await db.ref(`trips/${orderId}`).get() : null;
+  const orderSnap = declaredContext === "RIDE" ? null : await db.ref(`orders/${orderId}`).get();
+  const tripExists = tripSnap?.exists() ?? false;
+  const orderExists = orderSnap?.exists() ?? false;
+  if (!tripExists && !orderExists) throw new HttpsError("not-found", "The linked order or trip was not found.");
+  const rootPath = tripExists ? "trips" : "orders";
+  return { payment, rootPath };
+}
+
+async function getPayPalAccessToken(): Promise<{ baseUrl: string; token: string }> {
+  const baseUrl = paypalEnvironment.value().toLowerCase() === "live"
+    ? "https://api-m.paypal.com"
+    : "https://api-m.sandbox.paypal.com";
+  const clientId = paypalClientId.value().trim();
+  const clientSecret = paypalClientSecret.value().trim();
+  if (!clientId || !clientSecret) {
+    throw new HttpsError("failed-precondition", "PayPal server credentials are not configured.");
+  }
+  const response = await fetch(`${baseUrl}/v1/oauth2/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: "grant_type=client_credentials"
+  });
+  const json = await response.json() as { access_token?: string; error_description?: string };
+  if (!response.ok || !json.access_token) {
+    throw new HttpsError("internal", "PayPal authentication failed. Check server credentials and environment.");
+  }
+  return { baseUrl, token: json.access_token };
+}
+
+async function setPaymentStatus(
+  orderId: string,
+  context: PaymentContext,
+  status: string,
+  extraPaymentFields: Record<string, unknown> = {}
+): Promise<void> {
+  const now = Date.now();
+  await getDatabase().ref().update({
+    [`payments/${orderId}/status`]: status,
+    [`payments/${orderId}/updatedAtEpochMillis`]: now,
+    ...Object.fromEntries(Object.entries(extraPaymentFields).map(([key, value]) => [`payments/${orderId}/${key}`, value])),
+    [`${context.rootPath}/${orderId}/paymentStatus`]: status,
+    [`${context.rootPath}/${orderId}/paymentId`]: orderId
+  });
 }
 
 export const createOrder = onCall({ enforceAppCheck: true }, async (request) => {
@@ -109,6 +194,78 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   };
   await db.ref().update({ [`orders/${orderId}`]: order, [`payments/${orderId}`]: payment });
   return { orderId, subtotalMinor: subtotal, deliveryFeeMinor: fee, totalMinor: total, currencyCode: "USD" };
+});
+
+
+/**
+ * Creates a ride and its payment record atomically. Fare is calculated on the server;
+ * a fare estimate from the client is never used as a settlement amount.
+ */
+export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting a ride.");
+  const body = request.data as {
+    pickupLocation?: string; pickupLat?: number; pickupLng?: number;
+    dropoffLocation?: string; dropoffLat?: number; dropoffLng?: number;
+    passengerName?: string; passengerPhone?: string; targetDriverUid?: string | null; paymentMethod?: string;
+  };
+  const pickupLocation = typeof body.pickupLocation === "string" ? body.pickupLocation.trim() : "";
+  const dropoffLocation = typeof body.dropoffLocation === "string" ? body.dropoffLocation.trim() : "";
+  const pickupLat = Number(body.pickupLat), pickupLng = Number(body.pickupLng);
+  const dropoffLat = Number(body.dropoffLat), dropoffLng = Number(body.dropoffLng);
+  if (!pickupLocation || !dropoffLocation ||
+      !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
+      !Number.isFinite(dropoffLat) || !Number.isFinite(dropoffLng) ||
+      Math.abs(pickupLat) > 90 || Math.abs(dropoffLat) > 90 ||
+      Math.abs(pickupLng) > 180 || Math.abs(dropoffLng) > 180) {
+    throw new HttpsError("invalid-argument", "Valid pickup and destination points are required.");
+  }
+  const method = normalizePaymentMethod(body.paymentMethod);
+  if (!method) throw new HttpsError("invalid-argument", "Choose a supported payment method.");
+  const distance = distanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
+  if (!Number.isFinite(distance) || distance < 0.05 || distance > 1000) {
+    throw new HttpsError("invalid-argument", "Ride distance is not valid.");
+  }
+  // Mirrors the displayed estimate (base $2.00, $1.20/km, $4.00 minimum), but is
+  // recalculated from validated coordinates on the server and rounded to cents.
+  const fareMinorUnits = Math.round(Math.max(4.00, 2.00 + distance * 1.20) * 100);
+  const db = getDatabase();
+  const targetDriverUid = typeof body.targetDriverUid === "string" ? body.targetDriverUid.trim() : "";
+  let driverName = "";
+  let driverPhone = "";
+  let status = "REQUESTED";
+  if (targetDriverUid) {
+    const driver = await db.ref(`users/${targetDriverUid}`).get();
+    if (!driver.exists() || driver.child("isDriverOnline").val() !== true) {
+      throw new HttpsError("failed-precondition", "That driver is no longer online.");
+    }
+    driverName = String(driver.child("fullName").val() ?? "Driver");
+    driverPhone = String(driver.child("phoneNumber").val() ?? driver.child("phone").val() ?? "");
+    status = "ACCEPTED";
+  }
+  const tripRef = db.ref("trips").push();
+  const tripId = tripRef.key;
+  if (!tripId) throw new HttpsError("internal", "Could not allocate a ride ID.");
+  const now = Date.now();
+  const trip = {
+    id: tripId, passengerId: uid,
+    passengerName: typeof body.passengerName === "string" ? body.passengerName.trim() : "Passenger",
+    passengerPhone: typeof body.passengerPhone === "string" ? body.passengerPhone.trim() : "",
+    pickupLocation, pickupLat, pickupLng, dropoffLocation, dropoffLat, dropoffLng,
+    fare: fareMinorUnits / 100,
+    driverId: targetDriverUid, driverName, driverPhone, vehicleDetails: "",
+    status, createdAtTimestamp: now,
+    paymentMethod: method, paymentStatus: "PENDING", paymentId: tripId
+  };
+  const payment = {
+    orderId: tripId, contextType: "RIDE", clientId: uid, merchantId: "",
+    courierId: targetDriverUid, method, status: "PENDING",
+    amount: { minorUnits: fareMinorUnits, currencyCode: "USD" },
+    providerPaymentId: "", checkoutUrl: "", expiresAtEpochMillis: 0,
+    refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
+  };
+  await db.ref().update({ [`trips/${tripId}`]: trip, [`payments/${tripId}`]: payment });
+  return { tripId, fareMinorUnits, currencyCode: "USD" };
 });
 
 /**
