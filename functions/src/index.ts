@@ -223,6 +223,7 @@ async function setPaymentStatus(
       orderId,
       clientId: context.payment.clientId ?? "",
       merchantId: context.payment.merchantId ?? "",
+      merchantIds: context.payment.merchantIds ?? {},
       courierId: context.payment.courierId ?? "",
       provider: paymentProvider,
       providerReference,
