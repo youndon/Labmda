@@ -4,10 +4,13 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
+import com.zouitel.presentaion.model.PaymentRecord
+import com.zouitel.presentaion.screens.payment.PaymentRepository
 import com.zouitel.presentaion.screens.food.toOrderOrNull
 import com.zouitel.presentaion.screens.orders.OrderStatusRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import dev.gitlive.firebase.functions.functions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,15 +19,20 @@ import kotlinx.coroutines.launch
 
 class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
     private val db = Firebase.database.reference()
+    private val paymentRepository = PaymentRepository(db, Firebase.functions)
 
     private val _order = MutableStateFlow<Order?>(null)
     val order: StateFlow<Order?> = _order.asStateFlow()
+
+    private val _payment = MutableStateFlow<PaymentRecord?>(null)
+    val payment: StateFlow<PaymentRecord?> = _payment.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
         listenToOrderUpdates()
+        listenToPaymentUpdates()
     }
 
     private fun listenToOrderUpdates() {
@@ -43,6 +51,14 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                 } finally {
                     _isLoading.value = false
                 }
+            }
+        }
+    }
+
+    private fun listenToPaymentUpdates() {
+        screenModelScope.launch(Dispatchers.IO) {
+            paymentRepository.observePayment(orderId).collect { record ->
+                _payment.value = record
             }
         }
     }
