@@ -36,6 +36,7 @@ import com.zouitel.presentaion.common.DriveTokenProvider
 import com.zouitel.presentaion.common.ImagePicker
 import com.zouitel.presentaion.common.PickedImage
 import coil3.compose.AsyncImage
+import com.zouitel.presentaion.screens.wallet.MerchantEarningsScreen
 
 class RestaurantWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -173,7 +174,8 @@ class RestaurantWorkplaceScreen : Screen {
                                             navigator?.push(
                                                 RestaurantDashboardScreen(restaurantInfo.id.ifBlank { profile.uid })
                                             )
-                                        }
+                                        },
+                                        onOpenWallet = { navigator?.push(MerchantEarningsScreen()) }
                                     )
                                     else -> {
                                         Text("Unknown Status")
@@ -418,7 +420,8 @@ class RestaurantWorkplaceScreen : Screen {
         mealCount: Int,
         isOnline: Boolean,
         onOnlineChanged: (Boolean) -> Unit,
-        onManageMenu: () -> Unit
+        onManageMenu: () -> Unit,
+        onOpenWallet: () -> Unit
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -506,6 +509,12 @@ class RestaurantWorkplaceScreen : Screen {
                             )
                         }
                     }
+                }
+            }
+
+            item {
+                Button(onClick = onOpenWallet, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Text("Merchant earnings & payouts", fontWeight = FontWeight.Bold)
                 }
             }
 

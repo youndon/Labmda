@@ -5,20 +5,38 @@
     "users": {
       "$uid": {
         ".read": "auth != null && (auth.uid === $uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
-        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || (auth.uid === $uid && newData.child('role').val() === data.child('role').val()))"
-      }
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || (auth.uid === $uid && newData.child('role').val() === data.child('role').val() && (newData.child('foodStatus').val() === data.child('foodStatus').val() || (newData.child('foodStatus').val() === 'PENDING' && (data.child('foodStatus').val() === null || data.child('foodStatus').val() === 'NONE' || data.child('foodStatus').val() === 'REJECTED'))) && (newData.child('shopStatus').val() === data.child('shopStatus').val() || (newData.child('shopStatus').val() === 'PENDING' && (data.child('shopStatus').val() === null || data.child('shopStatus').val() === 'NONE' || data.child('shopStatus').val() === 'REJECTED'))) && (newData.child('driverService').child('status').val() === data.child('driverService').child('status').val() || (newData.child('driverService').child('status').val() === 'PENDING' && (data.child('driverService').child('status').val() === null || data.child('driverService').child('status').val() === 'NONE' || data.child('driverService').child('status').val() === 'REJECTED'))) && (newData.child('deliveryServices').child('status').val() === data.child('deliveryServices').child('status').val() || (newData.child('deliveryServices').child('status').val() === 'PENDING' && (data.child('deliveryServices').child('status').val() === null || data.child('deliveryServices').child('status').val() === 'NONE' || data.child('deliveryServices').child('status').val() === 'REJECTED')))))"
+      },
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'"
     },
     "orders": {
+      ".indexOn": [
+        "clientId",
+        "sourceId",
+        "merchantId",
+        "deliveryId"
+      ],
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'ADMIN' || (query.orderByChild === 'clientId' && query.equalTo === auth.uid) || (query.orderByChild === 'sourceId' && query.equalTo === auth.uid) || (query.orderByChild === 'merchantId' && query.equalTo === auth.uid) || (query.orderByChild === 'deliveryId' && query.equalTo === auth.uid))",
       "$orderId": {
-        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('sourceId').val() === auth.uid || data.child('deliveryId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('sourceId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('deliveryId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
         ".write": false
       }
     },
     "payments": {
+      ".indexOn": [
+        "clientId",
+        "merchantId",
+        "courierId"
+      ],
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
       "$paymentId": {
-        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
         ".write": false
       }
+    },
+    "deliveryQueue": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('deliveryServices').child('status').val() === 'APPROVED'",
+      ".write": false
     }
   }
 }

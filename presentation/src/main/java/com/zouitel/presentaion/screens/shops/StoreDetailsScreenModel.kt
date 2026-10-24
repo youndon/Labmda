@@ -2,9 +2,9 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
-import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.screens.orders.OrderCreationRepository
+import com.zouitel.presentaion.screens.orders.RequestedOrderItem
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -80,56 +80,25 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         }
     }
 
-    fun placeShopOrder(
+    suspend fun placeShopOrder(
         cartItems: List<ShopCartItem>,
-        subtotal: Double,
-        courierFee: Double,
-        totalPrice: Double,
-        pickupLat: Double,
-        pickupLng: Double,
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
         paymentMethod: String,
         onSuccess: (String) -> Unit
     ) {
-        val uid = auth.currentUser?.uid ?: "guest_client"
-        screenModelScope.launch {
-            val orderRef = db.child("orders").push()
-            val orderId = orderRef.key ?: System.currentTimeMillis().toString()
-
-            val mappedItems = cartItems.map { shopItem ->
-                CartItem(
-                    id = shopItem.productId,
-                    name = shopItem.productName,
-                    basePrice = shopItem.price,
-                    quantity = shopItem.quantity,
-                    specialInstructions = shopItem.specialInstructions
-                )
-            }
-
-            val universalOrder = Order(
-                id = orderId,
-                clientId = uid,
-                orderType = OrderType.RETAIL,
-                sourceId = shop.id,
-                sourceName = shop.name,
-                items = mappedItems,
-                subtotal = subtotal,
-                deliveryFee = courierFee,
-                totalPrice = totalPrice,
-                pickupLocation = shop.address,
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLocation = dropoffAddress,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                createdAtTimestamp = System.currentTimeMillis(),
-                paymentMethod = paymentMethod
-            )
-
-            orderRef.setValue(universalOrder)
-            onSuccess(orderId)
-        }
+        if (auth.currentUser?.uid == null) throw IllegalStateException("Please sign in to place an order.")
+        val orderId = OrderCreationRepository().createOrder(
+            orderType = OrderType.RETAIL,
+            sourceId = shop.id,
+            items = cartItems.map { RequestedOrderItem(it.productId, it.quantity.coerceIn(1, 99)) },
+            dropoffLocation = dropoffAddress,
+            dropoffLat = dropoffLat,
+            dropoffLng = dropoffLng,
+            paymentMethod = paymentMethod
+        )
+        onSuccess(orderId)
     }
+
 }

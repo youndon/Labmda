@@ -5,6 +5,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.screens.orders.OrderStatusRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -30,11 +31,15 @@ class FoodActivitiesScreenModel : ScreenModel {
 
     private fun listenToUserOrders() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
+            val uid = currentUserId ?: run {
+                _orders.value = emptyList()
+                _isLoading.value = false
+                return@launch
+            }
+            db.child("orders").orderByChild("clientId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
                     .filter { it.orderType == OrderType.FOOD }
-                    .filter { currentUserId == null || it.clientId == currentUserId }
                     .sortedByDescending { it.createdAtTimestamp }
                 _isLoading.value = false
             }
@@ -43,7 +48,7 @@ class FoodActivitiesScreenModel : ScreenModel {
 
     fun cancelOrder(orderId: String) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            runCatching { OrderStatusRepository().updateStatus(orderId, OrderStatus.CANCELLED.name) }
         }
     }
 }
