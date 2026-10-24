@@ -30,8 +30,10 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import coil3.compose.AsyncImage
 import com.google.android.gms.maps.model.LatLng
-import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.LocationPickerDialog
+import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.screens.payment.PaymentScreen
+import com.zouitel.presentaion.screens.payment.components.PaymentMethodSelector
 
 data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
@@ -59,10 +61,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var showMapPicker by remember { mutableStateOf(false) }
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var deliveryAddress by remember { mutableStateOf("") }
-        val paymentOptions = remember(restaurant) {
-            restaurant.paymentMethods.ifEmpty { listOf("Cash on Delivery") }
-        }
-        var paymentMethod by remember { mutableStateOf(paymentOptions.first()) }
+        var paymentMethod by remember(restaurant) { mutableStateOf(PaymentMethod.CASH) }
 
         val restaurantPoint = remember(restaurant) {
             if (restaurant.latitude != 0.0 || restaurant.longitude != 0.0)
@@ -313,16 +312,12 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     }
 
                     Text("Payment Method", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        paymentOptions.forEach { option ->
-                            FilterChip(
-                                selected = paymentMethod == option,
-                                onClick = { paymentMethod = option },
-                                label = { Text(option) },
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        }
-                    }
+                    PaymentMethodSelector(
+                        selected = paymentMethod,
+                        onSelect = { paymentMethod = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isSubmitting
+                    )
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
@@ -352,7 +347,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             val drop = dropoff ?: return@Button
                             screenModel.placeOrder(
                                 lines = cartLines,
-                                paymentMethod = paymentMethod,
+                                paymentMethod = paymentMethod.name,
                                 dropoffAddress = deliveryAddress,
                                 dropoffLat = drop.latitude,
                                 dropoffLng = drop.longitude,
@@ -360,7 +355,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     showOrderSheet = false
                                     dropoff = null
                                     deliveryAddress = ""
-                                    navigator?.push(LiveOrderTrackingScreen(orderId))
+                                    navigator?.push(PaymentScreen(orderId, paymentMethod))
                                 }
                             )
                         },

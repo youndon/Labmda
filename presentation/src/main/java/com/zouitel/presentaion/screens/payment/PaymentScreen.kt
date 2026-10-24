@@ -31,13 +31,14 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.model.PayPalSession
+import com.zouitel.presentaion.model.PaymentMethod
 import com.zouitel.presentaion.model.PaymentStatus
 import com.zouitel.presentaion.model.StripeSession
 import com.zouitel.presentaion.screens.payment.components.PayButton
 import com.zouitel.presentaion.screens.payment.components.PaymentMethodSelector
 import com.zouitel.presentaion.screens.payment.components.PaymentResultSheet
 
-data class PaymentScreen(val orderId: String) : Screen {
+data class PaymentScreen(val orderId: String, val initialMethod: PaymentMethod? = null) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
@@ -51,13 +52,17 @@ data class PaymentScreen(val orderId: String) : Screen {
         var showResult by remember { mutableStateOf(false) }
 
         LaunchedEffect(orderId) {
+            initialMethod?.let(model::selectMethod)
             model.observeOrderPayment(orderId)
+        }
+        LaunchedEffect(state.payment?.method, initialMethod) {
+            if (initialMethod == null) state.payment?.method?.let(model::selectMethod)
         }
         LaunchedEffect(context, orderId) {
             val uri = (context as? Activity)?.intent?.data ?: return@LaunchedEffect
             returnHandler.parse(uri)?.let { result ->
                 if (result.orderId == orderId) {
-                    model.handleProviderReturn(orderId, "PAYPAL", result.sessionId, result.resultToken)
+                    model.handleProviderReturn(orderId, result.provider.uppercase(), result.sessionId, result.resultToken)
                 }
             }
         }
@@ -76,7 +81,11 @@ data class PaymentScreen(val orderId: String) : Screen {
                             is StripeSession -> stripeLauncher.launch(context, session)
                             is PayPalSession -> paypalLauncher.launch(context, session)
                         }
-                    }.onFailure { /* State remains server-driven; errors can be retried from this screen. */ }
+                    }.onFailure { error ->
+                        model.reportCheckoutLaunchError(
+                            error.message ?: "Could not open the payment provider. Please try again."
+                        )
+                    }
                     PaymentEvent.CashPaymentRequested -> showResult = true
                     is PaymentEvent.Error -> Unit
                 }

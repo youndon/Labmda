@@ -1,6 +1,6 @@
 # Payment Cloud Functions contracts
 
-The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. The trusted `createOrder`, `updateOrderStatus`, `claimCourierOrder`, and `releaseCourierOrder` handlers are implemented in `functions/src/index.ts`. Provider checkout sessions, payment verification/webhooks, refunds, wallet accounting, and real payout execution remain unimplemented, so card payments and payouts are not production-ready.
+The Android payment layer calls callable HTTPS functions via GitLive Firebase Functions. The trusted `createOrder`, `createRideTrip`, order lifecycle, `createPaymentSession`, `requestCashPayment`, and `verifyPaymentReturn` handlers are implemented in `functions/src/index.ts`. Checkout creation and provider-return verification use the Stripe and PayPal APIs from server code. Signed provider webhooks, refunds/reconciliation, wallet accounting, admin commission handlers, and real payout execution remain unimplemented, so the integration is not production-ready.
 
 ## Security invariants
 
@@ -20,8 +20,9 @@ All property names are camelCase and currently match kotlinx.serialization DTOs 
 | `createOrder` | `{ orderType, sourceId, items: [{ id, quantity }], dropoffLocation, dropoffLat, dropoffLng, paymentMethod }` | `{ orderId, subtotalMinor, deliveryFeeMinor, totalMinor, currencyCode }` |
 | `updateOrderStatus` | `{ orderId, status }` | `{ accepted, status }` |
 | `claimCourierOrder` / `releaseCourierOrder` | `{ orderId }` | `{ accepted, orderId }` |
+| `createRideTrip` | pickup/drop-off coordinates, passenger metadata, optional target driver UID, `paymentMethod` | `{ tripId, fareMinorUnits, currencyCode }`; fare is recomputed server-side |
 | `createPaymentSession` | `{ orderId, method }`, method is `STRIPE` or `PAYPAL` | `{ orderId, sessionId, checkoutUrl, expiresAtEpochMillis }` |
-| `requestCashPayment` | `{ orderId }` | `{ accepted, message }` |
+| `requestCashPayment` | `{ orderId }` | `{ accepted, message }`; cash stays pending until collection |
 | `verifyPaymentReturn` | `{ orderId, provider, sessionId, resultToken }` | `{ accepted, message }` |
 | `getMerchantWallet` | no arguments | `WalletSnapshot` JSON shown below |
 | `getCourierWallet` | no arguments | `WalletSnapshot` JSON shown below |
@@ -69,6 +70,18 @@ A provider redirect only triggers `verifyPaymentReturn`; it must never mark a pa
 
 For payouts, verify the merchant/shop/restaurant or courier was approved by an administrator, check available balance and payout-account ownership on the server, and reserve/debit funds transactionally. For refunds, enforce refundable amount and provider state on the server, then record the provider refund result and wallet reversals.
 
+
+
+
+## Provider configuration and return flow
+
+- Configure the server-only Firebase Functions secrets `STRIPE_SECRET_KEY`, `PAYPAL_CLIENT_ID`, and `PAYPAL_CLIENT_SECRET`. The PayPal environment string parameter `PAYPAL_ENVIRONMENT` defaults to `sandbox`; set it to `live` only when live credentials are configured.
+- Supply the Stripe **publishable** key to the Android build with `-PstripePublishableKey=pk_test_...` or the `STRIPE_PUBLISHABLE_KEY` environment variable. Do not put a Stripe secret key in Gradle properties used by the client, source control, or the APK.
+- `createPaymentSession` reads the stored payment amount in integer minor units and creates a provider-hosted session. The client can open the returned HTTPS checkout URL but never supplies the amount used for settlement.
+- `verifyPaymentReturn` checks that the caller owns the payment, that the returned session matches the server-stored session, and that the provider API confirms the exact amount and currency before updating the payment/trip/order status. A redirect alone is not confirmation.
+- The Android manifest currently supports the custom scheme `labmda://payment-return`. A **verified HTTPS Android App Link** requires a real domain plus a matching `/.well-known/assetlinks.json`; no domain was supplied for this repository, so that domain association is not configured here.
+- Signed Stripe/PayPal webhooks still need to be added and deployed. Without webhooks, if a customer pays but does not return to the app, the local status might remain `REQUIRES_ACTION` until a later server reconciliation verifies it. Do not use the redirect as the only eventual fulfillment signal.
+- Provider API credentials and app return redirects must be tested in the provider sandbox before release. No secrets were added to this repository.
 
 ## Deployment caution
 

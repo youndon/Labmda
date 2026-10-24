@@ -10,6 +10,7 @@ import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import coil3.util.DebugLogger
 import com.mmk.kmpauth.core.KMPAuth
+import com.stripe.android.PaymentConfiguration
 import com.mmk.kmpauth.google.google
 import com.zouitel.presentaion.di.presentationModule
 import dev.gitlive.firebase.Firebase
@@ -30,6 +31,11 @@ class LambdaApplication : Application(), KoinStartup, SingletonImageLoader.Facto
             google("814762435029-63a565o3ub7d4ph32es0vugn5aoa79qs.apps.googleusercontent.com")
         }
         Firebase.initialize(this)
+        // Configure native Stripe components when a publishable key is supplied via Gradle property
+        // stripePublishableKey or the STRIPE_PUBLISHABLE_KEY environment variable.
+        BuildConfig.STRIPE_PUBLISHABLE_KEY.takeIf(String::isNotBlank)?.let { key ->
+            PaymentConfiguration.init(applicationContext, key)
+        }
     }
 
     // This configures the global ImageLoader and Caching behavior for Coil 3

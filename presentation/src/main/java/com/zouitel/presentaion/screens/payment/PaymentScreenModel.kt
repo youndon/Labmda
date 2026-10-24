@@ -86,6 +86,12 @@ class PaymentScreenModel(
         }
     }
 
+    fun reportCheckoutLaunchError(message: String) {
+        _uiState.value = _uiState.value.copy(
+            errorMessage = message.ifBlank { "Could not open the payment provider. Please try again." }
+        )
+    }
+
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
     }
