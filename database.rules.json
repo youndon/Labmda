@@ -28,9 +28,9 @@
         "merchantId",
         "courierId"
       ],
-      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+      ".read": false,
       "$paymentId": {
-        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('merchantIds').child(auth.uid).val() === true || data.child('courierId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN')",
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid)",
         ".write": false
       }
     },
@@ -54,7 +54,7 @@
       ],
       ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
       "$entryId": {
-        ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('merchantIds').child(auth.uid).val() === true || data.child('courierId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+        ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid)",
         ".write": false
       }
     },
@@ -67,7 +67,7 @@
       ],
       ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
       "$payoutId": {
-        ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'ADMIN'",
+        ".read": "auth != null && (data.child('uid').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('courierId').val() === auth.uid)",
         ".write": false
       }
     },
