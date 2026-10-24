@@ -75,6 +75,88 @@ async function getOwnedPaymentContext(orderId: string, uid: string): Promise<Pay
   return { payment, rootPath };
 }
 
+function moneyValue(value: unknown, currencyCode = "USD"): { minorUnits: number; currencyCode: string } {
+  if (!value || typeof value !== "object") return { minorUnits: 0, currencyCode };
+  const money = value as Record<string, unknown>;
+  const amount = Number(money.minorUnits ?? 0);
+  return {
+    minorUnits: Number.isSafeInteger(amount) ? amount : 0,
+    currencyCode: typeof money.currencyCode === "string" ? money.currencyCode : currencyCode
+  };
+}
+
+/**
+ * Create wallet schema only through trusted code. Balance postings are deliberately not
+ * inferred from checkout redirects: ledger accounting must allocate verified amounts first.
+ */
+async function ensureWallet(uid: string, currencyCode = "USD"): Promise<Record<string, unknown>> {
+  if (!uid) throw new HttpsError("invalid-argument", "A wallet owner is required.");
+  const ref = getDatabase().ref(`wallets/${uid}`);
+  const zero = { minorUnits: 0, currencyCode };
+  const result = await ref.transaction((current) => {
+    const wallet = current && typeof current === "object"
+      ? current as Record<string, unknown>
+      : {};
+    return {
+      ...wallet,
+      available: moneyValue(wallet.available, currencyCode),
+      pending: moneyValue(wallet.pending, currencyCode),
+      cashOwed: moneyValue(wallet.cashOwed, currencyCode),
+      lifetimeEarnings: moneyValue(wallet.lifetimeEarnings, currencyCode),
+      currencyCode: typeof wallet.currencyCode === "string" ? wallet.currencyCode : currencyCode,
+      updatedAtEpochMillis: typeof wallet.updatedAtEpochMillis === "number"
+        ? wallet.updatedAtEpochMillis : Date.now()
+    };
+  });
+  return (result.snapshot.val() ?? { available: zero, pending: zero, cashOwed: zero, lifetimeEarnings: zero }) as Record<string, unknown>;
+}
+
+function walletSnapshot(wallet: Record<string, unknown>, currencyCode = "USD"): Record<string, unknown> {
+  return {
+    summary: {
+      availableBalance: moneyValue(wallet.available, currencyCode),
+      pendingBalance: moneyValue(wallet.pending, currencyCode),
+      cashOwed: moneyValue(wallet.cashOwed, currencyCode),
+      lifetimeEarnings: moneyValue(wallet.lifetimeEarnings, currencyCode),
+      updatedAtEpochMillis: Number(wallet.updatedAtEpochMillis ?? 0)
+    },
+    transactions: [],
+    payoutAccount: null
+  };
+}
+
+async function getOrCreateStripeCustomer(uid: string, secretKey: string): Promise<string> {
+  const db = getDatabase();
+  const ref = db.ref(`paymentCustomers/${uid}`);
+  const stored = await ref.child("stripeCustomerId").get();
+  const existingId = stored.val();
+  if (typeof existingId === "string" && existingId.startsWith("cus_")) return existingId;
+
+  // A stable idempotency key prevents concurrent first checkouts from creating duplicate
+  // Stripe customers. Contact fields are intentionally not copied into the customer node.
+  const form = new URLSearchParams();
+  form.set("metadata[firebaseUid]", uid);
+  const response = await fetch("https://api.stripe.com/v1/customers", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + secretKey,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Idempotency-Key": "labmda-customer-" + uid
+    },
+    body: form
+  });
+  const customer = await response.json() as { id?: string; error?: { message?: string } };
+  if (!response.ok || !customer.id || !customer.id.startsWith("cus_")) {
+    throw new HttpsError("failed-precondition", customer.error?.message || "Stripe could not create a customer.");
+  }
+  await ref.update({
+    stripeCustomerId: customer.id,
+    provider: "STRIPE",
+    updatedAtEpochMillis: Date.now()
+  });
+  return customer.id;
+}
+
 async function getPayPalAccessToken(): Promise<{ baseUrl: string; token: string }> {
   const baseUrl = paypalEnvironment.value().toLowerCase() === "live"
     ? "https://api-m.paypal.com"
@@ -228,6 +310,7 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
   };
   await db.ref().update({ [`orders/${orderId}`]: order, [`payments/${orderId}`]: payment });
+  await ensureWallet(merchantId, "USD");
   return { orderId, subtotalMinor: subtotal, deliveryFeeMinor: fee, totalMinor: total, currencyCode: "USD" };
 });
 
@@ -308,6 +391,7 @@ export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) 
     refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
   };
   await db.ref().update({ [`trips/${tripId}`]: trip, [`payments/${tripId}`]: payment });
+  if (targetDriverUid) await ensureWallet(targetDriverUid, "USD");
   return { tripId, fareMinorUnits, currencyCode: "USD" };
 });
 
@@ -363,7 +447,9 @@ export const createPaymentSession = onCall({
   if (method === "STRIPE") {
     const key = stripeSecretKey.value().trim();
     if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
+    const customerId = await getOrCreateStripeCustomer(uid, key);
     const form = new URLSearchParams();
+    form.set("customer", customerId);
     form.set("mode", "payment");
     form.set("client_reference_id", orderId);
     form.set("metadata[orderId]", orderId);
@@ -734,6 +820,7 @@ export const claimCourierOrder = onCall({ enforceAppCheck: true }, async (reques
   });
   if (!transaction.committed) throw new HttpsError("failed-precondition", "This delivery has already been claimed.");
   await db.ref(`payments/${orderId}/courierId`).set(uid);
+  await ensureWallet(uid, "USD");
   await db.ref(`deliveryQueue/${orderId}`).remove();
   return { accepted: true, orderId };
 });
