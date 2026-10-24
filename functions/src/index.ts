@@ -2602,9 +2602,31 @@ async function failProviderEvent(provider: "stripe" | "paypal", eventId: string,
 async function handleStripeIntent(orderId: string, intent: Record<string, unknown>, eventType: string): Promise<void> {
   const context = await loadPaymentContext(orderId);
   if (!context) throw new Error("Payment not found for Stripe event.");
-  if (normalizePaymentMethod(context.payment.provider ?? context.payment.method) !== "STRIPE") {
-    throw new Error("Stripe event does not match the payment provider.");
+  const intentId = String(intent.id ?? "");
+  if (!intentId) throw new Error("Stripe PaymentIntent ID is missing.");
+
+  const currentProvider = normalizePaymentMethod(context.payment.provider ?? context.payment.method);
+  const reportsFunds = intent.status === "requires_capture" || intent.status === "succeeded";
+  const savedPaymentIntentId = String(context.payment.providerPaymentIntentId ?? "");
+  const legacyPaymentId = String(context.payment.providerPaymentId ?? "");
+  const activePaymentIntentId = savedPaymentIntentId ||
+    (legacyPaymentId.startsWith("pi_") ? legacyPaymentId : "");
+  if (currentProvider !== "STRIPE" || (activePaymentIntentId && activePaymentIntentId !== intentId)) {
+    if (reportsFunds) {
+      await getDatabase().ref("payments/" + orderId).update({
+        requiresAdminReconciliation: true,
+        reconciliationReason: "Stripe reported an authorization/capture for a payment attempt that is no longer the active provider session.",
+        staleProviderPaymentIntentId: intentId,
+        updatedAtEpochMillis: Date.now()
+      });
+    }
+    return;
   }
+
+  const currentStatus = String(context.payment.status ?? "");
+  if (SETTLED_PAYMENT_STATUSES.has(currentStatus) && intent.status !== "succeeded") return;
+  if (currentStatus === "CANCELLED" && intent.status === "requires_capture") return;
+
   const expected = moneyValue(context.payment.amount);
   const actualAmount =
     eventType === "payment_intent.amount_capturable_updated" || intent.status === "requires_capture"
@@ -2616,8 +2638,6 @@ async function handleStripeIntent(orderId: string, intent: Record<string, unknow
   if (actualAmount !== expected.minorUnits || actualCurrency !== expected.currencyCode.toUpperCase()) {
     throw new Error("Stripe amount or currency mismatch for payment " + orderId);
   }
-  const intentId = String(intent.id ?? "");
-  if (!intentId) throw new Error("Stripe PaymentIntent ID is missing.");
   if (eventType === "payment_intent.amount_capturable_updated" ||
       (eventType === "checkout.session.completed" && intent.status === "requires_capture")) {
     if (intent.status !== "requires_capture") throw new Error("Stripe PaymentIntent is not awaiting capture.");
@@ -2635,7 +2655,12 @@ async function handleStripeIntent(orderId: string, intent: Record<string, unknow
   }
   if (eventType === "payment_intent.succeeded" || intent.status === "succeeded") {
     if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(String(context.payment.status ?? ""))) {
-      await getDatabase().ref("payments/" + orderId).update({ requiresAdminReconciliation: true, reconciliationReason: "Stripe reported success after local refund status." });
+      await getDatabase().ref("payments/" + orderId).update({
+        requiresAdminReconciliation: true,
+        reconciliationReason: "Stripe reported success after local refund status.",
+        staleProviderPaymentIntentId: intentId,
+        updatedAtEpochMillis: Date.now()
+      });
       return;
     }
     const charge = intent.latest_charge;
@@ -2803,9 +2828,14 @@ export const paypalWebhook = onRequest({
         const orderId = located.orderId;
         const linkedRoot = await getDatabase().ref(located.context.rootPath + "/" + orderId).get();
         if (!linkedRoot.exists() || ["CANCELLED", "CANCELED", "DELIVERED", "COMPLETED"].includes(String(linkedRoot.child("status").val() ?? ""))) {
-          await setPaymentStatus(orderId, located.context, "CANCELLED", { cancelReason: "ORDER_TERMINAL_BEFORE_PAYPAL_AUTHORIZATION" });
+          // A checkout-approved event is not itself a provider cancellation/void confirmation.
+          // Avoid creating an authorization for a terminal order without rewriting payment status.
+          await getDatabase().ref("payments/" + orderId).update({
+            cancelReason: "ORDER_TERMINAL_BEFORE_PAYPAL_AUTHORIZATION",
+            updatedAtEpochMillis: Date.now()
+          });
           await completeProviderEvent("paypal", eventId);
-          response.status(200).send("Payment cancelled; PayPal authorization skipped");
+          response.status(200).send("PayPal authorization skipped for terminal order");
           return;
         }
         const access = await getPayPalAccessToken();
@@ -2834,15 +2864,18 @@ export const paypalWebhook = onRequest({
         if (actualMinor !== amount.minorUnits || actualCurrency !== amount.currencyCode.toUpperCase() || !authorizationId) {
           throw new Error("PayPal authorization amount, currency, or ID is invalid.");
         }
-        await setPaymentStatus(located.orderId, located.context, "AUTHORIZED", {
-          provider: "PAYPAL", providerAuthorizationId: authorizationId, authorizedAtEpochMillis: Date.now()
-        });
-        const latestContext = await loadPaymentContext(located.orderId);
-        const latestRoot = await getDatabase().ref(located.context.rootPath + "/" + located.orderId).get();
-        if (latestContext && String(latestRoot.child("status").val() ?? "") === "CANCELLED") {
-          await releasePaymentAuthorization(located.orderId, latestContext);
-        } else {
-          await maybeCaptureAfterAuthorization(located.orderId);
+        const currentStatus = String(located.context.payment.status ?? "");
+        if (!SETTLED_PAYMENT_STATUSES.has(currentStatus)) {
+          await setPaymentStatus(located.orderId, located.context, "AUTHORIZED", {
+            provider: "PAYPAL", providerAuthorizationId: authorizationId, authorizedAtEpochMillis: Date.now()
+          });
+          const latestContext = await loadPaymentContext(located.orderId);
+          const latestRoot = await getDatabase().ref(located.context.rootPath + "/" + located.orderId).get();
+          if (latestContext && String(latestRoot.child("status").val() ?? "") === "CANCELLED") {
+            await releasePaymentAuthorization(located.orderId, latestContext);
+          } else {
+            await maybeCaptureAfterAuthorization(located.orderId);
+          }
         }
       } else if (eventType === "PAYMENT.CAPTURE.COMPLETED" && located) {
         const amount = moneyValue(located.context.payment.amount);
@@ -2854,19 +2887,31 @@ export const paypalWebhook = onRequest({
         const feeValue = ((resource.seller_receivable_breakdown as Record<string, unknown> | undefined)?.paypal_fee) as Record<string, unknown> | undefined;
         const gatewayFeeMinorUnits = feeValue ? Math.round(Number(feeValue.value ?? "NaN") * 100) : undefined;
         const gatewayFeeCurrencyCode = String(feeValue?.currency_code ?? "").toUpperCase();
-        await setPaymentStatus(located.orderId, located.context, "SUCCEEDED", {
-          provider: "PAYPAL", providerReceiptId: String(resource.id ?? ""),
-          gatewayFeeMinorUnits: Number.isSafeInteger(gatewayFeeMinorUnits) && Number(gatewayFeeMinorUnits) >= 0 ? gatewayFeeMinorUnits : undefined,
-          gatewayFeeCurrencyCode: gatewayFeeCurrencyCode || undefined,
-          verifiedAtEpochMillis: Date.now()
-        });
-        if (!(await handleCaptureAfterCancellation(located.orderId))) {
-          await maybeCaptureAfterAuthorization(located.orderId);
+        const currentStatus = String(located.context.payment.status ?? "");
+        if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(currentStatus)) {
+          await getDatabase().ref("payments/" + located.orderId).update({
+            requiresAdminReconciliation: true,
+            reconciliationReason: "PayPal reported capture completion after a local refund status.",
+            staleProviderReceiptId: String(resource.id ?? ""),
+            updatedAtEpochMillis: Date.now()
+          });
+        } else {
+          await setPaymentStatus(located.orderId, located.context, "SUCCEEDED", {
+            provider: "PAYPAL", providerReceiptId: String(resource.id ?? ""),
+            gatewayFeeMinorUnits: Number.isSafeInteger(gatewayFeeMinorUnits) && Number(gatewayFeeMinorUnits) >= 0 ? gatewayFeeMinorUnits : undefined,
+            gatewayFeeCurrencyCode: gatewayFeeCurrencyCode || undefined,
+            verifiedAtEpochMillis: Date.now()
+          });
+          if (!(await handleCaptureAfterCancellation(located.orderId))) {
+            await maybeCaptureAfterAuthorization(located.orderId);
+          }
         }
       } else if (eventType === "PAYMENT.AUTHORIZATION.VOIDED" && located) {
-        await setPaymentStatus(located.orderId, located.context, "CANCELLED", {
-          provider: "PAYPAL", providerAuthorizationId: String(resource.id ?? "")
-        });
+        if (!SETTLED_PAYMENT_STATUSES.has(String(located.context.payment.status ?? ""))) {
+          await setPaymentStatus(located.orderId, located.context, "CANCELLED", {
+            provider: "PAYPAL", providerAuthorizationId: String(resource.id ?? "")
+          });
+        }
       } else if ((eventType === "PAYMENT.CAPTURE.DENIED" || eventType === "PAYMENT.CAPTURE.PENDING") && located) {
         const amount = moneyValue(located.context.payment.amount);
         const captureAmount = (resource.amount as Record<string, unknown> | undefined);
@@ -2876,12 +2921,17 @@ export const paypalWebhook = onRequest({
           throw new Error("PayPal capture amount or currency does not match the server payment.");
         }
         const captureStatus = eventType === "PAYMENT.CAPTURE.PENDING" ? "PROCESSING" : "FAILED";
-        await setPaymentStatus(located.orderId, located.context, captureStatus, {
-          provider: "PAYPAL",
-          providerReceiptId: String(resource.id ?? ""),
-          failureMessage: eventType === "PAYMENT.CAPTURE.DENIED" ? "PayPal denied the capture." : undefined,
-          verifiedAtEpochMillis: Date.now()
-        });
+        const currentStatus = String(located.context.payment.status ?? "");
+        const staleCaptureEvent = SETTLED_PAYMENT_STATUSES.has(currentStatus) ||
+          currentStatus === "CANCELLED" || (currentStatus === "FAILED" && captureStatus === "PROCESSING");
+        if (!staleCaptureEvent) {
+          await setPaymentStatus(located.orderId, located.context, captureStatus, {
+            provider: "PAYPAL",
+            providerReceiptId: String(resource.id ?? ""),
+            failureMessage: eventType === "PAYMENT.CAPTURE.DENIED" ? "PayPal denied the capture." : undefined,
+            verifiedAtEpochMillis: Date.now()
+          });
+        }
       } else if (eventType === "PAYMENT.CAPTURE.REFUNDED" && located) {
         const total = moneyValue(located.context.payment.amount);
         const previous = moneyValue(located.context.payment.refundAmount, total.currencyCode);
