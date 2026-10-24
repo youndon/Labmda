@@ -26,12 +26,12 @@ All property names are camelCase and currently match kotlinx.serialization DTOs 
 | `verifyPaymentReturn` | `{ orderId, provider, sessionId, resultToken }` | `{ accepted, message }` |
 | `getMerchantWallet` | no arguments | `WalletSnapshot` JSON shown below |
 | `getCourierWallet` | no arguments | `WalletSnapshot` JSON shown below |
-| `getPayoutAccount` | no arguments | `{ account: PayoutAccount or null }` |
-| `updatePayoutAccount` | `PayoutAccount` fields: `provider, providerAccountId, countryCode, accountLabel, updatedAtEpochMillis` | `{ accepted, message }` |
-| `requestPayout` | `{ amount: { minorUnits, currencyCode } }` | `{ accepted, message }` |
+| `getPayoutAccount` | no arguments | Not implemented in Functions yet |
+| `updatePayoutAccount` | `PayoutAccount` fields: `provider, providerAccountId, countryCode, accountLabel, updatedAtEpochMillis` | Not implemented in Functions yet |
+| `requestPayout` | `{ amount: { minorUnits, currencyCode } }` | Currently writes a `REJECTED_DISABLED` audit row under `payouts/`, then throws `failed-precondition`; it never reserves or transfers funds |
 | `adminListPayments` | `{ cursor }` | `{ payments: PaymentRecord[], nextCursor }` |
-| `adminRefundPayment` | `{ orderId, amountMinorUnits, currencyCode, reason }`; amount/currency may be null for full refund | `{ accepted, message }` |
-| `adminReconcilePayments` | `{ fromEpochMillis, toEpochMillis }` | `{ reconciled, matchedCount, unmatchedCount, message }` |
+| `adminRefundPayment` | `{ orderId, amountMinorUnits, currencyCode, reason }`; amount/currency may be null for full refund | Not implemented in Functions yet |
+| `adminReconcilePayments` | `{ fromEpochMillis, toEpochMillis }` | Not implemented in Functions yet |
 | `adminGetCommissionSettings` | no arguments | `CommissionSettings` |
 | `adminUpdateCommissionSettings` | `CommissionSettings` | `{ accepted, message }` |
 
@@ -65,7 +65,7 @@ The order screens call `createOrder`; the function derives item prices and fees 
 
 ## Payment record and RTDB writes
 
-Write `payments/{orderId}` as a server-owned record containing at least `orderId`, `clientId`, `merchantId`, `courierId`, `method`, `status`, `amount`, `breakdown`, `providerPaymentId`, `refundAmount`, and `updatedAtEpochMillis`. Money values use `{ minorUnits, currencyCode }`; breakdown contains `merchantShare`, `courierShare`, `platformShare`, and `gatewayFee` Money values.
+Write `payments/{orderId}` as a server-owned record containing at least `orderId`, `clientId`, `merchantId`, authorized `merchantIds`, `courierId`, `provider`, `providerReference`, `method` (legacy compatibility), `status`, `amount`, `breakdownStatus`, `breakdown`, `providerPaymentId` (legacy compatibility), `refundAmount`, and `updatedAtEpochMillis`. Money values use `{ minorUnits, currencyCode }`; breakdown contains `merchantShare`, `courierShare`, `platformShare`, and `gatewayFee` Money values.
 
 A provider redirect only triggers `verifyPaymentReturn`; it must never mark a payment successful on its own. Verified provider completion currently writes a deterministic gross-payment confirmation entry to `ledger/` with `affectsWallet: false`; it does not credit a wallet. Signed Stripe and PayPal webhooks still need to verify signatures, update payment status and final allocation atomically where possible, and deduplicate provider event IDs.
 
