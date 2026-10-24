@@ -192,10 +192,8 @@ async function cancelOpenStripeIntent(secretKey: string, intentId: string): Prom
   }
 }
 
-/** Maps a provider-verified manual-capture PaymentIntent to the local payment state. */
+/** Inspects a PaymentIntent for a checkout return without changing local payment status. */
 async function applyStripeIntentState(
-  orderId: string,
-  context: PaymentContext,
   secretKey: string,
   intentId: string,
   expectedMinorUnits: number,
@@ -1429,7 +1427,7 @@ export const verifyPaymentReturn = onCall({
     if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
       const key = stripeSecretKey.value().trim();
       if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
-      return applyStripeIntentState(orderId, context, key, recordedSessionId, expected.minorUnits, expected.currencyCode.toUpperCase(), true);
+      return applyStripeIntentState(key, recordedSessionId, expected.minorUnits, expected.currencyCode.toUpperCase(), true);
     }
     if (provider === "STRIPE") {
       const key = stripeSecretKey.value().trim();
@@ -1506,7 +1504,7 @@ export const verifyPaymentReturn = onCall({
   if (provider === "STRIPE" && recordedSessionId.startsWith("pi_")) {
     const key = stripeSecretKey.value().trim();
     if (!key) throw new HttpsError("failed-precondition", "Stripe server credentials are not configured.");
-    return applyStripeIntentState(orderId, context, key, recordedSessionId, expected.minorUnits, expected.currencyCode.toUpperCase(), false);
+    return applyStripeIntentState(key, recordedSessionId, expected.minorUnits, expected.currencyCode.toUpperCase(), false);
   }
   if (provider === "STRIPE") {
     const secret = stripeSecretKey.value().trim();
