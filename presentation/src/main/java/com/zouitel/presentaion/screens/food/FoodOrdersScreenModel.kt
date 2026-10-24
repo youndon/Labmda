@@ -5,6 +5,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.screens.orders.OrderStatusRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -30,13 +31,16 @@ class FoodOrdersScreenModel : ScreenModel {
 
     private fun listenToIncomingOrders() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
+            val uid = currentUid ?: run {
+                _orders.value = emptyList()
+                _isLoading.value = false
+                return@launch
+            }
+            db.child("orders").orderByChild("sourceId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
                     // Food orders only; retail shop orders live in the shop dashboard
                     .filter { it.orderType == OrderType.FOOD }
-                    // A restaurant's id is its manager's uid, so show only this restaurant's orders
-                    .filter { currentUid == null || it.sourceId == currentUid }
                     .sortedByDescending { it.createdAtTimestamp }
                 _isLoading.value = false
             }
@@ -48,7 +52,7 @@ class FoodOrdersScreenModel : ScreenModel {
         if (nextStatus == OrderStatus.DELIVERED) return
 
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(order.id).child("status").setValue(nextStatus.name)
+            runCatching { OrderStatusRepository().updateStatus(order.id, nextStatus.name) }
         }
     }
 }
