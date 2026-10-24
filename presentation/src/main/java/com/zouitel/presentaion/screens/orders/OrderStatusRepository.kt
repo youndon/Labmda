@@ -14,6 +14,16 @@ class OrderStatusRepository {
             OrderStatusRequest(orderId, status)
         ).data<OrderStatusResponse>()
     }
+
+    suspend fun claimCourierOrder(orderId: String) {
+        require(orderId.isNotBlank())
+        functions.httpsCallable("claimCourierOrder")(CourierOrderRequest(orderId)).data<OrderStatusResponse>()
+    }
+
+    suspend fun releaseCourierOrder(orderId: String) {
+        require(orderId.isNotBlank())
+        functions.httpsCallable("releaseCourierOrder")(CourierOrderRequest(orderId)).data<OrderStatusResponse>()
+    }
 }
 
 @Serializable
@@ -21,3 +31,6 @@ private data class OrderStatusRequest(val orderId: String, val status: String)
 
 @Serializable
 private data class OrderStatusResponse(val accepted: Boolean = false, val status: String = "")
+
+@Serializable
+private data class CourierOrderRequest(val orderId: String)
