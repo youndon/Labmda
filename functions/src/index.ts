@@ -326,7 +326,11 @@ async function stripeGatewayFee(payment: Record<string, unknown>, secretKey: str
   let balance = (charge as Record<string, unknown>).balance_transaction;
   if (typeof balance === "string") balance = await stripeApi<Record<string, unknown>>("balance_transactions/" + encodeURIComponent(balance), secretKey);
   if (!balance || typeof balance !== "object") return null;
-  const fee = Number((balance as Record<string, unknown>).fee);
+  const balanceRecord = balance as Record<string, unknown>;
+  const fee = Number(balanceRecord.fee);
+  const currency = String(balanceRecord.currency ?? "").toUpperCase();
+  const paymentCurrency = moneyValue(payment.amount).currencyCode.toUpperCase();
+  if (currency !== paymentCurrency) return null;
   return Number.isSafeInteger(fee) && fee >= 0 ? fee : null;
 }
 
@@ -341,6 +345,7 @@ async function postWalletSettlement(
   provider: string
 ): Promise<void> {
   if (!uid || (creditMinorUnits === 0 && cashOwedDelta === 0)) return;
+  await ensureWallet(uid, currencyCode);
   const walletRef = getDatabase().ref("wallets/" + uid);
   await walletRef.transaction((current) => {
     const wallet = current && typeof current === "object" ? current as Record<string, unknown> : {};
@@ -350,6 +355,9 @@ async function postWalletSettlement(
     const available = moneyValue(wallet.available, currencyCode);
     const cashOwed = moneyValue(wallet.cashOwed, currencyCode);
     const lifetime = moneyValue(wallet.lifetimeEarnings, currencyCode);
+    if (String(wallet.currencyCode ?? currencyCode).toUpperCase() !== currencyCode.toUpperCase() ||
+        available.currencyCode.toUpperCase() !== currencyCode.toUpperCase() ||
+        cashOwed.currencyCode.toUpperCase() !== currencyCode.toUpperCase()) return;
     return {
       ...wallet,
       available: { minorUnits: available.minorUnits + creditMinorUnits, currencyCode },
@@ -400,7 +408,8 @@ async function settleCompletedPayment(orderId: string): Promise<void> {
     gatewayFee = moneyValue(payment.breakdown && (payment.breakdown as Record<string, unknown>).gatewayFee, amount.currencyCode).minorUnits;
   } else if (provider === "STRIPE") {
     try { gatewayFee = await stripeGatewayFee(payment, stripeSecretKey.value().trim()); } catch { gatewayFee = null; }
-  } else if (provider === "PAYPAL" && typeof payment.gatewayFeeMinorUnits === "number") {
+  } else if (provider === "PAYPAL" && typeof payment.gatewayFeeMinorUnits === "number" &&
+      String(payment.gatewayFeeCurrencyCode ?? "").toUpperCase() === amount.currencyCode.toUpperCase()) {
     gatewayFee = Number(payment.gatewayFeeMinorUnits);
   }
   if (gatewayFee === null || !Number.isSafeInteger(gatewayFee) || gatewayFee < 0) {
@@ -2475,9 +2484,11 @@ export const paypalWebhook = onRequest({
         }
         const feeValue = ((resource.seller_receivable_breakdown as Record<string, unknown> | undefined)?.paypal_fee) as Record<string, unknown> | undefined;
         const gatewayFeeMinorUnits = feeValue ? Math.round(Number(feeValue.value ?? "NaN") * 100) : undefined;
+        const gatewayFeeCurrencyCode = String(feeValue?.currency_code ?? "").toUpperCase();
         await setPaymentStatus(located.orderId, located.context, "SUCCEEDED", {
           provider: "PAYPAL", providerReceiptId: String(resource.id ?? ""),
           gatewayFeeMinorUnits: Number.isSafeInteger(gatewayFeeMinorUnits) && Number(gatewayFeeMinorUnits) >= 0 ? gatewayFeeMinorUnits : undefined,
+          gatewayFeeCurrencyCode: gatewayFeeCurrencyCode || undefined,
           verifiedAtEpochMillis: Date.now()
         });
         if (!(await handleCaptureAfterCancellation(located.orderId))) {
