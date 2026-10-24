@@ -94,7 +94,8 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     items: normalizedItems, subtotal: subtotal / 100, deliveryFee: fee / 100, totalPrice: total / 100,
     status: "PLACED", pickupLocation: String(source.address ?? ""),
     pickupLat: Number(source.latitude) || 0, pickupLng: Number(source.longitude) || 0,
-    dropoffLocation, dropoffLat: lat, dropoffLng: lng, createdAtTimestamp: now
+    dropoffLocation, dropoffLat: lat, dropoffLng: lng, createdAtTimestamp: now,
+    deliveryId: "", deliveryName: "", deliveryPhone: ""
   };
   const payment = {
     orderId, clientId: uid, merchantId, courierId: "", method, status: "PENDING",
@@ -145,6 +146,58 @@ export const updateOrderStatus = onCall({ enforceAppCheck: true }, async (reques
       ["PLACED", "ACCEPTED", "PREPARING"].includes(currentStatus)) ||
     (nextStatus === "DELIVERED" && courierOwns && currentStatus === "OUT_FOR_DELIVERY");
   if (!isAdmin && !allowedByRole) throw new HttpsError("permission-denied", "You are not allowed to make this order transition.");
-  await ref.update({ status: nextStatus, updatedAtTimestamp: Date.now() });
+  const now = Date.now();
+  await ref.update({ status: nextStatus, updatedAtTimestamp: now });
+  if (nextStatus === "OUT_FOR_DELIVERY" && !String(order.deliveryId ?? "")) {
+    await db.ref(`deliveryQueue/${orderId}`).set({ ...order, status: nextStatus, updatedAtTimestamp: now, clientId: "" });
+  } else if (nextStatus === "DELIVERED" || nextStatus === "CANCELLED") {
+    await db.ref(`deliveryQueue/${orderId}`).remove();
+  }
   return { accepted: true, status: nextStatus };
+});
+
+export const claimCourierOrder = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as a courier.");
+  const orderId = typeof request.data?.orderId === "string" ? request.data.orderId.trim() : "";
+  if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
+  const db = getDatabase();
+  const profile = await db.ref(`users/${uid}`).get();
+  if (profile.child("deliveryServices").child("status").val() !== "APPROVED") {
+    throw new HttpsError("permission-denied", "Courier approval is required.");
+  }
+  const orderRef = db.ref(`orders/${orderId}`);
+  const transaction = await orderRef.transaction((current) => {
+    if (!current || current.status !== "OUT_FOR_DELIVERY" || (current.deliveryId && current.deliveryId !== uid)) return;
+    current.deliveryId = uid;
+    current.deliveryName = String(profile.child("fullName").val() ?? "Delivery");
+    current.deliveryPhone = String(profile.child("phoneNumber").val() ?? "");
+    current.updatedAtTimestamp = Date.now();
+    return current;
+  });
+  if (!transaction.committed) throw new HttpsError("failed-precondition", "This delivery has already been claimed.");
+  await db.ref(`deliveryQueue/${orderId}`).remove();
+  return { accepted: true, orderId };
+});
+
+export const releaseCourierOrder = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as a courier.");
+  const orderId = typeof request.data?.orderId === "string" ? request.data.orderId.trim() : "";
+  if (!orderId) throw new HttpsError("invalid-argument", "orderId is required.");
+  const db = getDatabase();
+  const orderRef = db.ref(`orders/${orderId}`);
+  const transaction = await orderRef.transaction((current) => {
+    if (!current || current.deliveryId !== uid || current.status !== "OUT_FOR_DELIVERY") return;
+    current.deliveryId = "";
+    current.deliveryName = "";
+    current.deliveryPhone = "";
+    current.updatedAtTimestamp = Date.now();
+    return current;
+  });
+  if (!transaction.committed) throw new HttpsError("permission-denied", "You cannot release this delivery.");
+  const snap = await orderRef.get();
+  const order = snap.val() as Record<string, unknown>;
+  await db.ref(`deliveryQueue/${orderId}`).set({ ...order, clientId: "" });
+  return { accepted: true, orderId };
 });
