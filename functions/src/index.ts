@@ -300,6 +300,7 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     amount: { minorUnits: total, currencyCode: "USD" },
     // Keep the schema explicit, but zero shares mean "not allocated yet". Trusted settlement
     // must replace this only after commission settings and provider fees are verified.
+    breakdownStatus: "UNALLOCATED",
     breakdown: {
       merchantShare: { minorUnits: 0, currencyCode: "USD" },
       courierShare: { minorUnits: 0, currencyCode: "USD" },
