@@ -15,7 +15,12 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
         names.firstNotNullOfOrNull { name -> runCatching { child(name).value<String>() }.getOrNull()?.takeIf { it.isNotBlank() } } ?: ""
     fun dbl(snap: DataSnapshot, name: String): Double =
         runCatching { snap.child(name).value<Double>() }
-            .getOrElse { runCatching { snap.child(name).value<Long>().toDouble() }.getOrDefault(0.0) }
+            .getOrElse { runCatching { snap.child(name).value<Long>().toDouble() }
+                .getOrElse { runCatching { snap.child(name).value<Int>().toDouble() }.getOrDefault(0.0) } }
+    fun firstDbl(snap: DataSnapshot, vararg names: String): Double =
+        names.firstNotNullOfOrNull { name -> runCatching { snap.child(name).value<Double>() }.getOrNull()
+            ?: runCatching { snap.child(name).value<Long>().toDouble() }.getOrNull()
+            ?: runCatching { snap.child(name).value<Int>().toDouble() }.getOrNull() } ?: 0.0
 
     val status = runCatching { OrderStatus.valueOf(str("status")) }.getOrDefault(OrderStatus.PLACED)
     val typeValue = firstString("orderType")
@@ -28,7 +33,7 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
                 .getOrElse { runCatching { itemChild.child("productId").value<String>() }.getOrElse { runCatching { itemChild.child("mealId").value<String>() }.getOrDefault("") } },
             name = runCatching { itemChild.child("name").value<String>() }
                 .getOrElse { runCatching { itemChild.child("productName").value<String>() }.getOrElse { runCatching { itemChild.child("mealName").value<String>() }.getOrDefault("Item") } },
-            basePrice = runCatching { dbl(itemChild, "basePrice") }.getOrElse { dbl(itemChild, "price") },
+            basePrice = firstDbl(itemChild, "basePrice", "price"),
             quantity = runCatching { itemChild.child("quantity").value<Int>() }
                 .getOrElse { runCatching { itemChild.child("quantity").value<Long>().toInt() }.getOrDefault(1) },
             specialInstructions = runCatching { itemChild.child("specialInstructions").value<String>() }.getOrDefault("")
