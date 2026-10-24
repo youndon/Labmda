@@ -101,12 +101,8 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   const payment = {
     orderId, clientId: uid, merchantId, courierId: "", method, status: "PENDING",
     amount: { minorUnits: total, currencyCode: "USD" },
-    breakdown: {
-      merchantShare: { minorUnits: subtotal, currencyCode: "USD" },
-      courierShare: { minorUnits: 0, currencyCode: "USD" },
-      platformShare: { minorUnits: fee, currencyCode: "USD" },
-      gatewayFee: { minorUnits: 0, currencyCode: "USD" }
-    },
+    // Settlement splits are intentionally omitted until trusted commission and gateway-fee
+    // settings are configured; never invent payout shares at order creation time.
     providerPaymentId: "", refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
   };
   await db.ref().update({ [`orders/${orderId}`]: order, [`payments/${orderId}`]: payment });
