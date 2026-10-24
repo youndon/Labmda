@@ -849,6 +849,132 @@ export const releaseCourierOrder = onCall({ enforceAppCheck: true }, async (requ
   return { accepted: true, orderId };
 });
 
+
+async function requireAdmin(uid: string): Promise<void> {
+  const profile = await getDatabase().ref("users/" + uid).get();
+  if (profile.child("role").val() !== "ADMIN") {
+    throw new HttpsError("permission-denied", "Administrator access is required.");
+  }
+}
+
+function walletTransactions(raw: unknown, uid: string): Array<Record<string, unknown>> {
+  if (!raw || typeof raw !== "object") return [];
+  return Object.entries(raw as Record<string, unknown>)
+    .map(([id, value]) => {
+      const entry = value && typeof value === "object" ? value as Record<string, unknown> : {};
+      return { ...entry, id };
+    })
+    .filter(entry => entry.uid === uid && entry.amount !== undefined)
+    .sort((a, b) => Number(b.createdAtEpochMillis ?? 0) - Number(a.createdAtEpochMillis ?? 0))
+    .slice(0, 50);
+}
+
+/** Only approved merchants can read their own server-calculated wallet snapshot. */
+export const getMerchantWallet = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to view your wallet.");
+  const profile = await getDatabase().ref("users/" + uid).get();
+  const approved = profile.child("foodStatus").val() === "APPROVED" ||
+    profile.child("shopStatus").val() === "APPROVED";
+  if (!approved) throw new HttpsError("permission-denied", "Administrator-approved merchant access is required.");
+  const wallet = await ensureWallet(uid, "USD");
+  const transactionSnap = await getDatabase().ref("ledger").orderByChild("uid").equalTo(uid).limitToLast(50).get();
+  return {
+    ...walletSnapshot(wallet, "USD"),
+    transactions: walletTransactions(transactionSnap.val(), uid)
+  };
+});
+
+/** Only approved couriers can read their own server-calculated wallet snapshot. */
+export const getCourierWallet = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to view your wallet.");
+  const profile = await getDatabase().ref("users/" + uid).get();
+  if (profile.child("deliveryServices").child("status").val() !== "APPROVED") {
+    throw new HttpsError("permission-denied", "Administrator-approved courier access is required.");
+  }
+  const wallet = await ensureWallet(uid, "USD");
+  const transactionSnap = await getDatabase().ref("ledger").orderByChild("uid").equalTo(uid).limitToLast(50).get();
+  return {
+    ...walletSnapshot(wallet, "USD"),
+    transactions: walletTransactions(transactionSnap.val(), uid)
+  };
+});
+
+/** Read the current server-owned commission policy, initializing safe defaults on first access. */
+export const adminGetCommissionSettings = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const ref = getDatabase().ref("config/commission");
+  const defaults = {
+    currencyCode: "USD",
+    platformCommissionBps: 1000,
+    courierShareBps: 0,
+    updatedAtEpochMillis: Date.now()
+  };
+  await ref.transaction(current => current ?? defaults);
+  const snapshot = await ref.get();
+  return snapshot.val() ?? defaults;
+});
+
+/** Only an administrator callable can write config/commission; direct client writes are denied. */
+export const adminUpdateCommissionSettings = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const body = request.data as {
+    currencyCode?: string; platformCommissionBps?: number; courierShareBps?: number;
+  };
+  const currencyCode = typeof body.currencyCode === "string" ? body.currencyCode.trim().toUpperCase() : "";
+  const platformCommissionBps = Number(body.platformCommissionBps);
+  const courierShareBps = Number(body.courierShareBps);
+  if (!/^[A-Z]{3}$/.test(currencyCode) ||
+      !Number.isInteger(platformCommissionBps) || platformCommissionBps < 0 || platformCommissionBps > 10000 ||
+      !Number.isInteger(courierShareBps) || courierShareBps < 0 || courierShareBps > 10000 ||
+      platformCommissionBps + courierShareBps > 10000) {
+    throw new HttpsError("invalid-argument", "Currency or commission basis points are invalid.");
+  }
+  await getDatabase().ref("config/commission").set({
+    currencyCode,
+    platformCommissionBps,
+    courierShareBps,
+    updatedAtEpochMillis: Date.now()
+  });
+  return { accepted: true, message: "Commission settings saved." };
+});
+
+/** Server-side admin listing; ordinary clients have no direct payment-list access. */
+export const adminListPayments = onCall({ enforceAppCheck: true }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in as an administrator.");
+  await requireAdmin(uid);
+  const body = request.data as { cursor?: string | null };
+  const db = getDatabase();
+  let query = db.ref("payments").orderByChild("updatedAtEpochMillis");
+  if (typeof body.cursor === "string" && body.cursor.trim()) {
+    const cursor = Number(body.cursor);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new HttpsError("invalid-argument", "Payment cursor is invalid.");
+    }
+    query = query.endAt(Math.max(0, cursor - 1));
+  }
+  const snapshot = await query.limitToLast(51).get();
+  const raw = snapshot.val() as Record<string, unknown> | null;
+  const all = Object.entries(raw ?? {})
+    .map(([key, value]) => {
+      const payment = value && typeof value === "object" ? value as Record<string, unknown> : {};
+      return { ...payment, orderId: String(payment.orderId ?? key) };
+    })
+    .sort((a, b) => Number(b.updatedAtEpochMillis ?? 0) - Number(a.updatedAtEpochMillis ?? 0));
+  const hasMore = all.length > 50;
+  const payments = all.slice(0, 50);
+  const nextCursor = hasMore && payments.length
+    ? String(payments[payments.length - 1].updatedAtEpochMillis ?? 0)
+    : null;
+  return { payments, nextCursor };
+});
+
 /**
  * Payout execution deliberately fails closed until the wallet ledger and provider payout
  * integration are implemented. This guard ensures unapproved accounts cannot start payouts.
