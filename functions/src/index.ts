@@ -240,12 +240,14 @@ export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) 
   let status = "REQUESTED";
   if (targetDriverUid) {
     const driver = await db.ref(`users/${targetDriverUid}`).get();
-    if (!driver.exists() || driver.child("isDriverOnline").val() !== true) {
-      throw new HttpsError("failed-precondition", "That driver is no longer online.");
+    if (!driver.exists() || driver.child("isDriverOnline").val() !== true ||
+        driver.child("driverService").child("status").val() !== "APPROVED") {
+      throw new HttpsError("failed-precondition", "That driver is not available or not administrator-approved.");
     }
     driverName = String(driver.child("fullName").val() ?? "Driver");
     driverPhone = String(driver.child("phoneNumber").val() ?? driver.child("phone").val() ?? "");
-    status = "ACCEPTED";
+    // Only cash can be treated as immediately accepted. Online payment must be completed first.
+    status = method === "CASH" ? "ACCEPTED" : "REQUESTED";
   }
   const tripRef = db.ref("trips").push();
   const tripId = tripRef.key;
