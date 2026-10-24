@@ -97,6 +97,7 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     status: "PLACED", pickupLocation: String(source.address ?? ""),
     pickupLat: Number(source.latitude) || 0, pickupLng: Number(source.longitude) || 0,
     dropoffLocation, dropoffLat: lat, dropoffLng: lng, createdAtTimestamp: now,
+    paymentMethod: method, paymentStatus: "PENDING", paymentId: orderId,
     deliveryId: "", deliveryName: "", deliveryPhone: ""
   };
   const payment = {
