@@ -1013,12 +1013,38 @@ export const adminListPayments = onCall({ enforceAppCheck: true }, async (reques
 export const requestPayout = onCall({ enforceAppCheck: true }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in before requesting a payout.");
-  const profile = await getDatabase().ref(`users/${uid}`).get();
+  const body = request.data as { amount?: { minorUnits?: number; currencyCode?: string } };
+  const minorUnitsRequested = Number(body.amount?.minorUnits);
+  const currencyCode = typeof body.amount?.currencyCode === "string"
+    ? body.amount.currencyCode.toUpperCase() : "";
+  if (!Number.isSafeInteger(minorUnitsRequested) || minorUnitsRequested <= 0 ||
+      !/^[A-Z]{3}$/.test(currencyCode)) {
+    throw new HttpsError("invalid-argument", "A positive payout amount and currency are required.");
+  }
+  const db = getDatabase();
+  const profile = await db.ref("users/" + uid).get();
   const approvedMerchant = profile.child("foodStatus").val() === "APPROVED" ||
     profile.child("shopStatus").val() === "APPROVED";
   const approvedCourier = profile.child("deliveryServices").child("status").val() === "APPROVED";
   if (!approvedMerchant && !approvedCourier) {
     throw new HttpsError("permission-denied", "Only administrator-approved merchants and couriers may request payouts.");
   }
+
+  // Keep a server-owned audit record of the rejected attempt, but do not reserve or change
+  // balances until a transactional payout processor is configured.
+  const payoutRef = db.ref("payouts").push();
+  const now = Date.now();
+  await payoutRef.set({
+    id: payoutRef.key ?? "",
+    uid,
+    merchantId: approvedMerchant ? uid : "",
+    courierId: approvedCourier ? uid : "",
+    amount: { minorUnits: minorUnitsRequested, currencyCode },
+    status: "REJECTED_DISABLED",
+    rejectionReason: "PAYOUT_EXECUTION_NOT_CONFIGURED",
+    providerReference: "",
+    createdAtEpochMillis: now,
+    updatedAtEpochMillis: now
+  });
   throw new HttpsError("failed-precondition", "Payouts are disabled until server-side wallet reservation and provider payout processing are configured.");
 });
