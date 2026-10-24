@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity() {
                 val returnUri = incomingPaymentReturn.value
                 val returnOrderId = returnUri?.let { android.net.Uri.parse(it) }?.let { returnHandler.parse(it)?.orderId }
                 key(returnUri) {
-                    Navigator(returnOrderId?.let(::PaymentScreen) ?: LogInScreen())
+                    Navigator(returnOrderId?.let { PaymentScreen(it) } ?: LogInScreen())
                 }
             }
         }
