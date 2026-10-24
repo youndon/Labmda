@@ -89,7 +89,7 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   const merchantId = orderType === "FOOD" ? sourceId : String(source.ownerUid ?? sourceId);
   const now = Date.now();
   const order = {
-    id: orderId, clientId: uid, orderType, sourceId,
+    id: orderId, clientId: uid, merchantId, orderType, sourceId,
     sourceName: typeof source.name === "string" ? source.name : String(source.fullName ?? ""),
     items: normalizedItems, subtotal: subtotal / 100, deliveryFee: fee / 100, totalPrice: total / 100,
     status: "PLACED", pickupLocation: String(source.address ?? ""),
