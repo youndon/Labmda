@@ -382,6 +382,7 @@ export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) 
     orderId: tripId, contextType: "RIDE", clientId: uid, merchantId: "", merchantIds: {},
     courierId: targetDriverUid, provider: method, providerReference: "", method, status: "PENDING",
     amount: { minorUnits: fareMinorUnits, currencyCode: "USD" },
+    breakdownStatus: "UNALLOCATED",
     breakdown: {
       merchantShare: { minorUnits: 0, currencyCode: "USD" },
       courierShare: { minorUnits: 0, currencyCode: "USD" },
