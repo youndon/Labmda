@@ -1975,6 +1975,38 @@ async function submitProviderRefund(orderId: string, context: PaymentContext, am
   return refundId;
 }
 
+async function handleCaptureAfterCancellation(orderId: string): Promise<boolean> {
+  const context = await loadPaymentContext(orderId);
+  if (!context) return false;
+  const root = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+  if (!root.exists() || String(root.child("status").val() ?? "") !== "CANCELLED") return false;
+
+  const payment = context.payment;
+  if (String(payment.breakdownStatus ?? "") === "ALLOCATED" || String(payment.breakdownStatus ?? "") === "ALLOCATING") {
+    await getDatabase().ref("payments/" + orderId).update({
+      requiresAdminReconciliation: true,
+      reconciliationReason: "Provider capture completed after cancellation, but wallets were already allocated.",
+      updatedAtEpochMillis: Date.now()
+    });
+    return true;
+  }
+  if ((payment.refundRequest as Record<string, unknown> | undefined)?.status === "SUBMITTED") return true;
+  const total = moneyValue(payment.amount);
+  const refunded = moneyValue(payment.refundAmount, total.currencyCode);
+  const remaining = total.minorUnits - refunded.minorUnits;
+  if (remaining <= 0) return true;
+  try {
+    await submitProviderRefund(orderId, context, remaining, "Order or ride cancelled while provider capture was completing");
+  } catch (error) {
+    await getDatabase().ref("payments/" + orderId).update({
+      requiresAdminReconciliation: true,
+      reconciliationReason: error instanceof Error ? error.message.slice(0, 250) : "Automatic refund after cancellation failed",
+      updatedAtEpochMillis: Date.now()
+    });
+  }
+  return true;
+}
+
 async function refundPaymentForAdmin(uid: string, body: {
   orderId?: string; amountMinorUnits?: number | null; currencyCode?: string | null; reason?: string;
 }): Promise<Record<string, unknown>> {
@@ -2158,8 +2190,18 @@ export const onTripStatusChange = onValueUpdated({
 }, async event => {
   const tripId = String(event.params.tripId ?? "");
   const status = String(event.data.after.val() ?? "");
-  if (!tripId || status !== "COMPLETED" || event.data.before.val() === status) return;
-  await maybeCaptureAfterAuthorization(tripId);
+  if (!tripId || event.data.before.val() === status) return;
+  if (status === "COMPLETED") {
+    await maybeCaptureAfterAuthorization(tripId);
+  } else if (status === "CANCELLED") {
+    const context = await loadPaymentContext(tripId);
+    if (!context) return;
+    if (["AUTHORIZED", "REQUIRES_ACTION", "PENDING"].includes(String(context.payment.status ?? ""))) {
+      await releasePaymentAuthorization(tripId, context);
+    } else if (String(context.payment.status ?? "") === "SUCCEEDED") {
+      await handleCaptureAfterCancellation(tripId);
+    }
+  }
 });
 
 async function claimProviderEvent(provider: "stripe" | "paypal", eventId: string): Promise<"PROCESS" | "DONE"> {
@@ -2219,6 +2261,12 @@ async function handleStripeIntent(orderId: string, intent: Record<string, unknow
     await setPaymentStatus(orderId, context, "AUTHORIZED", {
       provider: "STRIPE", providerPaymentIntentId: intentId, authorizedAtEpochMillis: Date.now()
     });
+    const latestContext = await loadPaymentContext(orderId);
+    const latestRoot = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+    if (latestContext && String(latestRoot.child("status").val() ?? "") === "CANCELLED") {
+      await releasePaymentAuthorization(orderId, latestContext);
+      return;
+    }
     await maybeCaptureAfterAuthorization(orderId);
     return;
   }
@@ -2231,9 +2279,10 @@ async function handleStripeIntent(orderId: string, intent: Record<string, unknow
     const chargeId = typeof charge === "string" ? charge : String((charge as Record<string, unknown> | undefined)?.id ?? "");
     await setPaymentStatus(orderId, context, "SUCCEEDED", {
       provider: "STRIPE", providerPaymentIntentId: intentId,
-      providerReceiptId: chargeId || intentId, providerReference: String(context.payment.providerReference ?? ""),
+      providerReceiptId: chargeId || intentId, providerReference: String(context.payment.providerReference || ""),
       verifiedAtEpochMillis: Date.now()
     });
+    if (await handleCaptureAfterCancellation(orderId)) return;
     await maybeCaptureAfterAuthorization(orderId);
     return;
   }
@@ -2410,7 +2459,13 @@ export const paypalWebhook = onRequest({
         await setPaymentStatus(located.orderId, located.context, "AUTHORIZED", {
           provider: "PAYPAL", providerAuthorizationId: authorizationId, authorizedAtEpochMillis: Date.now()
         });
-        await maybeCaptureAfterAuthorization(located.orderId);
+        const latestContext = await loadPaymentContext(located.orderId);
+        const latestRoot = await getDatabase().ref(located.context.rootPath + "/" + located.orderId).get();
+        if (latestContext && String(latestRoot.child("status").val() ?? "") === "CANCELLED") {
+          await releasePaymentAuthorization(located.orderId, latestContext);
+        } else {
+          await maybeCaptureAfterAuthorization(located.orderId);
+        }
       } else if (eventType === "PAYMENT.CAPTURE.COMPLETED" && located) {
         const amount = moneyValue(located.context.payment.amount);
         const actualMinor = Math.round(Number((resource.amount as Record<string, unknown> | undefined)?.value ?? "NaN") * 100);
@@ -2425,7 +2480,9 @@ export const paypalWebhook = onRequest({
           gatewayFeeMinorUnits: Number.isSafeInteger(gatewayFeeMinorUnits) && Number(gatewayFeeMinorUnits) >= 0 ? gatewayFeeMinorUnits : undefined,
           verifiedAtEpochMillis: Date.now()
         });
-        await maybeCaptureAfterAuthorization(located.orderId);
+        if (!(await handleCaptureAfterCancellation(located.orderId))) {
+          await maybeCaptureAfterAuthorization(located.orderId);
+        }
       } else if (eventType === "PAYMENT.AUTHORIZATION.VOIDED" && located) {
         await setPaymentStatus(located.orderId, located.context, "CANCELLED", {
           provider: "PAYPAL", providerAuthorizationId: String(resource.id ?? "")
