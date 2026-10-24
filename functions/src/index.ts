@@ -2216,6 +2216,7 @@ async function handleOrderStatusChange(orderId: string, status: string): Promise
 
 export const onOrderStatusChange = onValueUpdated({
   ref: "/orders/{orderId}/status",
+  retry: true,
   secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
 }, async event => {
   const orderId = String(event.params.orderId ?? "");
@@ -2226,6 +2227,7 @@ export const onOrderStatusChange = onValueUpdated({
 
 export const onTripStatusChange = onValueUpdated({
   ref: "/trips/{tripId}/status",
+  retry: true,
   secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
 }, async event => {
   const tripId = String(event.params.tripId ?? "");
@@ -2574,6 +2576,28 @@ export const paypalWebhook = onRequest({
   } catch (error) {
     console.error("PayPal webhook rejected", error instanceof Error ? error.message : "unknown error");
     response.status(500).send("Webhook processing error");
+  }
+});
+
+/** Retry authorizations when a status-trigger or transient provider API attempt was interrupted. */
+export const retryAuthorizedPaymentCapture = onSchedule({
+  schedule: "every 5 minutes",
+  timeoutSeconds: 540,
+  secrets: [stripeSecretKey, paypalClientId, paypalClientSecret]
+}, async () => {
+  const snapshot = await getDatabase().ref("payments").orderByChild("status").equalTo("AUTHORIZED").limitToFirst(100).get();
+  const raw = snapshot.val() as Record<string, unknown> | null;
+  for (const [orderId] of Object.entries(raw ?? {})) {
+    try {
+      const context = await loadPaymentContext(orderId);
+      if (!context) continue;
+      const root = await getDatabase().ref(context.rootPath + "/" + orderId).get();
+      const status = String(root.child("status").val() ?? "");
+      if (status === "CANCELLED" || status === "CANCELED") await releasePaymentAuthorization(orderId, context);
+      else await maybeCaptureAfterAuthorization(orderId);
+    } catch (error) {
+      console.error("Authorization retry deferred for", orderId, error instanceof Error ? error.message : "unknown error");
+    }
   }
 });
 
