@@ -36,7 +36,8 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                     return@collect
                 }
 
-                _order.value = snapshot.toOrderOrNull()
+                try {
+                    _order.value = snapshot.toOrderOrNull()
                 } catch (e: Exception) {
                     _order.value = null
                 } finally {
