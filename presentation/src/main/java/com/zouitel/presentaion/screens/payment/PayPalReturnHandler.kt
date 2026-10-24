@@ -15,7 +15,7 @@ data class PayPalReturn(
 )
 
 class PayPalReturnHandler {
-    fun parse(intent: Intent): PayPalReturn? = intent.data?.let(::parse)
+    fun parse(intent: Intent): PayPalReturn? = intent.data?.let { uri -> parse(uri) }
 
     fun parse(uri: Uri): PayPalReturn? {
         if (uri.scheme != "labmda" || uri.host != "payment-return") return null
