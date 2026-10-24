@@ -11,18 +11,24 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
     val id = key ?: return null
 
     fun str(name: String) = runCatching { child(name).value<String>() }.getOrDefault("")
+    fun firstString(vararg names: String): String =
+        names.firstNotNullOfOrNull { name -> runCatching { child(name).value<String>() }.getOrNull()?.takeIf { it.isNotBlank() } } ?: ""
     fun dbl(snap: DataSnapshot, name: String): Double =
         runCatching { snap.child(name).value<Double>() }
             .getOrElse { runCatching { snap.child(name).value<Long>().toDouble() }.getOrDefault(0.0) }
 
     val status = runCatching { OrderStatus.valueOf(str("status")) }.getOrDefault(OrderStatus.PLACED)
-    val orderType = runCatching { OrderType.valueOf(str("orderType")) }.getOrDefault(OrderType.FOOD)
+    val typeValue = firstString("orderType")
+    val orderType = runCatching { OrderType.valueOf(typeValue) }
+        .getOrElse { if (firstString("shopId").isNotBlank()) OrderType.RETAIL else OrderType.FOOD }
 
     val items = child("items").children.map { itemChild ->
         CartItem(
-            id = runCatching { itemChild.child("id").value<String>() }.getOrDefault(""),
-            name = runCatching { itemChild.child("name").value<String>() }.getOrDefault("Item"),
-            basePrice = dbl(itemChild, "basePrice"),
+            id = runCatching { itemChild.child("id").value<String>() }
+                .getOrElse { runCatching { itemChild.child("productId").value<String>() }.getOrElse { runCatching { itemChild.child("mealId").value<String>() }.getOrDefault("") } },
+            name = runCatching { itemChild.child("name").value<String>() }
+                .getOrElse { runCatching { itemChild.child("productName").value<String>() }.getOrElse { runCatching { itemChild.child("mealName").value<String>() }.getOrDefault("Item") } },
+            basePrice = runCatching { dbl(itemChild, "basePrice") }.getOrElse { dbl(itemChild, "price") },
             quantity = runCatching { itemChild.child("quantity").value<Int>() }
                 .getOrElse { runCatching { itemChild.child("quantity").value<Long>().toInt() }.getOrDefault(1) },
             specialInstructions = runCatching { itemChild.child("specialInstructions").value<String>() }.getOrDefault("")
@@ -33,8 +39,8 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
         id = id,
         clientId = str("clientId"),
         orderType = orderType,
-        sourceId = str("sourceId"),
-        sourceName = str("sourceName"),
+        sourceId = firstString("sourceId", "shopId"),
+        sourceName = firstString("sourceName", "shopName"),
         items = items,
         subtotal = dbl(this, "subtotal"),
         deliveryFee = dbl(this, "deliveryFee"),
