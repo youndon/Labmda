@@ -2,7 +2,7 @@ package com.zouitel.presentaion.screens.payment
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.model.PaymentMethodType
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +19,7 @@ class PaymentScreenModel(
     private val _events = MutableSharedFlow<PaymentEvent>(extraBufferCapacity = 8)
     val events = _events.asSharedFlow()
 
-    fun selectMethod(method: PaymentMethod) {
+    fun selectMethod(method: PaymentMethodType) {
         _uiState.value = _uiState.value.copy(selectedMethod = method, errorMessage = null, session = null)
     }
 
@@ -54,14 +54,18 @@ class PaymentScreenModel(
         screenModelScope.launch {
             try {
                 when (method) {
-                    PaymentMethod.CASH -> {
+                    PaymentMethodType.CASH -> {
                         repository.requestCashPayment(orderId)
                         _events.emit(PaymentEvent.CashPaymentRequested)
                     }
-                    PaymentMethod.STRIPE, PaymentMethod.PAYPAL -> {
+                    PaymentMethodType.STRIPE, PaymentMethodType.PAYPAL -> {
                         val session = repository.createCheckout(orderId, method)
                         _uiState.value = _uiState.value.copy(session = session)
                         _events.emit(PaymentEvent.CheckoutReady(session))
+                    }
+
+                    else -> {
+                        _uiState.value = _uiState.value.copy(errorMessage = "Unsupported payment method.")
                     }
                 }
             } catch (error: Exception) {

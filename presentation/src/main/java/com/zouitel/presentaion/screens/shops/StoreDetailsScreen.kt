@@ -24,9 +24,9 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.model.PaymentMethodType
 import com.zouitel.presentaion.screens.payment.PaymentScreen
-import com.zouitel.presentaion.screens.payment.components.PaymentMethodSelector
+import com.zouitel.presentaion.screens.payment.components.PaymentMethodTypeSelector
 import kotlinx.coroutines.launch
 import android.content.Context
 import android.location.Geocoder
@@ -63,7 +63,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         var showOrderSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember { mutableStateOf(PaymentMethod.CASH) }
+        var PaymentMethodType by remember { mutableStateOf(PaymentMethodType.CASH) }
         var isSubmitting by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
@@ -318,9 +318,9 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         }
 
                         Text("Payment Method", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        PaymentMethodSelector(
-                            selected = paymentMethod,
-                            onSelect = { paymentMethod = it },
+                        PaymentMethodTypeSelector(
+                            selected = PaymentMethodType,
+                            onSelect = { PaymentMethodType = it },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !isSubmitting
                         )
@@ -342,14 +342,14 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                         dropoffAddress = deliveryAddress,
                                         dropoffLat = drop.latitude,
                                         dropoffLng = drop.longitude,
-                                        paymentMethod = paymentMethod.name,
+                                        paymentMethodType = PaymentMethodType.name,
                                         onSuccess = { orderId ->
                                             isSubmitting = false
                                             showOrderSheet = false
                                             cartItems.clear()
                                             dropoff = null
                                             deliveryAddress = ""
-                                            navigator?.push(PaymentScreen(orderId, paymentMethod))
+                                            navigator?.push(PaymentScreen(orderId, PaymentMethodType))
                                         }
                                     )
                                     } catch (_: Exception) {

@@ -12,7 +12,7 @@ data class PaymentRecord(
     val clientId: String = "",
     val merchantId: String = "",
     val courierId: String = "",
-    val method: PaymentMethod = PaymentMethod.CASH,
+    val method: PaymentMethodType = PaymentMethodType.CASH,
     val status: PaymentStatus = PaymentStatus.UNKNOWN,
     val amount: Money = Money(),
     val breakdown: OrderBreakdown? = null,

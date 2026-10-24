@@ -5,7 +5,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
-import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.model.PaymentMethodType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -83,7 +83,7 @@ class PassengerScreenModel : ScreenModel {
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
-                            paymentMethod = str("paymentMethod").ifBlank { "CASH" },
+                            paymentMethodType = str("PaymentMethodType").ifBlank { "CASH" },
                             paymentStatus = str("paymentStatus").ifBlank { "PENDING" },
                             paymentId = str("paymentId"),
                             driverId = str("driverId"),
@@ -156,7 +156,7 @@ class PassengerScreenModel : ScreenModel {
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        paymentMethod: PaymentMethod,
+        PaymentMethodType: PaymentMethodType,
         passengerName: String,
         passengerPhone: String,
         targetDriver: UserProfile? = null,
@@ -180,7 +180,7 @@ class PassengerScreenModel : ScreenModel {
                         passengerName = passengerName.ifBlank { "Passenger" },
                         passengerPhone = passengerPhone,
                         targetDriverUid = targetDriver?.uid,
-                        paymentMethod = paymentMethod.name
+                        PaymentMethodType = PaymentMethodType.name
                     )
                 ).data<CreateRideTripResponse>()
                 require(response.tripId.isNotBlank()) { "The server did not return a ride ID." }
@@ -208,7 +208,7 @@ private data class CreateRideTripRequest(
     val passengerName: String,
     val passengerPhone: String,
     val targetDriverUid: String?,
-    val paymentMethod: String
+    val PaymentMethodType: String
 )
 
 @Serializable

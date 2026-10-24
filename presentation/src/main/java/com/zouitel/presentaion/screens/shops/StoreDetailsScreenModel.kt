@@ -85,7 +85,7 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        paymentMethod: String,
+        paymentMethodType: String,
         onSuccess: (String) -> Unit
     ) {
         if (auth.currentUser?.uid == null) throw IllegalStateException("Please sign in to place an order.")
@@ -96,7 +96,7 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
             dropoffLocation = dropoffAddress,
             dropoffLat = dropoffLat,
             dropoffLng = dropoffLng,
-            paymentMethod = paymentMethod
+            paymentMethod = paymentMethodType
         )
         onSuccess(orderId)
     }

@@ -50,9 +50,9 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
-import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.model.PaymentMethodType
 import com.zouitel.presentaion.screens.payment.PaymentScreen
-import com.zouitel.presentaion.screens.payment.components.PaymentMethodSelector
+import com.zouitel.presentaion.screens.payment.components.PaymentMethodTypeSelector
 import com.zouitel.presentaion.model.VehicleType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,7 +94,7 @@ class PassengerScreen : Screen {
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember { mutableStateOf(false) }
         var hasCenteredOnPickup by remember { mutableStateOf(false) }
-        var paymentMethod by remember { mutableStateOf(PaymentMethod.CASH) }
+        var PaymentMethodType by remember { mutableStateOf(PaymentMethodType.CASH) }
 
         var hasLocationPermission by remember {
             mutableStateOf(
@@ -192,7 +192,7 @@ class PassengerScreen : Screen {
                 dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
                 dropoffLat = d.latitude,
                 dropoffLng = d.longitude,
-                paymentMethod = paymentMethod,
+                PaymentMethodType = PaymentMethodType,
                 passengerName = name,
                 passengerPhone = phone,
                 targetDriver = driver,
@@ -202,7 +202,7 @@ class PassengerScreen : Screen {
                     selectedDriver = null
                     tappedDriverId = null
                     requestSheetDriver = null
-                    navigator?.push(PaymentScreen(tripId, paymentMethod))
+                    navigator?.push(PaymentScreen(tripId, PaymentMethodType))
                 },
                 onFailure = { message ->
                     scope.launch { snackbarHostState.showSnackbar(message) }
@@ -335,9 +335,9 @@ class PassengerScreen : Screen {
                                 )
                             } else {
                                 Text("Payment method", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                PaymentMethodSelector(
-                                    selected = paymentMethod,
-                                    onSelect = { paymentMethod = it },
+                                PaymentMethodTypeSelector(
+                                    selected = PaymentMethodType,
+                                    onSelect = { PaymentMethodType = it },
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 RequestPanel(
@@ -381,8 +381,8 @@ class PassengerScreen : Screen {
                         destinationAddress = destinationAddress,
                         distanceKm = distanceKm,
                         fare = fare,
-                        selectedPaymentMethod = paymentMethod,
-                        onPaymentMethodChange = { paymentMethod = it },
+                        selectedPaymentMethodType = PaymentMethodType,
+                        onPaymentMethodTypeChange = { PaymentMethodType = it },
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
                         onRequest = { name, phone ->
@@ -662,8 +662,8 @@ class PassengerScreen : Screen {
         destinationAddress: String,
         distanceKm: Double,
         fare: Double,
-        selectedPaymentMethod: PaymentMethod,
-        onPaymentMethodChange: (PaymentMethod) -> Unit,
+        selectedPaymentMethodType: PaymentMethodType,
+        onPaymentMethodTypeChange: (PaymentMethodType) -> Unit,
         initialName: String,
         initialPhone: String,
         onRequest: (String, String) -> Unit
@@ -699,9 +699,9 @@ class PassengerScreen : Screen {
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
             Text("Payment method", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-            PaymentMethodSelector(
-                selected = selectedPaymentMethod,
-                onSelect = onPaymentMethodChange,
+            PaymentMethodTypeSelector(
+                selected = selectedPaymentMethodType,
+                onSelect = onPaymentMethodTypeChange,
                 modifier = Modifier.fillMaxWidth()
             )
 

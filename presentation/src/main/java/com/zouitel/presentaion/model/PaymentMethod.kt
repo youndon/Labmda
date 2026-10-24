@@ -7,7 +7,8 @@ enum class PaymentMethodType {
     STRIPE_CARD,
     PAYPAL,
     CASH,
-    CARD_ON_DELIVERY
+    CARD_ON_DELIVERY,
+    STRIPE
 }
 
 @Serializable

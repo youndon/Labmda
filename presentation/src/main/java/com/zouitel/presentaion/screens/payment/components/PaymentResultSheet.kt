@@ -12,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.zouitel.presentaion.model.PaymentMethodType
 import com.zouitel.presentaion.model.PaymentRecord
 import com.zouitel.presentaion.model.PaymentStatus
 
@@ -30,7 +31,7 @@ fun PaymentResultSheet(
             Text("Payment status", style = MaterialTheme.typography.headlineSmall)
             Text(
                 text = when {
-                    payment?.method == com.zouitel.presentaion.model.PaymentMethod.CASH &&
+                    payment?.method == PaymentMethodType.CASH &&
                         payment?.status == PaymentStatus.PENDING ->
                         "Cash on delivery selected. Payment remains pending until cash is collected."
                     payment?.status == PaymentStatus.SUCCEEDED -> "Payment confirmed by the server."

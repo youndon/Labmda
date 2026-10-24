@@ -31,14 +31,14 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.model.PayPalSession
-import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.model.PaymentMethodType
 import com.zouitel.presentaion.model.PaymentStatus
 import com.zouitel.presentaion.model.StripeSession
 import com.zouitel.presentaion.screens.payment.components.PayButton
-import com.zouitel.presentaion.screens.payment.components.PaymentMethodSelector
+import com.zouitel.presentaion.screens.payment.components.PaymentMethodTypeSelector
 import com.zouitel.presentaion.screens.payment.components.PaymentResultSheet
 
-data class PaymentScreen(val orderId: String, val initialMethod: PaymentMethod? = null) : Screen {
+data class PaymentScreen(val orderId: String, val initialMethod: PaymentMethodType? = null) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
@@ -108,7 +108,7 @@ data class PaymentScreen(val orderId: String, val initialMethod: PaymentMethod? 
             ) {
                 Text("Choose how you want to pay", style = MaterialTheme.typography.titleLarge)
                 Text("Order: $orderId", style = MaterialTheme.typography.bodyMedium)
-                PaymentMethodSelector(
+                PaymentMethodTypeSelector(
                     selected = state.selectedMethod,
                     onSelect = model::selectMethod,
                     enabled = !state.isSubmitting

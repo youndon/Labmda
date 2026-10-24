@@ -31,9 +31,9 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import coil3.compose.AsyncImage
 import com.google.android.gms.maps.model.LatLng
 import com.zouitel.presentaion.common.LocationPickerDialog
-import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.model.PaymentMethodType
 import com.zouitel.presentaion.screens.payment.PaymentScreen
-import com.zouitel.presentaion.screens.payment.components.PaymentMethodSelector
+import com.zouitel.presentaion.screens.payment.components.PaymentMethodTypeSelector
 
 data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
@@ -61,7 +61,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var showMapPicker by remember { mutableStateOf(false) }
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember(restaurant) { mutableStateOf(PaymentMethod.CASH) }
+        var paymentMethod by remember(restaurant) { mutableStateOf(PaymentMethodType.CASH) }
 
         val restaurantPoint = remember(restaurant) {
             if (restaurant.latitude != 0.0 || restaurant.longitude != 0.0)
@@ -312,7 +312,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     }
 
                     Text("Payment Method", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                    PaymentMethodSelector(
+                    PaymentMethodTypeSelector(
                         selected = paymentMethod,
                         onSelect = { paymentMethod = it },
                         modifier = Modifier.fillMaxWidth(),

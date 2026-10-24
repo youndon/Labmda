@@ -4,7 +4,7 @@ import com.zouitel.presentaion.admin.CommissionSettings
 import com.zouitel.presentaion.admin.PaymentLedgerResponse
 import com.zouitel.presentaion.model.Money
 import com.zouitel.presentaion.model.OrderBreakdown
-import com.zouitel.presentaion.model.PaymentMethod
+import com.zouitel.presentaion.model.PaymentMethodType
 import com.zouitel.presentaion.model.PaymentRecord
 import com.zouitel.presentaion.model.PaymentSession
 import com.zouitel.presentaion.model.PaymentStatus
@@ -36,8 +36,8 @@ class PaymentRepository(
             snapshot.toPaymentRecord(orderId)
         }
 
-    suspend fun createCheckout(orderId: String, method: PaymentMethod): PaymentSession {
-        require(method == PaymentMethod.STRIPE || method == PaymentMethod.PAYPAL) {
+    suspend fun createCheckout(orderId: String, method: PaymentMethodType): PaymentSession {
+        require(method == PaymentMethodType.STRIPE || method == PaymentMethodType.PAYPAL) {
             "Hosted checkout is only available for Stripe and PayPal."
         }
         val response = functions.httpsCallable("createPaymentSession")(
@@ -48,19 +48,19 @@ class PaymentRepository(
             "The server returned an invalid checkout session."
         }
         return when (method) {
-            PaymentMethod.STRIPE -> StripeSession(
+            PaymentMethodType.STRIPE -> StripeSession(
                 orderId = response.orderId,
                 sessionId = response.sessionId,
                 checkoutUrl = response.checkoutUrl,
                 expiresAtEpochMillis = response.expiresAtEpochMillis
             )
-            PaymentMethod.PAYPAL -> PayPalSession(
+            PaymentMethodType.PAYPAL -> PayPalSession(
                 orderId = response.orderId,
                 sessionId = response.sessionId,
                 checkoutUrl = response.checkoutUrl,
                 expiresAtEpochMillis = response.expiresAtEpochMillis
             )
-            PaymentMethod.CASH -> error("Cash does not use hosted checkout.")
+            PaymentMethodType.CASH -> error("Cash does not use hosted checkout.")
         }
     }
 
@@ -140,7 +140,7 @@ class PaymentRepository(
             val currency = runCatching { node.child("currencyCode").value<String>() }.getOrDefault("USD")
             return Money(minor, currency)
         }
-        val method = runCatching { PaymentMethod.valueOf(string("method")) }.getOrDefault(PaymentMethod.CASH)
+        val method = runCatching { PaymentMethodType.valueOf(string("method")) }.getOrDefault(PaymentMethodType.CASH)
         val status = runCatching { PaymentStatus.valueOf(string("status")) }.getOrDefault(PaymentStatus.UNKNOWN)
         val breakdownNode = child("breakdown")
         val breakdown = if (breakdownNode.exists) {
