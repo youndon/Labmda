@@ -894,7 +894,7 @@ function walletTransactions(raw: unknown, uid: string): Array<Record<string, unk
   return Object.entries(raw as Record<string, unknown>)
     .map(([id, value]) => {
       const entry = value && typeof value === "object" ? value as Record<string, unknown> : {};
-      return { ...entry, id };
+      return { ...entry, id } as Record<string, unknown>;
     })
     .filter(entry => entry.uid === uid && entry.amount !== undefined)
     .sort((a, b) => Number(b.createdAtEpochMillis ?? 0) - Number(a.createdAtEpochMillis ?? 0))
@@ -996,7 +996,7 @@ export const adminListPayments = onCall({ enforceAppCheck: true }, async (reques
   const all = Object.entries(raw ?? {})
     .map(([key, value]) => {
       const payment = value && typeof value === "object" ? value as Record<string, unknown> : {};
-      return { ...payment, orderId: String(payment.orderId ?? key) };
+      return { ...payment, orderId: String(payment.orderId ?? key) } as Record<string, unknown>;
     })
     .sort((a, b) => Number(b.updatedAtEpochMillis ?? 0) - Number(a.updatedAtEpochMillis ?? 0));
   const hasMore = all.length > 50;
