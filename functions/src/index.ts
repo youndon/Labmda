@@ -34,6 +34,22 @@ function normalizePaymentMethod(value: unknown): "CASH" | "STRIPE" | "PAYPAL" | 
   return "";
 }
 
+function merchantAccessIds(source: Record<string, unknown>, fallbackId: string): Record<string, true> {
+  const ids = new Set<string>();
+  for (const candidate of [source.ownerUid, source.ownerId, source.merchantId, fallbackId]) {
+    if (typeof candidate === "string" && candidate.trim()) ids.add(candidate.trim());
+  }
+  const managers = source.managers;
+  if (Array.isArray(managers)) {
+    for (const manager of managers) if (typeof manager === "string" && manager.trim()) ids.add(manager.trim());
+  } else if (managers && typeof managers === "object") {
+    for (const [uid, allowed] of Object.entries(managers as Record<string, unknown>)) {
+      if (allowed === true && uid.trim()) ids.add(uid.trim());
+    }
+  }
+  return Object.fromEntries([...ids].map(uid => [uid, true])) as Record<string, true>;
+}
+
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const radians = (degrees: number) => degrees * Math.PI / 180;
   const dLat = radians(lat2 - lat1);
@@ -94,10 +110,17 @@ async function setPaymentStatus(
     [`payments/${orderId}/status`]: status,
     [`payments/${orderId}/updatedAtEpochMillis`]: now,
     ...Object.fromEntries(Object.entries(extraPaymentFields).map(([key, value]) => [`payments/${orderId}/${key}`, value])),
+    [`payments/${orderId}/provider`]:
+      typeof extraPaymentFields.provider === "string" ? extraPaymentFields.provider : String(context.payment.provider ?? context.payment.method ?? "CASH"),
+    [`payments/${orderId}/providerReference`]:
+      typeof extraPaymentFields.providerReference === "string" ? extraPaymentFields.providerReference :
+      typeof extraPaymentFields.providerPaymentId === "string" ? extraPaymentFields.providerPaymentId :
+      String(context.payment.providerReference ?? context.payment.providerPaymentId ?? ""),
     [`${context.rootPath}/${orderId}/paymentStatus`]: status,
     [`${context.rootPath}/${orderId}/paymentId`]: orderId,
     [`${context.rootPath}/${orderId}/paymentMethod`]:
-      typeof extraPaymentFields.method === "string" ? extraPaymentFields.method : String(context.payment.method ?? "CASH")
+      typeof extraPaymentFields.provider === "string" ? extraPaymentFields.provider :
+      typeof extraPaymentFields.method === "string" ? extraPaymentFields.method : String(context.payment.provider ?? context.payment.method ?? "CASH")
   });
 }
 
@@ -176,7 +199,8 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
   const orderRef = db.ref("orders").push();
   const orderId = orderRef.key;
   if (!orderId) throw new HttpsError("internal", "Could not allocate an order ID.");
-  const merchantId = orderType === "FOOD" ? sourceId : String(source.ownerUid ?? sourceId);
+  const accessMerchantIds = merchantAccessIds(source, sourceId);
+  const merchantId = String(source.ownerUid ?? source.ownerId ?? source.merchantId ?? sourceId);
   const now = Date.now();
   const order = {
     id: orderId, clientId: uid, merchantId, orderType, sourceId,
@@ -189,10 +213,17 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     deliveryId: "", deliveryName: "", deliveryPhone: ""
   };
   const payment = {
-    orderId, contextType: "ORDER", clientId: uid, merchantId, courierId: "", method, status: "PENDING",
+    orderId, contextType: "ORDER", clientId: uid, merchantId, merchantIds: accessMerchantIds,
+    courierId: "", provider: method, providerReference: "", method, status: "PENDING",
     amount: { minorUnits: total, currencyCode: "USD" },
-    // Settlement splits are intentionally omitted until trusted commission and gateway-fee
-    // settings are configured; never invent payout shares at order creation time.
+    // Keep the schema explicit, but zero shares mean "not allocated yet". Trusted settlement
+    // must replace this only after commission settings and provider fees are verified.
+    breakdown: {
+      merchantShare: { minorUnits: 0, currencyCode: "USD" },
+      courierShare: { minorUnits: 0, currencyCode: "USD" },
+      platformShare: { minorUnits: 0, currencyCode: "USD" },
+      gatewayFee: { minorUnits: 0, currencyCode: "USD" }
+    },
     providerPaymentId: "", checkoutUrl: "", expiresAtEpochMillis: 0,
     refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
   };
@@ -264,9 +295,15 @@ export const createRideTrip = onCall({ enforceAppCheck: true }, async (request) 
     paymentMethod: method, paymentStatus: "PENDING", paymentId: tripId
   };
   const payment = {
-    orderId: tripId, contextType: "RIDE", clientId: uid, merchantId: "",
-    courierId: targetDriverUid, method, status: "PENDING",
+    orderId: tripId, contextType: "RIDE", clientId: uid, merchantId: "", merchantIds: {},
+    courierId: targetDriverUid, provider: method, providerReference: "", method, status: "PENDING",
     amount: { minorUnits: fareMinorUnits, currencyCode: "USD" },
+    breakdown: {
+      merchantShare: { minorUnits: 0, currencyCode: "USD" },
+      courierShare: { minorUnits: 0, currencyCode: "USD" },
+      platformShare: { minorUnits: 0, currencyCode: "USD" },
+      gatewayFee: { minorUnits: 0, currencyCode: "USD" }
+    },
     providerPaymentId: "", checkoutUrl: "", expiresAtEpochMillis: 0,
     refundAmount: { minorUnits: 0, currencyCode: "USD" }, updatedAtEpochMillis: now
   };
@@ -395,6 +432,8 @@ export const createPaymentSession = onCall({
 
   const now = Date.now();
   await getDatabase().ref().update({
+    ["payments/" + orderId + "/provider"]: method,
+    ["payments/" + orderId + "/providerReference"]: sessionId,
     ["payments/" + orderId + "/method"]: method,
     ["payments/" + orderId + "/providerPaymentId"]: sessionId,
     ["payments/" + orderId + "/checkoutUrl"]: checkoutUrl,
@@ -426,6 +465,8 @@ export const requestCashPayment = onCall({ enforceAppCheck: true }, async (reque
     throw new HttpsError("failed-precondition", "Finish or cancel the current checkout before switching to cash.");
   }
   await setPaymentStatus(orderId, context, "PENDING", {
+    provider: "CASH",
+    providerReference: "",
     method: "CASH",
     providerPaymentId: "",
     checkoutUrl: "",
@@ -692,6 +733,7 @@ export const claimCourierOrder = onCall({ enforceAppCheck: true }, async (reques
     return current;
   });
   if (!transaction.committed) throw new HttpsError("failed-precondition", "This delivery has already been claimed.");
+  await db.ref(`payments/${orderId}/courierId`).set(uid);
   await db.ref(`deliveryQueue/${orderId}`).remove();
   return { accepted: true, orderId };
 });
@@ -714,6 +756,7 @@ export const releaseCourierOrder = onCall({ enforceAppCheck: true }, async (requ
   if (!transaction.committed) throw new HttpsError("permission-denied", "You cannot release this delivery.");
   const snap = await orderRef.get();
   const order = snap.val() as Record<string, unknown>;
+  await db.ref(`payments/${orderId}/courierId`).set("");
   await db.ref(`deliveryQueue/${orderId}`).set({ ...order, clientId: "" });
   return { accepted: true, orderId };
 });
