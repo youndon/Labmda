@@ -425,7 +425,7 @@ async function settleCompletedPayment(orderId: string): Promise<void> {
   let merchantShare = 0;
   let courierShare = 0;
   let platformShare = 0;
-  const courierId = String(payment.courierId ?? (context.rootPath === "trips" ? root.driverId ?? "" : root.deliveryId ?? ""));
+  const courierId = String(payment.courierId || (context.rootPath === "trips" ? root.driverId ?? "" : root.deliveryId ?? "") || "");
   if (context.rootPath === "trips") {
     if (!courierId) throw new Error("Completed ride has no assigned driver; refusing wallet settlement.");
     platformShare = Math.floor(amount.minorUnits * platformBps / 10000);
@@ -554,9 +554,37 @@ async function releasePaymentAuthorization(orderId: string, context: PaymentCont
           "checkout/sessions/" + encodeURIComponent(sessionId) + "/expire", key, "POST",
           new URLSearchParams(), "labmda-expire-" + orderId
         );
-      } else if (session.status !== "expired") {
-        await getDatabase().ref("payments/" + orderId).update({ requiresAdminReconciliation: true, reconciliationReason: "Order cancelled after checkout left the open state but no PaymentIntent reference was stored." });
+        return;
       }
+      if (session.status === "expired") {
+        await setPaymentStatus(orderId, context, "CANCELLED", { cancelReason: "CHECKOUT_EXPIRED" });
+        return;
+      }
+      const linkedIntent = typeof session.payment_intent === "string" ? session.payment_intent :
+        String((session.payment_intent as Record<string, unknown> | undefined)?.id ?? "");
+      if (linkedIntent) {
+        const intent = await stripeApi<Record<string, unknown>>("payment_intents/" + encodeURIComponent(linkedIntent), key);
+        await getDatabase().ref("payments/" + orderId).update({ providerPaymentIntentId: linkedIntent });
+        if (intent.status === "requires_capture") {
+          await stripeApi<Record<string, unknown>>(
+            "payment_intents/" + encodeURIComponent(linkedIntent) + "/cancel", key, "POST",
+            new URLSearchParams(), "labmda-cancel-" + orderId
+          );
+          return;
+        }
+        if (intent.status === "succeeded" && String(payment.breakdownStatus ?? "") !== "ALLOCATED") {
+          const total = moneyValue(payment.amount);
+          const refunded = moneyValue(payment.refundAmount, total.currencyCode);
+          const remaining = total.minorUnits - refunded.minorUnits;
+          if (remaining > 0) await submitProviderRefund(orderId, context, remaining, "Order cancelled before settlement");
+          return;
+        }
+      }
+      await getDatabase().ref("payments/" + orderId).update({
+        requiresAdminReconciliation: true,
+        reconciliationReason: "Order cancellation could not release or refund the provider payment automatically.",
+        updatedAtEpochMillis: Date.now()
+      });
       return;
     }
     await setPaymentStatus(orderId, context, "CANCELLED", { cancelReason: "ORDER_CANCELLED_BEFORE_PROVIDER_SESSION" });
@@ -564,6 +592,25 @@ async function releasePaymentAuthorization(orderId: string, context: PaymentCont
     const authorizationId = String(payment.providerAuthorizationId ?? "");
     const access = await getPayPalAccessToken();
     if (!authorizationId) {
+      const orderIdRef = String(payment.providerReference ?? payment.providerPaymentId ?? "");
+      if (orderIdRef) {
+        const orderResponse = await fetch(access.baseUrl + "/v2/checkout/orders/" + encodeURIComponent(orderIdRef), {
+          headers: { Authorization: "Bearer " + access.token }
+        });
+        const providerOrder = await orderResponse.json() as {
+          purchase_units?: Array<{ payments?: { authorizations?: Array<{ id?: string }> } }>;
+        };
+        const storedAuthorizationId = String(providerOrder.purchase_units?.[0]?.payments?.authorizations?.[0]?.id ?? "");
+        if (orderResponse.ok && storedAuthorizationId) {
+          await getDatabase().ref("payments/" + orderId + "/providerAuthorizationId").set(storedAuthorizationId);
+          const voidResponse = await fetch(access.baseUrl + "/v2/payments/authorizations/" + encodeURIComponent(storedAuthorizationId) + "/void", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + access.token, "PayPal-Request-Id": "labmda-void-" + orderId }
+          });
+          if (!voidResponse.ok && voidResponse.status !== 422) throw new Error("PayPal authorization void failed.");
+          return;
+        }
+      }
       await setPaymentStatus(orderId, context, "CANCELLED", { cancelReason: "ORDER_CANCELLED_BEFORE_AUTHORIZATION" });
       return;
     }
@@ -1432,7 +1479,8 @@ type CashoutInput = {
 };
 
 function cashoutRecordId(uid: string, key: string): string {
-  return "cashout_" + createHash("sha256").update(uid + "|" + key).digest("hex").slice(0, 48);
+  // 30 chars also fits PayPal sender-batch and sender-item ID limits.
+  return "c_" + createHash("sha256").update(uid + "|" + key).digest("hex").slice(0, 28);
 }
 
 async function reserveCashout(uid: string, payoutId: string, amount: AuthoritativeAmount): Promise<boolean> {
@@ -1776,7 +1824,7 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
         headers: {
           Authorization: "Bearer " + access.token,
           "Content-Type": "application/json",
-          "PayPal-Request-Id": "labmda-payout-" + payoutId
+          "PayPal-Request-Id": payoutId
         },
         body: JSON.stringify(requestBody)
       });
@@ -1857,7 +1905,7 @@ async function submitProviderRefund(orderId: string, context: PaymentContext, am
       headers: {
         Authorization: "Bearer " + access.token,
         "Content-Type": "application/json",
-        "PayPal-Request-Id": "labmda-refund-" + orderId + "-" + (refunded.minorUnits + amountMinorUnits)
+        "PayPal-Request-Id": "rf_" + createHash("sha256").update(orderId + "|" + (refunded.minorUnits + amountMinorUnits)).digest("hex").slice(0, 32)
       },
       body: JSON.stringify({
         amount: { value: (amountMinorUnits / 100).toFixed(2), currency_code: total.currencyCode.toUpperCase() },
