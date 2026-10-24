@@ -1,8 +1,11 @@
 package com.zouitel.labmda
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.activity.enableEdgeToEdge
 import cafe.adriel.voyager.navigator.Navigator
 import coil3.ImageLoader
@@ -16,6 +19,9 @@ import com.zouitel.presentaion.screens.payment.PayPalReturnHandler
 import com.zouitel.presentaion.screens.payment.PaymentScreen
 
 class MainActivity : ComponentActivity() {
+    private val incomingPaymentReturn = mutableStateOf<String?>(null)
+    private val returnHandler = PayPalReturnHandler()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -25,6 +31,7 @@ class MainActivity : ComponentActivity() {
             )
         )
 
+        incomingPaymentReturn.value = intent?.data?.toString()
         enableEdgeToEdge()
         setContent {
             AppTheme {
@@ -34,9 +41,18 @@ class MainActivity : ComponentActivity() {
                         .build()
                 }
 
-                val returnOrderId = intent?.data?.let { PayPalReturnHandler().parse(it)?.orderId }
-                Navigator(returnOrderId?.let(::PaymentScreen) ?: LogInScreen())
+                val returnUri = incomingPaymentReturn.value
+                val returnOrderId = returnUri?.let { android.net.Uri.parse(it) }?.let { returnHandler.parse(it)?.orderId }
+                key(returnUri) {
+                    Navigator(returnOrderId?.let(::PaymentScreen) ?: LogInScreen())
+                }
             }
         }
+    }
+
+    override fun onNewIntent(newIntent: Intent) {
+        super.onNewIntent(newIntent)
+        setIntent(newIntent)
+        incomingPaymentReturn.value = newIntent.data?.toString()
     }
 }
