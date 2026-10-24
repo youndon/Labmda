@@ -82,11 +82,6 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
 
     suspend fun placeShopOrder(
         cartItems: List<ShopCartItem>,
-        subtotal: Double,
-        courierFee: Double,
-        totalPrice: Double,
-        pickupLat: Double,
-        pickupLng: Double,
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
