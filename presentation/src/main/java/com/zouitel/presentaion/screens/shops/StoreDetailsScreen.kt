@@ -79,7 +79,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
         val totalItemsCount = cartItems.values.sumOf { it.quantity }
         val subtotal = cartItems.values.sumOf { it.totalPrice }
-        val grandTotal = if (totalItemsCount > 0) subtotal else 0.0
+        val courierFee = 3.00
+        val grandTotal = if (totalItemsCount > 0) subtotal + courierFee else 0.0
 
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -125,7 +126,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         ) {
                             Column {
                                 Text(
-                                    text = "$totalItemsCount product(s) • delivery fee at checkout",
+                                    text = "$totalItemsCount product(s) selected",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -324,7 +325,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         )
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Items subtotal", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("Total Demand Price", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                             Text("$${"%.2f".format(grandTotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
 
@@ -334,9 +335,13 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                 val drop = dropoff ?: return@Button
                                 isSubmitting = true
                                 scope.launch {
-                                    try {
-                                        screenModel.placeShopOrder(
+                                    screenModel.placeShopOrder(
                                         cartItems = cartItems.values.toList(),
+                                        subtotal = subtotal,
+                                        courierFee = courierFee,
+                                        totalPrice = grandTotal,
+                                        pickupLat = shopPoint?.latitude ?: 0.0,
+                                        pickupLng = shopPoint?.longitude ?: 0.0,
                                         dropoffAddress = deliveryAddress,
                                         dropoffLat = drop.latitude,
                                         dropoffLng = drop.longitude,
@@ -350,9 +355,6 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                             navigator?.push(LiveOrderTrackingScreen(orderId))
                                         }
                                     )
-                                    } catch (_: Exception) {
-                                        isSubmitting = false
-                                    }
                                 }
                             },
                             shape = RoundedCornerShape(14.dp),

@@ -20,7 +20,6 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
-import com.zouitel.presentaion.screens.wallet.CourierWalletScreen
 
 class DeliveryWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -113,18 +112,6 @@ class DeliveryWorkplaceScreen : Screen {
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Text("Open Active Orders Dashboard", fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        if (deliveryAccount?.status == Status.APPROVED) {
-                            item {
-                                Button(
-                                    onClick = { navigator?.push(CourierWalletScreen()) },
-                                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text("Courier wallet & payouts", fontWeight = FontWeight.Bold)
-                                }
                             }
                         }
 
