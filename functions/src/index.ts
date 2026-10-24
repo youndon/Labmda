@@ -546,7 +546,7 @@ async function releasePaymentAuthorization(orderId: string, context: PaymentCont
       }
       return;
     }
-    const sessionId = String(payment.providerReference ?? payment.providerPaymentId ?? "");
+    const sessionId = String(payment.providerReference || payment.providerPaymentId || "");
     if (sessionId.startsWith("cs_")) {
       const session = await stripeApi<Record<string, unknown>>("checkout/sessions/" + encodeURIComponent(sessionId), key);
       if (session.status === "open") {
@@ -704,7 +704,7 @@ async function setPaymentStatus(
     [`payments/${orderId}/providerReference`]:
       typeof extraPaymentFields.providerReference === "string" ? extraPaymentFields.providerReference :
       typeof extraPaymentFields.providerPaymentId === "string" ? extraPaymentFields.providerPaymentId :
-      String(context.payment.providerReference ?? context.payment.providerPaymentId ?? ""),
+      String(context.payment.providerReference || context.payment.providerPaymentId || ""),
     [`${context.rootPath}/${orderId}/paymentStatus`]: status,
     [`${context.rootPath}/${orderId}/paymentId`]: orderId,
     [`${context.rootPath}/${orderId}/paymentMethod`]:
@@ -1129,7 +1129,7 @@ export const verifyPaymentReturn = onCall({
   if (normalizePaymentMethod(payment.provider ?? payment.method) !== provider) {
     throw new HttpsError("permission-denied", "This provider does not match the payment method.");
   }
-  const recordedSessionId = String(payment.providerReference ?? payment.providerPaymentId ?? "");
+  const recordedSessionId = String(payment.providerReference || payment.providerPaymentId || "");
   if (!recordedSessionId || (resultToken !== "cancel" && (sessionId !== recordedSessionId || resultToken !== recordedSessionId))) {
     throw new HttpsError("permission-denied", "The returned session does not match this payment.");
   }
@@ -1580,8 +1580,8 @@ async function requestCashoutForUid(uid: string, body: CashoutInput): Promise<Re
   const existing = await payoutRef.get();
   if (existing.exists()) {
     const record = existing.val() as Record<string, unknown>;
-    if (record.status === "QUEUED" || record.status === "TRANSFERRED" || record.status === "SUBMITTED" ||
-        record.status === "PAID") return { accepted: true, payoutId, status: record.status };
+    if (record.status === "QUEUED" || record.status === "TRANSFERRED" || record.status === "PROCESSING" ||
+        record.status === "SUBMITTED" || record.status === "PAID") return { accepted: true, payoutId, status: record.status };
     if (record.status !== "RESERVING" ||
         Number((record.amount as Record<string, unknown> | undefined)?.minorUnits) !== minorUnitsRequested ||
         String((record.amount as Record<string, unknown> | undefined)?.currencyCode ?? "").toUpperCase() !== currencyCode ||
@@ -1697,6 +1697,15 @@ export const updatePayoutAccount = onCall({
     throw new HttpsError("invalid-argument", "PayPal EMAIL recipients must be valid email addresses.");
   }
 
+  const activePayoutSnapshot = await getDatabase().ref("payouts").orderByChild("uid").equalTo(uid).limitToLast(100).get();
+  const activePayouts = Object.values((activePayoutSnapshot.val() ?? {}) as Record<string, unknown>)
+    .filter(value => value && typeof value === "object")
+    .map(value => value as Record<string, unknown>)
+    .some(value => ["RESERVING", "QUEUED", "TRANSFERRED", "PROCESSING", "SUBMITTED"].includes(String(value.status ?? "")));
+  if (activePayouts) {
+    throw new HttpsError("failed-precondition", "A payout is in progress. Wait for it to finish before changing the payout account.");
+  }
+
   const value = {
     provider, providerAccountId, countryCode, accountLabel, recipientType,
     status, verifiedBy: status === "VERIFIED" ? "STRIPE_ACCOUNT_API" : "",
@@ -1763,7 +1772,8 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
   try {
     if (!account || account.status !== "VERIFIED" ||
         account.provider !== payout.provider || account.providerAccountId !== payout.providerAccountId) {
-      throw new Error("Payout account is missing, changed, or not verified.");
+      await finalizePayoutEvent(payoutId, "FAILED", "PAYOUT_ACCOUNT_MISSING_OR_NOT_VERIFIED");
+      return;
     }
     const amount = moneyValue(payout.amount);
     if (amount.minorUnits <= 0 || !/^[A-Z]{3}$/.test(amount.currencyCode.toUpperCase())) throw new Error("Payout amount is invalid.");
@@ -2298,7 +2308,7 @@ function firstHeader(value: string | string[] | undefined): string {
 }
 
 export const paypalWebhook = onRequest({
-  secrets: [paypalClientId, paypalClientSecret, paypalWebhookId, stripeSecretKey],
+  secrets: [paypalClientId, paypalClientSecret, stripeSecretKey],
   timeoutSeconds: 120
 }, async (request, response) => {
   const body = request.body as Record<string, unknown>;
