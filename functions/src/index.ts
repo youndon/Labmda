@@ -84,6 +84,7 @@ export const createOrder = onCall({ enforceAppCheck: true }, async (request) => 
     fee = minorUnits(configuredFee.val(), "retail delivery fee");
   }
   const total = subtotal + fee;
+  if (!Number.isSafeInteger(total)) throw new HttpsError("out-of-range", "Order total is too large.");
   const orderRef = db.ref("orders").push();
   const orderId = orderRef.key;
   if (!orderId) throw new HttpsError("internal", "Could not allocate an order ID.");
@@ -131,11 +132,17 @@ export const updateOrderStatus = onCall({ enforceAppCheck: true }, async (reques
   const isAdmin = profile.child("role").val() === "ADMIN";
   const clientOwns = order.clientId === uid;
   const sourceId = String(order.sourceId ?? "");
-  const isFoodManager = order.orderType === "FOOD" && (sourceId === uid ||
-    (await db.ref(`restaurants/${sourceId}/managers`).get()).val()?.[uid] === true);
+  const restaurantManagers = (await db.ref(`restaurants/${sourceId}/managers`).get()).val();
+  const foodManagerMatch = Array.isArray(restaurantManagers)
+    ? restaurantManagers.includes(uid)
+    : Boolean(restaurantManagers && typeof restaurantManagers === "object" && restaurantManagers[uid] === true);
+  const isFoodManager = order.orderType === "FOOD" && (sourceId === uid || foodManagerMatch);
   const shop = await db.ref(`shops/${sourceId}`).get();
-  const isShopManager = order.orderType === "RETAIL" && (shop.child("ownerUid").val() === uid ||
-    (shop.child("managers").val() && (shop.child("managers").val() as unknown[]).includes(uid)));
+  const shopManagers = shop.child("managers").val();
+  const shopManagerMatch = Array.isArray(shopManagers)
+    ? shopManagers.includes(uid)
+    : Boolean(shopManagers && typeof shopManagers === "object" && shopManagers[uid] === true);
+  const isShopManager = order.orderType === "RETAIL" && (shop.child("ownerUid").val() === uid || shopManagerMatch);
   const courierOwns = order.deliveryId === uid;
   const allowedByRole =
     (nextStatus === "CANCELLED" && clientOwns && currentStatus === "PLACED") ||
