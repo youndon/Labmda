@@ -1,15 +1,13 @@
-import java.util.Properties
-
-val stripePublishableKey = providers.gradleProperty("stripePublishableKey")
-    .orElse(providers.environmentVariable("STRIPE_PUBLISHABLE_KEY"))
-    .orElse("")
-    .get()
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
 }
+
+val stripePublishableKey = providers.gradleProperty("stripePublishableKey")
+    .orElse(providers.environmentVariable("STRIPE_PUBLISHABLE_KEY"))
+    .orElse("")
+    .get()
 
 android {
     namespace = "com.zouitel.labmda"
