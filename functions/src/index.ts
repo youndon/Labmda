@@ -108,6 +108,7 @@ async function ensureWallet(uid: string, currencyCode = "USD"): Promise<Record<s
       available: moneyValue(wallet.available, currencyCode),
       pending: moneyValue(wallet.pending, currencyCode),
       cashOwed: moneyValue(wallet.cashOwed, currencyCode),
+      reservedForPayouts: moneyValue(wallet.reservedForPayouts, currencyCode),
       lifetimeEarnings: moneyValue(wallet.lifetimeEarnings, currencyCode),
       currencyCode: typeof wallet.currencyCode === "string" ? wallet.currencyCode : currencyCode,
       updatedAtEpochMillis: typeof wallet.updatedAtEpochMillis === "number"
@@ -597,11 +598,11 @@ async function verifyPayPalWebhook(event: Record<string, unknown>, headers: Reco
   if (!webhookId) return false;
   const access = await getPayPalAccessToken();
   const payload = {
-    auth_algo: headers["paypal-auth-algo"],
-    cert_url: headers["paypal-cert-url"],
-    transmission_id: headers["paypal-transmission-id"],
-    transmission_sig: headers["paypal-transmission-sig"],
-    transmission_time: headers["paypal-transmission-time"],
+    auth_algo: firstHeader(headers["paypal-auth-algo"]),
+    cert_url: firstHeader(headers["paypal-cert-url"]),
+    transmission_id: firstHeader(headers["paypal-transmission-id"]),
+    transmission_sig: firstHeader(headers["paypal-transmission-sig"]),
+    transmission_time: firstHeader(headers["paypal-transmission-time"]),
     webhook_id: webhookId,
     webhook_event: event
   };
@@ -1420,13 +1421,13 @@ async function reserveCashout(uid: string, payoutId: string, amount: Authoritati
       ? wallet.payoutReservations as Record<string, unknown> : {};
     if (reservations[payoutId] === true) return;
     const available = moneyValue(wallet.available, amount.currencyCode);
-    const pending = moneyValue(wallet.pending, amount.currencyCode);
+    const reserved = moneyValue(wallet.reservedForPayouts, amount.currencyCode);
     if (available.currencyCode.toUpperCase() !== amount.currencyCode.toUpperCase() ||
         available.minorUnits < amount.minorUnits) return;
     return {
       ...wallet,
       available: { minorUnits: available.minorUnits - amount.minorUnits, currencyCode: amount.currencyCode },
-      pending: { minorUnits: pending.minorUnits + amount.minorUnits, currencyCode: amount.currencyCode },
+      reservedForPayouts: { minorUnits: reserved.minorUnits + amount.minorUnits, currencyCode: amount.currencyCode },
       payoutReservations: { ...reservations, [payoutId]: true },
       updatedAtEpochMillis: Date.now()
     };
@@ -1451,15 +1452,15 @@ async function closeCashoutReservation(payout: Record<string, unknown>, payoutId
       ? wallet.closedPayouts as Record<string, unknown> : {};
     if (closed[payoutId] === true || reservations[payoutId] !== true) return;
     const available = moneyValue(wallet.available, amount.currencyCode);
-    const pending = moneyValue(wallet.pending, amount.currencyCode);
+    const reserved = moneyValue(wallet.reservedForPayouts, amount.currencyCode);
     return {
       ...wallet,
       available: {
         minorUnits: available.minorUnits + (releaseAvailable ? amount.minorUnits : 0),
         currencyCode: amount.currencyCode
       },
-      pending: {
-        minorUnits: Math.max(0, pending.minorUnits - amount.minorUnits),
+      reservedForPayouts: {
+        minorUnits: Math.max(0, reserved.minorUnits - amount.minorUnits),
         currencyCode: amount.currencyCode
       },
       closedPayouts: { ...closed, [payoutId]: true },
@@ -1509,7 +1510,13 @@ async function requestCashoutForUid(uid: string, body: CashoutInput): Promise<Re
     const record = existing.val() as Record<string, unknown>;
     if (record.status === "QUEUED" || record.status === "TRANSFERRED" || record.status === "SUBMITTED" ||
         record.status === "PAID") return { accepted: true, payoutId, status: record.status };
-    throw new HttpsError("failed-precondition", "This idempotent cashout request has already been rejected.");
+    if (record.status !== "RESERVING" ||
+        Number((record.amount as Record<string, unknown> | undefined)?.minorUnits) !== minorUnitsRequested ||
+        String((record.amount as Record<string, unknown> | undefined)?.currencyCode ?? "").toUpperCase() !== currencyCode ||
+        String(record.uid ?? "") !== uid) {
+      throw new HttpsError("failed-precondition", "This idempotent cashout request has already been rejected or conflicts with another request.");
+    }
+    // Resume an interrupted reservation safely; reserveCashout is idempotent per payout ID.
   }
 
   const accountSnap = await db.ref("payoutAccounts/" + uid).get();
@@ -1532,12 +1539,16 @@ async function requestCashoutForUid(uid: string, body: CashoutInput): Promise<Re
     idempotencyKeyHash: createHash("sha256").update(key).digest("hex"),
     createdAtEpochMillis: now, updatedAtEpochMillis: now
   };
-  await payoutRef.set(record);
   if (rejection) {
+    const existingWallet = await db.ref("wallets/" + uid).get();
+    const reservations = (existingWallet.child("payoutReservations").val() ?? {}) as Record<string, unknown>;
+    if (reservations[payoutId] === true) await closeCashoutReservation(record, payoutId, true);
+    await payoutRef.set(record);
     throw new HttpsError("failed-precondition", rejection === "PAYOUTS_DISABLED"
       ? "Cashouts are disabled until provider payout credentials and account verification are configured."
       : "A verified payout account is required before cashout.");
   }
+  await payoutRef.set(record);
   const reserved = await reserveCashout(uid, payoutId, { minorUnits: minorUnitsRequested, currencyCode });
   if (!reserved) {
     await payoutRef.update({ status: "REJECTED_INSUFFICIENT_BALANCE", rejectionReason: "INSUFFICIENT_AVAILABLE_BALANCE", updatedAtEpochMillis: Date.now() });
@@ -1643,6 +1654,15 @@ export const adminVerifyPayoutAccount = onCall({ enforceAppCheck: true }, async 
   return { accepted: true, message: "Payout account marked verified by an administrator." };
 });
 
+async function updatePayoutUnlessFinal(payoutId: string, fields: Record<string, unknown>): Promise<void> {
+  await getDatabase().ref("payouts/" + payoutId).transaction(current => {
+    if (!current || typeof current !== "object") return;
+    const status = String((current as Record<string, unknown>).status ?? "");
+    if (status === "PAID" || status === "FAILED" || status.startsWith("REJECTED")) return;
+    return { ...current, ...fields };
+  });
+}
+
 async function finalizePayoutEvent(payoutId: string, status: "PAID" | "FAILED", providerReference: string): Promise<void> {
   const ref = getDatabase().ref("payouts/" + payoutId);
   const snapshot = await ref.get();
@@ -1695,7 +1715,7 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
           "transfers", secret, "POST", transferBody, "labmda-transfer-" + payoutId
         );
         if (typeof transfer.id !== "string") throw new Error("Stripe transfer response did not contain an ID.");
-        await ref.update({ status: "TRANSFERRED", transferReference: transfer.id, updatedAtEpochMillis: Date.now() });
+        await updatePayoutUnlessFinal(payoutId, { status: "TRANSFERRED", transferReference: transfer.id, updatedAtEpochMillis: Date.now() });
         return;
       }
       const payoutBody = new URLSearchParams();
@@ -1707,7 +1727,7 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
         "payouts", secret, "POST", payoutBody, "labmda-payout-" + payoutId, acct
       );
       if (typeof result.id !== "string") throw new Error("Stripe payout response did not contain an ID.");
-      await ref.update({ status: "SUBMITTED", providerReference: result.id, submittedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
+      await updatePayoutUnlessFinal(payoutId, { status: "SUBMITTED", providerReference: result.id, submittedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
       return;
     }
     if (account.provider === "PAYPAL") {
@@ -1739,12 +1759,12 @@ async function processPayout(payoutId: string, initialStatus: string): Promise<v
       const result = await response.json() as { batch_header?: { payout_batch_id?: string; batch_status?: string } };
       const batchId = String(result.batch_header?.payout_batch_id ?? "");
       if (!response.ok || !batchId) throw new Error("PayPal payout request failed.");
-      await ref.update({ status: "SUBMITTED", providerReference: batchId, submittedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
+      await updatePayoutUnlessFinal(payoutId, { status: "SUBMITTED", providerReference: batchId, submittedAtEpochMillis: Date.now(), updatedAtEpochMillis: Date.now() });
       return;
     }
     throw new Error("Unsupported payout provider.");
   } catch (error) {
-    await ref.update({
+    await updatePayoutUnlessFinal(payoutId, {
       status: initialStatus,
       lastError: error instanceof Error ? error.message.slice(0, 250) : "Unknown payout processing error",
       updatedAtEpochMillis: Date.now()
@@ -2047,7 +2067,7 @@ async function handleStripeIntent(orderId: string, intent: Record<string, unknow
     throw new Error("Stripe event does not match the payment provider.");
   }
   const expected = moneyValue(context.payment.amount);
-  const actualAmount = eventType === "payment_intent.amount_capturable_updated"
+  const actualAmount = eventType === "payment_intent.amount_capturable_updated" || intent.status === "requires_capture"
     ? Number(intent.amount_capturable ?? 0)
     : Number(intent.amount_received ?? intent.amount ?? 0);
   const actualCurrency = String(intent.currency ?? "").toUpperCase();
