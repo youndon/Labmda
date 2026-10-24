@@ -35,13 +35,17 @@ class ShopOrdersScreenModel : ScreenModel {
             return
         }
         screenModelScope.launch {
-            db.child("orders").orderByChild("merchantId").equalTo(uid).valueEvents.collect { snapshot ->
-                _orders.value = snapshot.children
-                    .mapNotNull { it.toOrderOrNull() }
-                    .filter { it.orderType == OrderType.RETAIL }
-                    .sortedByDescending { it.createdAtTimestamp }
-                _isLoading.value = false
-            }
+            db.child("orders")
+                .orderByChild("merchantId")
+                .equalTo(uid)
+                .valueEvents
+                .collect { snapshot ->
+                    _orders.value = snapshot.children
+                        .mapNotNull { it.toOrderOrNull() }
+                        .filter { it.orderType == OrderType.RETAIL }
+                        .sortedByDescending { it.createdAtTimestamp }
+                    _isLoading.value = false
+                }
         }
     }
 

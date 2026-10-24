@@ -4,7 +4,6 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
-import com.zouitel.presentaion.model.VehicleType
 import com.zouitel.presentaion.model.PaymentMethodType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -13,6 +12,7 @@ import dev.gitlive.firebase.functions.functions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.serialization.Serializable
 import kotlinx.coroutines.launch
 
@@ -61,87 +61,102 @@ class PassengerScreenModel : ScreenModel {
         }
 
         screenModelScope.launch {
-            db.child("trips").valueEvents.collect { snapshot ->
-                val list = snapshot.children.mapNotNull { child ->
-                    try {
-                        val id = child.key ?: return@mapNotNull null
-                        val passengerId = child.child("passengerId").value<String>()
-                        if (passengerId != uid) return@mapNotNull null
+            db.child("trips")
+                .orderByChild("passengerId")
+                .equalTo(uid)
+                .valueEvents
+                .collect { snapshot ->
+                    val list = snapshot.children.mapNotNull { child ->
+                        try {
+                            val id = child.key ?: return@mapNotNull null
+                            val passengerId = child.child("passengerId").value<String>()
+                            if (passengerId != uid) return@mapNotNull null
 
-                        fun str(key: String) = runCatching { child.child(key).value<String>() }.getOrDefault("")
-                        fun dbl(key: String) = runCatching { child.child(key).value<Double>() }.getOrDefault(0.0)
+                            fun str(key: String) =
+                                runCatching { child.child(key).value<String>() }.getOrDefault("")
 
-                        Trip(
-                            id = id,
-                            passengerId = passengerId,
-                            passengerName = child.child("passengerName").value<String>(),
-                            passengerPhone = str("passengerPhone"),
-                            pickupLocation = child.child("pickupLocation").value<String>(),
-                            dropoffLocation = child.child("dropoffLocation").value<String>(),
-                            pickupLat = dbl("pickupLat"),
-                            pickupLng = dbl("pickupLng"),
-                            dropoffLat = dbl("dropoffLat"),
-                            dropoffLng = dbl("dropoffLng"),
-                            fare = child.child("fare").value<Double>(),
-                            paymentMethodType = str("PaymentMethodType").ifBlank { "CASH" },
-                            paymentStatus = str("paymentStatus").ifBlank { "PENDING" },
-                            paymentId = str("paymentId"),
-                            driverId = str("driverId"),
-                            driverName = str("driverName"),
-                            driverPhone = str("driverPhone"),
-                            vehicleDetails = str("vehicleDetails"),
-                            status = child.child("status").value<String>(),
-                            createdAtTimestamp = child.child("createdAtTimestamp").value<Long>()
-                        )
-                    } catch (e: Exception) {
-                        null
-                    }
-                }.sortedByDescending { it.createdAtTimestamp }
+                            fun dbl(key: String) =
+                                runCatching { child.child(key).value<Double>() }.getOrDefault(0.0)
 
-                _trips.value = list
-                _isLoading.value = false
-            }
+                            Trip(
+                                id = id,
+                                passengerId = passengerId,
+                                passengerName = child.child("passengerName").value<String>(),
+                                passengerPhone = str("passengerPhone"),
+                                pickupLocation = child.child("pickupLocation").value<String>(),
+                                dropoffLocation = child.child("dropoffLocation").value<String>(),
+                                pickupLat = dbl("pickupLat"),
+                                pickupLng = dbl("pickupLng"),
+                                dropoffLat = dbl("dropoffLat"),
+                                dropoffLng = dbl("dropoffLng"),
+                                fare = child.child("fare").value<Double>(),
+                                paymentMethodType = str("PaymentMethodType").ifBlank { "CASH" },
+                                paymentStatus = str("paymentStatus").ifBlank { "PENDING" },
+                                paymentId = str("paymentId"),
+                                driverId = str("driverId"),
+                                driverName = str("driverName"),
+                                driverPhone = str("driverPhone"),
+                                vehicleDetails = str("vehicleDetails"),
+                                status = child.child("status").value<String>(),
+                                createdAtTimestamp = child.child("createdAtTimestamp").value<Long>()
+                            )
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }.sortedByDescending { it.createdAtTimestamp }
+
+                    _trips.value = list
+                    _isLoading.value = false
+                }
         }
     }
 
     private fun listenToOnlineDrivers() {
+        // Read only the intentionally shareable driver-presence records, not the full users collection.
+        // The matching Realtime Database rules must allow this query and drivers must publish their
+        // online status/location under /driverPresence/$uid.
         screenModelScope.launch {
-            db.child("users").valueEvents.collect { snapshot ->
-                val drivers = snapshot.children.mapNotNull { child ->
-                    try {
-                        val uid = child.key ?: return@mapNotNull null
-                        val isOnline = runCatching { child.child("isDriverOnline").value<Boolean>() }.getOrDefault(false)
-                        if (!isOnline) return@mapNotNull null
-
-                        val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
-                        val phone = runCatching { child.child("phoneNumber").value<String>() }
-                            .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
-
-                        val loc = child.child("currentLocation")
-                        val lat = runCatching { loc.child("latitude").value<Double>() }.getOrDefault(0.0)
-                        val lng = runCatching { loc.child("longitude").value<Double>() }.getOrDefault(0.0)
-                        val heading = runCatching { loc.child("heading").value<Float>() }.getOrDefault(0f)
-
-                        val v = child.child("vehicleInfo")
-                        val typeStr = runCatching { v.child("type").value<String>() }.getOrDefault("CAR")
-                        val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
-
-                        UserProfile(
-                            uid = uid,
-                            fullName = fullName,
-                            phoneNumber = phone,
-
-                            driverService = DriverAccountInfo(
-                                currentLocation = DriverLocation(latitude = lat, longitude = lng, heading = heading),
-                                isOnline = true,
-                            )
-                        )
-                    } catch (e: Exception) {
-                        null
-                    }
+            db.child("driverPresence")
+                .orderByChild("isDriverOnline")
+                .equalTo(true)
+                .valueEvents
+                .catch {
+                    // Keep a database permission/network failure from crashing the screen model.
+                    _onlineDrivers.value = emptyList()
                 }
-                _onlineDrivers.value = drivers
-            }
+                .collect { snapshot ->
+                    val drivers = snapshot.children.mapNotNull { child ->
+                        try {
+                            val uid = child.key ?: return@mapNotNull null
+                            val isOnline = runCatching { child.child("isDriverOnline").value<Boolean>() }
+                                .getOrDefault(false)
+                            if (!isOnline) return@mapNotNull null
+
+                            val fullName = runCatching { child.child("fullName").value<String>() }
+                                .getOrDefault("Driver")
+                            val phone = runCatching { child.child("phoneNumber").value<String>() }
+                                .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
+
+                            val loc = child.child("currentLocation")
+                            val lat = runCatching { loc.child("latitude").value<Double>() }.getOrDefault(0.0)
+                            val lng = runCatching { loc.child("longitude").value<Double>() }.getOrDefault(0.0)
+                            val heading = runCatching { loc.child("heading").value<Float>() }.getOrDefault(0f)
+
+                            UserProfile(
+                                uid = uid,
+                                fullName = fullName,
+                                phoneNumber = phone,
+                                driverService = DriverAccountInfo(
+                                    currentLocation = DriverLocation(latitude = lat, longitude = lng, heading = heading),
+                                    isOnline = true,
+                                )
+                            )
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    _onlineDrivers.value = drivers
+                }
         }
     }
 

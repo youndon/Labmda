@@ -6,7 +6,6 @@ import com.zouitel.presentaion.common.DriveImageUploader
 import com.zouitel.presentaion.common.DriveTokenProvider
 import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.screens.food.ImageUploadState
-import com.zouitel.presentaion.model.OrderStatus
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.CancellationException
@@ -149,29 +148,6 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
     fun deleteProduct(productId: String) {
         screenModelScope.launch {
             db.child("shops").child(shopId).child("products").child(productId).removeValue()
-        }
-    }
-
-    fun updateShopOrderStatus(orderId: String, nextStatus: OrderStatus, order: ShopOrder) {
-        if (nextStatus == OrderStatus.DELIVERED) return
-
-        screenModelScope.launch {
-            db.child("shop_orders").child(orderId).child("status").setValue(nextStatus.name)
-
-//            if (nextStatus == OrderStatus.OUT_FOR_DELIVERY) {
-//                val courierRecord = mapOf(
-//                    "id" to order.id,
-//                    "orderId" to order.id,
-//                    "sourceId" to order.shopId,
-//                    "sourceName" to order.shopName,
-//                    "customerAddress" to order.fromLocation,
-//                    "totalPrice" to order.totalPrice,
-//                    "deliveryFee" to order.deliveryFee,
-//                    "status" to OrderStatus.OUT_FOR_DELIVERY.name,
-//                    "dispatchedAtTimestamp" to System.currentTimeMillis()
-//                )
-//                db.child("couriers").child(order.id).setValue(courierRecord)
-//            }
         }
     }
 }
