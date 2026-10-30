@@ -5,6 +5,8 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
+import com.zouitel.presentaion.screens.payment.PaymentCreationResult
+import com.zouitel.presentaion.screens.payment.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -12,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 /** Name and phone used to prefill the request form. */
 data class PassengerInfo(val name: String = "", val phone: String = "")
@@ -19,6 +22,7 @@ data class PassengerInfo(val name: String = "", val phone: String = "")
 class PassengerScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUser = Firebase.auth.currentUser
+    private val payments = PaymentRepository()
 
     private val _trips = MutableStateFlow<List<Trip>>(emptyList())
     val trips: StateFlow<List<Trip>> = _trips.asStateFlow()
@@ -58,12 +62,11 @@ class PassengerScreenModel : ScreenModel {
         }
 
         screenModelScope.launch {
-            db.child("trips").valueEvents.collect { snapshot ->
+            db.child("trips").orderByChild("passengerId").equalTo(uid).valueEvents.collect { snapshot ->
                 val list = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
                         val passengerId = child.child("passengerId").value<String>()
-                        if (passengerId != uid) return@mapNotNull null
 
                         fun str(key: String) = runCatching { child.child(key).value<String>() }.getOrDefault("")
                         fun dbl(key: String) = runCatching { child.child(key).value<Double>() }.getOrDefault(0.0)
@@ -85,6 +88,9 @@ class PassengerScreenModel : ScreenModel {
                             driverPhone = str("driverPhone"),
                             vehicleDetails = str("vehicleDetails"),
                             status = child.child("status").value<String>(),
+                            paymentMethod = str("paymentMethod"),
+                            paymentStatus = str("paymentStatus").ifBlank { "UNPAID" },
+                            paymentId = str("paymentId"),
                             createdAtTimestamp = child.child("createdAtTimestamp").value<Long>()
                         )
                     } catch (e: Exception) {
@@ -100,11 +106,11 @@ class PassengerScreenModel : ScreenModel {
 
     private fun listenToOnlineDrivers() {
         screenModelScope.launch {
-            db.child("users").valueEvents.collect { snapshot ->
+            db.child("users").orderByChild("driverService/isOnline").equalTo(true).valueEvents.collect { snapshot ->
                 val drivers = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
-                        val isOnline = runCatching { child.child("isDriverOnline").value<Boolean>() }.getOrDefault(false)
+                        val isOnline = runCatching { child.child("driverService").child("isOnline").value<Boolean>() }.getOrDefault(false)
                         if (!isOnline) return@mapNotNull null
 
                         val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
@@ -139,6 +145,7 @@ class PassengerScreenModel : ScreenModel {
         }
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun requestTrip(
         pickupAddress: String,
         pickupLat: Double,
@@ -149,37 +156,39 @@ class PassengerScreenModel : ScreenModel {
         fare: Double,
         passengerName: String,
         passengerPhone: String,
-        targetDriver: UserProfile? = null
+        targetDriver: UserProfile? = null,
+        paymentMethod: String = "CASH",
+        onSuccess: (PaymentCreationResult) -> Unit = {},
+        onFailure: (String) -> Unit = {}
     ) {
-        val uid = currentUser?.uid ?: return
+        val uid = currentUser?.uid
+        if (uid == null) {
+            onFailure("Please sign in to request a ride.")
+            return
+        }
+
         screenModelScope.launch {
-            val ref = db.child("trips").push()
-            val tripId = ref.key ?: System.currentTimeMillis().toString()
-
-//            val vehicleStr = targetDriver?.vehicleInfo?.let {
-//                "[${it.type?.name ?: requestedVehicleType.name}] ${it.color} ${it.make} ${it.model} (${it.licensePlate})"
-//            } ?: "[${requestedVehicleType.name}] Standard Request"
-
-            val trip = Trip(
-                id = tripId,
-                passengerId = uid,
-                passengerName = passengerName.ifBlank { "Passenger" },
-                passengerPhone = passengerPhone,
-                pickupLocation = pickupAddress,
-                dropoffLocation = dropoffAddress,
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                fare = fare,
-                driverId = targetDriver?.uid ?: "",
-                driverName = targetDriver?.fullName ?: "",
-                driverPhone = targetDriver?.phoneNumber ?: "",
-//                vehicleDetails = vehicleStr,
-                status = if (targetDriver != null) "ACCEPTED" else "REQUESTED",
-                createdAtTimestamp = System.currentTimeMillis()
-            )
-            ref.setValue(trip)
+            try {
+                // The client-side fare is intentionally ignored. Cloud Functions calculate it
+                // from server-managed service pricing and the submitted route coordinates.
+                val result = payments.createTrip(
+                    idempotencyKey = UUID.randomUUID().toString(),
+                    serviceType = "RIDE",
+                    pickupLocation = pickupAddress,
+                    pickupLat = pickupLat,
+                    pickupLng = pickupLng,
+                    dropoffLocation = dropoffAddress,
+                    dropoffLat = dropoffLat,
+                    dropoffLng = dropoffLng,
+                    passengerName = passengerName.ifBlank { "Passenger" },
+                    passengerPhone = passengerPhone,
+                    targetDriverId = targetDriver?.uid,
+                    paymentMethod = paymentMethod
+                )
+                onSuccess(result)
+            } catch (e: Exception) {
+                onFailure(e.message ?: "Could not request the trip. Please try again.")
+            }
         }
     }
 

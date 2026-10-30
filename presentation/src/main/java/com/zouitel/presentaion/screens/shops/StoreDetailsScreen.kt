@@ -20,6 +20,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -53,6 +55,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
+        val uriHandler = LocalUriHandler.current
         val screenModel = rememberScreenModel { StoreDetailsScreenModel(shop) }
         val products by screenModel.products.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
@@ -61,7 +64,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         var showOrderSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember { mutableStateOf("Cash on Delivery") }
+        var paymentMethod by remember { mutableStateOf("CASH") }
         var isSubmitting by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
@@ -79,8 +82,6 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
         val totalItemsCount = cartItems.values.sumOf { it.quantity }
         val subtotal = cartItems.values.sumOf { it.totalPrice }
-        val courierFee = 3.00
-        val grandTotal = if (totalItemsCount > 0) subtotal + courierFee else 0.0
 
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -131,7 +132,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "$${"%.2f".format(grandTotal)}",
+                                    text = "₱${"%.2f".format(subtotal)}",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -211,7 +212,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                         )
 
                                         Text(
-                                            text = "$${"%.2f".format(product.price)}",
+                                            text = "₱${"%.2f".format(product.price)}",
                                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                             maxLines = 1,
                                             color = MaterialTheme.colorScheme.primary
@@ -273,7 +274,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(text = item.productName, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
-                                        Text(text = "$${"%.2f".format(item.price)} × ${item.quantity} = $${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(text = "₱${"%.2f".format(item.price)} × ${item.quantity} = ₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     IconButton(onClick = { cartItems.remove(item.productId) }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
@@ -316,17 +317,23 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             )
                         }
 
-                        OutlinedTextField(
-                            value = paymentMethod,
-                            onValueChange = { paymentMethod = it },
-                            label = { Text("Payment Method") },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        Text("Payment Method", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = paymentMethod == "GCASH",
+                                onClick = { paymentMethod = "GCASH" },
+                                label = { Text("GCash") }
+                            )
+                            FilterChip(
+                                selected = paymentMethod == "CASH",
+                                onClick = { paymentMethod = "CASH" },
+                                label = { Text("Cash on Delivery") }
+                            )
+                        }
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Total Demand Price", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text("$${"%.2f".format(grandTotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            Text("Item Subtotal", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
 
                         Button(
@@ -337,22 +344,26 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                 scope.launch {
                                     screenModel.placeShopOrder(
                                         cartItems = cartItems.values.toList(),
-                                        subtotal = subtotal,
-                                        courierFee = courierFee,
-                                        totalPrice = grandTotal,
                                         pickupLat = shopPoint?.latitude ?: 0.0,
                                         pickupLng = shopPoint?.longitude ?: 0.0,
                                         dropoffAddress = deliveryAddress,
                                         dropoffLat = drop.latitude,
                                         dropoffLng = drop.longitude,
                                         paymentMethod = paymentMethod,
-                                        onSuccess = { orderId ->
+                                        onSuccess = { result ->
                                             isSubmitting = false
                                             showOrderSheet = false
                                             cartItems.clear()
                                             dropoff = null
                                             deliveryAddress = ""
-                                            navigator?.push(LiveOrderTrackingScreen(orderId))
+                                            result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                                                runCatching { uriHandler.openUri(url) }
+                                            }
+                                            navigator?.push(LiveOrderTrackingScreen(result.entityId))
+                                        },
+                                        onFailure = { message ->
+                                            isSubmitting = false
+                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                         }
                                     )
                                 }

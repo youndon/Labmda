@@ -350,7 +350,7 @@ class DriverDashboardScreen : Screen {
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            "$${"%.2f".format(trip.fare)}",
+                            "₱${"%.2f".format(trip.fare)}",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -375,6 +375,12 @@ class DriverDashboardScreen : Screen {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Phone: ${trip.passengerPhone.ifBlank { "N/A" }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Text(
+                    "Payment: ${trip.paymentMethod.ifBlank { "CASH" }} · ${trip.paymentStatus.replace('_', ' ')}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

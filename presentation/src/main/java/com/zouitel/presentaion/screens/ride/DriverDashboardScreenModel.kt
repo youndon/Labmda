@@ -11,6 +11,7 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -67,12 +68,18 @@ class DriverDashboardScreenModel : ScreenModel {
             return
         }
 
+        val trips = db.child("trips")
+        val openRequests = trips.orderByChild("status").equalTo("REQUESTED").valueEvents
+        val assignedToDriver = trips.orderByChild("driverId").equalTo(uid).valueEvents
+
         screenModelScope.launch {
-            db.child("trips").valueEvents.collect { snapshot ->
+            combine(openRequests, assignedToDriver) { openSnapshot, assignedSnapshot ->
+                openSnapshot.children + assignedSnapshot.children
+            }.collect { snapshots ->
                 val available = mutableListOf<Trip>()
                 val active = mutableListOf<Trip>()
 
-                snapshot.children.forEach { child ->
+                snapshots.distinctBy { it.key }.forEach { child ->
                     try {
                         val id = child.key ?: return@forEach
 
@@ -99,12 +106,20 @@ class DriverDashboardScreenModel : ScreenModel {
                             driverPhone = str("driverPhone"),
                             vehicleDetails = str("vehicleDetails"),
                             status = status,
+                            paymentMethod = str("paymentMethod"),
+                            paymentStatus = str("paymentStatus").ifBlank { "UNPAID" },
+                            paymentId = str("paymentId"),
                             createdAtTimestamp = child.child("createdAtTimestamp").value<Long>()
                         )
 
                         if (status == "REQUESTED" && driverId.isBlank()) {
                             available.add(trip)
-                        } else if (driverId == uid && status != "COMPLETED" && status != "CANCELLED") {
+                        } else if (
+                            driverId == uid &&
+                            status != "AWAITING_PAYMENT" &&
+                            status != "COMPLETED" &&
+                            status != "CANCELLED"
+                        ) {
                             active.add(trip)
                         }
                     } catch (e: Exception) {

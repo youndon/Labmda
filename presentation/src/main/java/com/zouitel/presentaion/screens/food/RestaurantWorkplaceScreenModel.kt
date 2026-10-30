@@ -172,23 +172,12 @@ class RestaurantWorkplaceScreenModel(
                 "restaurantAddress" to address,
                 "restaurantLatitude" to latitude,
                 "restaurantLongitude" to longitude,
-                "foodStatus" to Status.APPROVED.name,
+                "foodStatus" to Status.PENDING.name,
                 "foodMode" to UserMode.MANAGER.name
             )
             db.child("users").child(uid).updateChildren(updates)
 
-            val publicMap = mapOf(
-                "id" to uid,
-                "name" to restaurantName,
-                "imageUrl" to imageUrl,
-                "deliveryFee" to deliveryFee,
-                "estimatedTimeMinutes" to estimatedTimeMinutes,
-                "managers" to listOf(managerPhone),
-                "address" to address,
-                "latitude" to latitude,
-                "longitude" to longitude
-            )
-            db.child("restaurants").child(uid).updateChildren(publicMap)
+            // Public restaurant visibility is created by the admin approval flow.
 
             _isLoading.value = false
         }

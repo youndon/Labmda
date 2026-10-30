@@ -29,20 +29,22 @@ class FoodOrdersScreenModel : ScreenModel {
     }
 
     private fun listenToIncomingOrders() {
+        val uid = currentUid
+        if (uid.isNullOrBlank()) {
+            _orders.value = emptyList()
+            _isLoading.value = false
+            return
+        }
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
+            db.child("orders").orderByChild("sourceId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
-                    // Food orders only; retail shop orders live in the shop dashboard
                     .filter { it.orderType == OrderType.FOOD }
-                    // A restaurant's id is its manager's uid, so show only this restaurant's orders
-                    .filter { currentUid == null || it.sourceId == currentUid }
                     .sortedByDescending { it.createdAtTimestamp }
                 _isLoading.value = false
             }
         }
     }
-
     fun updateOrderStatus(order: Order, nextStatus: OrderStatus) {
         // Restaurant managers cannot mark DELIVERED; only the courier can
         if (nextStatus == OrderStatus.DELIVERED) return

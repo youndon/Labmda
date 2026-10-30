@@ -29,18 +29,22 @@ class FoodActivitiesScreenModel : ScreenModel {
     }
 
     private fun listenToUserOrders() {
+        val uid = currentUserId
+        if (uid.isNullOrBlank()) {
+            _orders.value = emptyList()
+            _isLoading.value = false
+            return
+        }
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
+            db.child("orders").orderByChild("clientId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
                     .filter { it.orderType == OrderType.FOOD }
-                    .filter { currentUserId == null || it.clientId == currentUserId }
                     .sortedByDescending { it.createdAtTimestamp }
                 _isLoading.value = false
             }
         }
     }
-
     fun cancelOrder(orderId: String) {
         screenModelScope.launch(Dispatchers.IO) {
             db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)

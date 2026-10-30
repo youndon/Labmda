@@ -126,6 +126,7 @@ class FoodOrdersScreen : Screen {
                     Text(text = "Pickup: ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall)
+                    Text(text = "Payment status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall)
 
                     if (order.deliveryName.isNotBlank()) {
                         Spacer(modifier = Modifier.height(2.dp))
@@ -160,7 +161,7 @@ class FoodOrdersScreen : Screen {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -175,7 +176,7 @@ class FoodOrdersScreen : Screen {
                 ) {
                     Text("Total Amount", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(order.totalPrice)}",
+                        "₱${"%.2f".format(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -191,6 +192,7 @@ class FoodOrdersScreen : Screen {
     @Composable
     private fun StatusChip(status: OrderStatus) {
         val (color, containerColor, text) = when (status) {
+            OrderStatus.AWAITING_PAYMENT -> Triple(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer, "PAYMENT PENDING")
             OrderStatus.PLACED -> Triple(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer, "NEW ORDER")
             OrderStatus.ACCEPTED -> Triple(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer, "ACCEPTED")
             OrderStatus.PREPARING -> Triple(MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.secondaryContainer, "PREPARING IN KITCHEN")
@@ -222,6 +224,7 @@ class FoodOrdersScreen : Screen {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             when (status) {
+                OrderStatus.AWAITING_PAYMENT -> { /* Payment must complete before the merchant can accept the order. */ }
                 OrderStatus.PLACED -> {
                     Button(
                         onClick = { onStatusChange(OrderStatus.ACCEPTED) },
