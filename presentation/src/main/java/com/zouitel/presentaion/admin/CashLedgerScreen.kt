@@ -134,7 +134,7 @@ class CashLedgerScreen : Screen {
                     collections.forEach { row ->
                         CashCollectionCard(
                             row = row,
-                            onRemit = { amountText ->
+                            onRemit = { amountText, idempotencyKey, onFinished ->
                                 val amountCentavos = try {
                                     BigDecimal(amountText.trim())
                                         .multiply(BigDecimal("100"))
@@ -142,10 +142,12 @@ class CashLedgerScreen : Screen {
                                         .longValueExact()
                                 } catch (_: Exception) {
                                     message = "Enter a valid amount in PHP with up to two decimal places."
+                                    onFinished(false)
                                     return@CashCollectionCard
                                 }
                                 if (amountCentavos <= 0L || amountCentavos > row.outstandingRemittanceCentavos) {
                                     message = "Remittance must be greater than zero and cannot exceed the outstanding amount."
+                                    onFinished(false)
                                     return@CashCollectionCard
                                 }
                                 scope.launch {
@@ -155,11 +157,13 @@ class CashLedgerScreen : Screen {
                                             entityType = row.entityType,
                                             entityId = row.entityId,
                                             amountCentavos = amountCentavos,
-                                            idempotencyKey = UUID.randomUUID().toString()
+                                            idempotencyKey = idempotencyKey
                                         )
                                         message = "Recorded ₱${peso(amountCentavos)} for ${row.entityType.lowercase()} ${row.entityId}. Remaining due: ₱${peso(result.outstandingRemittanceCentavos)}."
+                                        onFinished(true)
                                     } catch (e: Exception) {
                                         message = e.message ?: "Could not record the cash remittance."
+                                        onFinished(false)
                                     }
                                 }
                             }
@@ -174,11 +178,15 @@ class CashLedgerScreen : Screen {
 @Composable
 private fun CashCollectionCard(
     row: CashCollectionRow,
-    onRemit: (String) -> Unit
+    onRemit: (String, String, (Boolean) -> Unit) -> Unit
 ) {
-    var amount by remember(row.collectionId, row.outstandingRemittanceCentavos) {
+    var amount by remember(row.collectionId) {
         mutableStateOf((row.outstandingRemittanceCentavos / 100.0).let { "%.2f".format(it) })
     }
+    var requestKey by remember(row.collectionId) {
+        mutableStateOf(UUID.randomUUID().toString())
+    }
+    var isSubmitting by remember(row.collectionId) { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -206,16 +214,28 @@ private fun CashCollectionCard(
             if (row.outstandingRemittanceCentavos > 0L) {
                 OutlinedTextField(
                     value = amount,
-                    onValueChange = { amount = it },
+                    onValueChange = {
+                        if (it != amount) requestKey = UUID.randomUUID().toString()
+                        amount = it
+                    },
                     label = { Text("Amount received (₱)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Button(
-                    onClick = { onRemit(amount) },
+                    onClick = {
+                        if (!isSubmitting) {
+                            isSubmitting = true
+                            onRemit(amount, requestKey) { succeeded ->
+                                isSubmitting = false
+                                if (succeeded) requestKey = UUID.randomUUID().toString()
+                            }
+                        }
+                    },
+                    enabled = !isSubmitting,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Record cash remittance")
+                    Text(if (isSubmitting) "Recording…" else "Record cash remittance")
                 }
             }
         }
