@@ -838,6 +838,59 @@ export const updatePricingConfiguration = onCall(
   }
 );
 
+/** Backward-compatible, task-specific name for the full administrator pricing update. */
+export const adminUpdatePricing = updatePricingConfiguration;
+
+/**
+ * Updates only commission rules while preserving all delivery, ride, fee and refund rules.
+ * Each update is versioned exactly like a complete pricing configuration publication.
+ */
+export const adminSetCommissionRules = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = requireAdmin(request);
+    const data = asRecord(request.data);
+    const input = asRecord(data.commissions ?? data.commissionRules ?? data);
+    const requested: Partial<PricingConfiguration["commissions"]> = {};
+
+    if (input.foodBps !== undefined) requested.foodBps = boundedBasisPoints(input.foodBps, "food commission");
+    if (input.goodsBps !== undefined) requested.goodsBps = boundedBasisPoints(input.goodsBps, "goods commission");
+    if (input.deliveryBps !== undefined) requested.deliveryBps = boundedBasisPoints(input.deliveryBps, "delivery commission");
+    if (input.ridesBps !== undefined) requested.ridesBps = boundedBasisPoints(input.ridesBps, "ride commission");
+    if (Object.keys(requested).length === 0) {
+      throw new HttpsError("invalid-argument", "Provide at least one commission rate to update.");
+    }
+
+    const currentRef = db.ref("config/pricing/current");
+    const transaction = await currentRef.transaction((currentValue) => {
+      if (!currentValue) return;
+      const current = normalizePricingConfiguration(currentValue);
+      return {
+        ...current,
+        commissions: { ...current.commissions, ...requested },
+        version: current.version + 1,
+        updatedAtTimestamp: Date.now(),
+        updatedBy: uid,
+      };
+    });
+
+    if (!transaction.committed || !transaction.snapshot.exists()) {
+      throw new HttpsError("aborted", "Commission rules could not be published. Initialize pricing first, then retry.");
+    }
+    const published = asRecord(transaction.snapshot.val());
+    const version = Number(published.version);
+    await db.ref("config/pricing/versions/" + version).set(published);
+
+    logger.info("Administrator updated commission rules", { uid, version, fields: Object.keys(requested) });
+    return {
+      success: true,
+      version,
+      commissions: published.commissions,
+      updatedAtTimestamp: published.updatedAtTimestamp,
+    };
+  }
+);
+
 async function buildRouteQuote(
   uid: string,
   data: Record<string, unknown>,
@@ -1707,6 +1760,171 @@ export const createTripPayment = onCall(
       pricingVersion: config.version,
       breakdown: rideBreakdown,
       checkoutUrl: checkoutUrl || null,
+    };
+  }
+);
+
+
+/**
+ * Creates a trip from a server-issued quote. The caller cannot submit or alter the fare,
+ * billable distance, commission, or pricing snapshot.
+ */
+export const createTrip = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const quoteId = asString(data.quoteId);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(quoteId)) {
+      throw new HttpsError("invalid-argument", "A valid ride quote ID is required.");
+    }
+    const tripId = parseIdempotencyKey(data.idempotencyKey);
+    const existingSnapshot = await db.ref("trips/" + tripId).get();
+    if (existingSnapshot.exists()) {
+      const existing = asRecord(existingSnapshot.val());
+      if (asString(existing.passengerId) !== uid) {
+        throw new HttpsError("already-exists", "This idempotency key has already been used.");
+      }
+      return {
+        tripId,
+        fareCentavos: Number(existing.fareCentavos ?? 0),
+        fare: Number(existing.fare ?? 0),
+        pricingVersion: Number(existing.pricingVersion ?? 0),
+        breakdown: existing.breakdown ?? null,
+        reused: true,
+      };
+    }
+
+    const quoteRef = db.ref("pricingQuotes/" + quoteId);
+    const quoteSnapshot = await quoteRef.get();
+    if (!quoteSnapshot.exists()) {
+      throw new HttpsError("not-found", "The ride quote was not found. Request a new quote.");
+    }
+    const quote = asRecord(quoteSnapshot.val());
+    if (asString(quote.userId) !== uid || asString(quote.quoteType) !== "RIDE") {
+      throw new HttpsError("permission-denied", "This ride quote does not belong to this account.");
+    }
+    if (Number(quote.expiresAtTimestamp) < Date.now()) {
+      throw new HttpsError("deadline-exceeded", "The ride quote expired. Request a new quote.");
+    }
+    const serviceType = asString(quote.serviceType).toLowerCase();
+    if (!serviceType || (asString(data.serviceType) && asString(data.serviceType).toLowerCase() !== serviceType)) {
+      throw new HttpsError("invalid-argument", "The requested ride service does not match the quote.");
+    }
+
+    const config = normalizePricingConfiguration(quote.pricingConfiguration);
+    const rideRule = config.rides[serviceType];
+    if (!rideRule) {
+      throw new HttpsError("failed-precondition", "The quoted ride service no longer has a valid pricing snapshot.");
+    }
+    const fareCentavos = nonNegativeInteger(quote.fareCentavos, "quoted ride fare");
+    const route = {
+      provider: "GOOGLE_ROUTES_API" as const,
+      distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
+      duration: asString(quote.routeDuration),
+    };
+    const pricingSnapshotValue = asRecord(quote.pricingSnapshot);
+    const optionalChargesCentavos = nonNegativeInteger(
+      pricingSnapshotValue.optionalChargesCentavos ?? quote.additionalChargesCentavos ?? 0,
+      "quoted optional ride charges"
+    );
+    const rideCommissionCentavos = commissionCentavos(fareCentavos, config.commissions.ridesBps);
+    const rideBreakdown = {
+      subtotal: fareCentavos - optionalChargesCentavos,
+      deliveryFee: 0,
+      serviceFee: optionalChargesCentavos,
+      discount: 0,
+      tax: 0,
+      total: fareCentavos,
+      merchantShare: 0,
+      courierShare: 0,
+      driverShare: fareCentavos - rideCommissionCentavos,
+      platformShare: rideCommissionCentavos,
+      gatewayFee: 0,
+      merchantCommission: 0,
+      deliveryCommission: 0,
+      rideCommission: rideCommissionCentavos,
+    };
+    const timestamp = Date.now();
+
+    const lock = await quoteRef.transaction((currentValue) => {
+      const current = asRecord(currentValue);
+      if (
+        asString(current.userId) !== uid ||
+        asString(current.quoteType) !== "RIDE" ||
+        Number(current.expiresAtTimestamp) < Date.now() ||
+        (asString(current.status) === "USED" && asString(current.createdTripId) !== tripId)
+      ) {
+        return;
+      }
+      return {
+        ...current,
+        status: "USED",
+        createdTripId: tripId,
+        usedAtTimestamp: Date.now(),
+      };
+    });
+    if (!lock.committed) {
+      const refreshed = await db.ref("trips/" + tripId).get();
+      if (refreshed.exists() && asString(asRecord(refreshed.val()).passengerId) === uid) {
+        const saved = asRecord(refreshed.val());
+        return {
+          tripId,
+          fareCentavos: Number(saved.fareCentavos ?? 0),
+          fare: Number(saved.fare ?? 0),
+          pricingVersion: Number(saved.pricingVersion ?? 0),
+          breakdown: saved.breakdown ?? null,
+          reused: true,
+        };
+      }
+      throw new HttpsError("already-exists", "This ride quote is already being used.");
+    }
+
+    const pickupLat = asNumber(quote.pickupLat, "quoted pickup latitude");
+    const pickupLng = asNumber(quote.pickupLng, "quoted pickup longitude");
+    const dropoffLat = asNumber(quote.dropoffLat, "quoted drop-off latitude");
+    const dropoffLng = asNumber(quote.dropoffLng, "quoted drop-off longitude");
+    const fare = phpFromCents(fareCentavos);
+    const trip = {
+      id: tripId,
+      passengerId: uid,
+      passengerName: asString(data.passengerName) || "Passenger",
+      passengerPhone: asString(data.passengerPhone),
+      pickupLocation: asString(data.pickupLocation),
+      dropoffLocation: asString(data.dropoffLocation),
+      pickupLat,
+      pickupLng,
+      dropoffLat,
+      dropoffLng,
+      fare,
+      fareCentavos,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      routeDuration: route.duration,
+      pricingVersion: config.version,
+      pricingQuoteId: quoteId,
+      pricingSnapshot: pricingSnapshotValue,
+      breakdown: rideBreakdown,
+      serviceType: serviceType.toUpperCase(),
+      driverId: asString(data.targetDriverId),
+      status: "REQUESTED",
+      paymentMethod: "",
+      paymentStatus: "UNPAID",
+      paymentId: "",
+      createdAtTimestamp: timestamp,
+    };
+    await db.ref("trips/" + tripId).set(trip);
+
+    logger.info("Server created trip from locked pricing quote", { tripId, quoteId, uid, pricingVersion: config.version });
+    return {
+      tripId,
+      fareCentavos,
+      fare,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      pricingVersion: config.version,
+      breakdown: rideBreakdown,
+      reused: false,
     };
   }
 );
