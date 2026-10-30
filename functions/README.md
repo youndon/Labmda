@@ -512,3 +512,69 @@ All wallet, payout, private payout account and marketplace ledger paths must be 
 client writes in production RTDB rules. Add participant-safe callable reads instead of granting
 clients broad access to these nodes. Keep `cashCollections.reconciliationStatus` and
 `payouts.userId` indexed where those indexed queries are used.
+
+
+### Server-owned wallet, payout and marketplace ledger rules
+
+The new wallet and payout APIs use callable Functions. Merge the following branches into your
+existing RTDB rules document; they are not a replacement for your participant/order/trip rules.
+Do not add a broad parent-level read or write grant that would override these child restrictions.
+
+```json
+{
+  "rules": {
+    "wallets": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
+    "payouts": {
+      "$payoutId": {
+        ".read": "auth != null && (data.child('userId').val() === auth.uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
+    "payoutAccounts": {
+      "$uid": {
+        ".read": false,
+        ".write": false
+      }
+    },
+    "payoutAccountReviews": {
+      "$uid": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "ledger": {
+      "$entryId": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "ledgerAccounts": {
+      "$accountId": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "ledgerPostingStatus": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "payoutReconciliationQueue": {
+      ".read": false,
+      ".write": false
+    },
+    "walletPayoutQueue": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}
+```
+
+Add the `userId` index to `payouts` if any server or admin query uses
+`orderByChild('userId')`. Client screens do not read private payout account details directly;
+they use `getMyPayoutAccount`, which returns only masked information.
