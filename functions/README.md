@@ -19,22 +19,105 @@ pricing configuration from Realtime Database; clients never send order totals or
 The callable and webhook functions are deployed in `asia-southeast1`. The payment currency is
 PHP and the online channel in this first collection flow is GCash.
 
-## Realtime Database pricing
+## Administrator pricing configuration
 
-Before accepting orders, configure numeric prices in PHP:
+All platform pricing is stored server-side at `config/pricing/current`. The Android app must
+not write to this path. Administrators publish a complete configuration through the callable
+`updatePricingConfiguration`; reading it through `getPricingConfiguration` is also restricted
+to administrators.
 
-- Food: `restaurants/{restaurantId}/meals/{mealId}/basePrice` and
-  `restaurants/{restaurantId}/deliveryFee`.
-- Retail: `shops/{shopId}/products/{productId}/price` and
-  `config/pricing/shopDeliveryFee`.
-- Rides: `config/pricing/rides/ride/baseFare`,
-  `config/pricing/rides/ride/perKm`, and
-  `config/pricing/rides/ride/minimumFare`.
+The schema template is `functions/pricing.example.json`. Amounts are integer PHP centavos
+(100 centavos = PHP 1.00), and commission/cancellation percentages are integer basis points
+(100 basis points = 1%). Do not enter peso decimals in the configuration.
 
-Ride pricing is calculated on the server using straight-line (Haversine) distance between the
-submitted pickup and drop-off coordinates and the configured rate. The client-supplied fare
-estimate is ignored. This is not road distance; before production, replace it with a trusted
-server-side routing distance if fares must follow actual road routes.
+The configuration contains:
+
+- `delivery`: base fee, centavos per kilometre, minimum fee, rounding increment and rounding
+  mode (`CEIL`, `NEAREST`, or `FLOOR`).
+- `rides/{serviceType}`: base fare, centavos per kilometre, minimum fare, rounding rules and
+  optional fixed additional charges.
+- `commissions`: independent rates for food, goods, delivery and rides.
+- `additionalCharges`: fixed charges for food, goods, delivery and rides.
+- `cancellationFees` and `refundPolicy`: fixed cancellation amounts, optional percentage
+  rates, cancellation timing and delivery-fee refund policy.
+
+The zero amounts in `pricing.example.json` are placeholders, not recommended prices.
+Enter actual delivery, ride, commission, refund and cancellation rates in the Admin Panel before
+publishing. A configuration must be published before quote or checkout functions will accept
+new orders. Every publish increments `version` and stores a historical copy under
+`config/pricing/versions/{version}`. Each quote, order and trip stores its own route distance,
+pricing version, applicable rules and calculated centavo breakdown. Existing snapshots are not
+recalculated when an administrator later changes the current configuration.
+
+### Secure administrator access
+
+Pricing callables require the Firebase Authentication custom claim `admin: true`. Do not use
+a client-editable `users/{uid}/isAdmin` field as authorization. On a trusted machine using the
+Firebase Admin SDK, assign the claim to the intended administrator UID while preserving their
+other custom claims:
+
+```ts
+import { getAuth } from "firebase-admin/auth";
+
+const auth = getAuth();
+const user = await auth.getUser("ADMIN_UID");
+await auth.setCustomUserClaims(user.uid, {
+  ...(user.customClaims ?? {}),
+  admin: true,
+});
+```
+
+After changing a custom claim, the administrator must obtain a refreshed ID token (sign out and
+back in, or force-refresh the token) before calling the pricing functions.
+
+### Google Routes API
+
+The backend uses Google Routes API `computeRoutes` for driving distance. It requests
+`routes.distanceMeters` and `routes.duration` through the required field mask. Haversine
+distance and client-supplied kilometres are not used to calculate a billable price.
+
+1. Enable Routes API in the Google Cloud project with billing enabled:
+   `gcloud services enable routes.googleapis.com`.
+2. Create an API key restricted to Routes API.
+3. Store the key as a Firebase Functions secret:
+   `firebase functions:secrets:set GOOGLE_ROUTES_API_KEY`.
+4. Deploy Functions after configuring the secret.
+
+Keep this key in Secret Manager; never include it in Android resources, Realtime Database or a
+client request. Google documents the `computeRoutes` endpoint, API-key header and field-mask
+requirements in its [Routes API setup guide](https://developers.google.com/maps/documentation/routes/get-api-key)
+and [field-mask guide](https://developers.google.com/maps/documentation/routes/choose_fields).
+
+### Realtime Database access
+
+Deny client writes to `config/pricing`, `config/pricing/versions` and
+`pricingQuotes`. Cloud Functions use the Admin SDK and bypass RTDB rules. A quote may be read
+only by its owning signed-in user; clients must not create, alter or extend quote records.
+
+The repository does not currently contain the deployed Realtime Database rules file. Add
+these branches to your existing rules (preserve your participant/order/trip rules):
+
+```json
+{
+  "rules": {
+    "config": {
+      "pricing": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "pricingQuotes": {
+      "$quoteId": {
+        ".read": "auth != null && data.child('userId').val() === auth.uid",
+        ".write": false
+      }
+    }
+  }
+}
+```
+
+The Functions Admin SDK bypasses RTDB rules for server writes. Do not replace your complete
+rules document with this fragment; merge only these paths into the existing rules tree.
 
 ## Realtime Database indexes and rules
 

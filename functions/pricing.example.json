@@ -1,0 +1,45 @@
+{
+  "currency": "PHP",
+  "delivery": {
+    "baseFeeCentavos": 0,
+    "pricePerKmCentavos": 0,
+    "minimumFeeCentavos": 0,
+    "roundingIncrementCentavos": 1,
+    "roundingMode": "NEAREST"
+  },
+  "rides": {
+    "ride": {
+      "baseFareCentavos": 0,
+      "pricePerKmCentavos": 0,
+      "minimumFareCentavos": 0,
+      "roundingIncrementCentavos": 1,
+      "roundingMode": "NEAREST",
+      "additionalCharges": []
+    }
+  },
+  "commissions": {
+    "foodBps": 0,
+    "goodsBps": 0,
+    "deliveryBps": 0,
+    "ridesBps": 0
+  },
+  "additionalCharges": {
+    "foodCentavos": 0,
+    "goodsCentavos": 0,
+    "deliveryCentavos": 0,
+    "ridesCentavos": 0
+  },
+  "cancellationFees": {
+    "foodCentavos": 0,
+    "goodsCentavos": 0,
+    "deliveryCentavos": 0,
+    "ridesCentavos": 0,
+    "customerCancellationBps": 0,
+    "merchantCancellationBps": 0
+  },
+  "refundPolicy": {
+    "freeCancellationBeforeAcceptance": true,
+    "refundDeliveryFeeOnCancellation": true,
+    "refundWindowHours": 24
+  }
+}

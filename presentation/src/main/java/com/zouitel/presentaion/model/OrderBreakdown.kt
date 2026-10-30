@@ -3,11 +3,11 @@ package com.zouitel.presentaion.model
 import kotlinx.serialization.Serializable
 
 /**
- * Server-calculated money totals and allocation for an order or ride.
+ * Server-calculated order or ride totals and participant allocations.
  *
- * For a ride, subtotal can represent the fare and driverShare the driver's share.
- * For food or goods, merchantShare and courierShare represent the corresponding
- * allocations. Values are stored in Philippine centavos through Money.
+ * Every Money field is an integer amount in Philippine centavos. The backend returns
+ * these same field names as integer values so the object can be decoded consistently
+ * by food, goods, delivery and ride flows.
  */
 @Serializable
 data class OrderBreakdown(
@@ -21,5 +21,8 @@ data class OrderBreakdown(
     val courierShare: Money = Money.ZERO,
     val driverShare: Money = Money.ZERO,
     val platformShare: Money = Money.ZERO,
-    val gatewayFee: Money = Money.ZERO
+    val gatewayFee: Money = Money.ZERO,
+    val merchantCommission: Money = Money.ZERO,
+    val deliveryCommission: Money = Money.ZERO,
+    val rideCommission: Money = Money.ZERO
 )
