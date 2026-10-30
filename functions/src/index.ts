@@ -659,6 +659,16 @@ async function calculateGoogleRoute(
   destinationLat: number,
   destinationLng: number
 ): Promise<RouteResult> {
+  if (
+    (originLat === 0 && originLng === 0) ||
+    (destinationLat === 0 && destinationLng === 0)
+  ) {
+    throw new HttpsError("invalid-argument", "A valid pickup and drop-off location is required.");
+  }
+  if (closeCoordinate(originLat, destinationLat) && closeCoordinate(originLng, destinationLng)) {
+    throw new HttpsError("invalid-argument", "Pickup and drop-off locations must be different.");
+  }
+
   const apiKey = GOOGLE_ROUTES_API_KEY.value();
   if (!apiKey) {
     throw new HttpsError("failed-precondition", "The Google Routes API key is not configured in Firebase Functions secrets.");
@@ -805,19 +815,29 @@ export const createPricingQuote = onCall(
     const route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng);
     let amountCentavos: number;
     let feeKind: "deliveryFeeCentavos" | "fareCentavos";
+    let additionalChargesCentavos = 0;
     let snapshot: Record<string, unknown>;
 
     if (quoteType === "DELIVERY") {
-      amountCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
+      const deliveryFeeCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
+      additionalChargesCentavos = config.additionalCharges.deliveryCentavos;
+      amountCentavos = deliveryFeeCentavos + additionalChargesCentavos;
       feeKind = "deliveryFeeCentavos";
-      snapshot = pricingSnapshot(config, "DELIVERY", route);
+      snapshot = pricingSnapshot(config, "DELIVERY", route, {
+        deliveryFeeCentavos,
+        additionalChargesCentavos,
+      });
     } else {
+      if (!/^[a-z0-9_-]{2,24}$/.test(serviceType)) {
+        throw new HttpsError("invalid-argument", "Invalid ride service type.");
+      }
       const rule = config.rides[serviceType];
       if (!rule) {
         throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
       }
       const fare = calculateRideFareCentavos(route.distanceMeters, rule, config.additionalCharges.ridesCentavos);
       amountCentavos = fare.fareCentavos;
+      additionalChargesCentavos = fare.optionalChargesCentavos;
       feeKind = "fareCentavos";
       snapshot = pricingSnapshot(config, "RIDES", route, {
         serviceType,
@@ -839,7 +859,10 @@ export const createPricingQuote = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
-      [feeKind]: amountCentavos,
+      [feeKind]: feeKind === "deliveryFeeCentavos"
+        ? Number(asRecord(snapshot).deliveryFeeCentavos)
+        : amountCentavos,
+      additionalChargesCentavos,
       amountCentavos,
       amount: phpFromCents(amountCentavos),
       pricingVersion: config.version,
