@@ -3019,13 +3019,13 @@ export const reconcilePendingPayments = onSchedule(
       }
       const paymentSnapshot = await db.ref("payments/" + entityId).get();
       if (!paymentSnapshot.exists()) {
-        await child.ref.remove();
+        await childQueueRef.remove();
         continue;
       }
       const payment = asRecord(paymentSnapshot.val());
       const refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
       if (["SUCCEEDED", "FAILED"].includes(asString(refund.status).toUpperCase())) {
-        await child.ref.remove();
+        await childQueueRef.remove();
         continue;
       }
 
@@ -3073,7 +3073,7 @@ export const reconcilePendingPayments = onSchedule(
         logger.warn("Refund reconciliation lookup failed", { entityId, providerRefundId, error });
         const attempts = Number(queue.attempts ?? 0) + 1;
         const backoffMinutes = Math.min(30, 5 * Math.pow(2, Math.min(attempts, 2)));
-        await child.ref.update({
+        await childQueueRef.update({
           attempts,
           lastCheckedAtTimestamp: now,
           dueAtTimestamp: now + backoffMinutes * 60 * 1000,
