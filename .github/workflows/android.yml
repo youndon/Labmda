@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main", "master"]
   pull_request:
-    branches: ["main", "master"]
+    branches: ["**"]
 
 permissions:
   contents: read
@@ -71,3 +71,6 @@ jobs:
 
       - name: Compile Firebase Functions
         run: npm run build
+
+      - name: Run Firebase emulator security tests
+        run: npm run test:rules
