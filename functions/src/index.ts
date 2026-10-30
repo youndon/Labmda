@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
 import { logger } from "firebase-functions";
@@ -11,6 +11,7 @@ const REGION = "asia-southeast1";
 const db = getDatabase();
 const XENDIT_SECRET_KEY = defineSecret("XENDIT_SECRET_KEY");
 const XENDIT_WEBHOOK_TOKEN = defineSecret("XENDIT_WEBHOOK_TOKEN");
+const GOOGLE_ROUTES_API_KEY = defineSecret("GOOGLE_ROUTES_API_KEY");
 const PAYMENT_SUCCESS_RETURN_URL = defineString("PAYMENT_SUCCESS_RETURN_URL");
 const PAYMENT_FAILURE_RETURN_URL = defineString("PAYMENT_FAILURE_RETURN_URL");
 
@@ -303,7 +304,7 @@ async function loadOrderCatalog(
       pickupLocation: asString(restaurant.address),
       pickupLat: Number(restaurant.latitude ?? 0),
       pickupLng: Number(restaurant.longitude ?? 0),
-      deliveryFee: roundMoney(Math.max(0, asNumber(restaurant.deliveryFee ?? 0, "restaurant delivery fee"))),
+      deliveryFee: 0, // Global administrator pricing is applied after route calculation.
       items,
       merchantId: sourceId,
     };
@@ -322,11 +323,7 @@ async function loadOrderCatalog(
     throw new HttpsError("failed-precondition", "This shop is currently offline.");
   }
 
-  const shopFeeSnapshot = await db.ref("config/pricing/shopDeliveryFee").get();
-  if (!shopFeeSnapshot.exists()) {
-    throw new HttpsError("failed-precondition", "Retail delivery pricing is not configured by the administrator.");
-  }
-  const deliveryFee = roundMoney(Math.max(0, asNumber(shopFeeSnapshot.val(), "shop delivery fee")));
+  // Delivery charges are calculated from the administrator's route pricing below.
 
   const items = await Promise.all(requestedItems.map(async (requested) => {
     const snapshot = await db.ref("shops/" + sourceId + "/products/" + requested.id).get();
@@ -357,14 +354,513 @@ async function loadOrderCatalog(
     pickupLocation: asString(shop.address),
     pickupLat: Number(shop.latitude ?? 0),
     pickupLng: Number(shop.longitude ?? 0),
-    deliveryFee,
+    deliveryFee: 0,
     items,
     merchantId: asString(shop.ownerUid),
   };
 }
 
+
+// -----------------------------------------------------------------------------
+// Server-owned pricing configuration, route calculation, quotes and snapshots.
+// Prices/rates are stored as integer PHP centavos and basis points in Realtime DB.
+// -----------------------------------------------------------------------------
+
+type RoundingMode = "CEIL" | "NEAREST" | "FLOOR";
+
+type DeliveryPricingRule = {
+  baseFeeCentavos: number;
+  pricePerKmCentavos: number;
+  minimumFeeCentavos: number;
+  roundingIncrementCentavos: number;
+  roundingMode: RoundingMode;
+};
+
+type RidePricingRule = {
+  baseFareCentavos: number;
+  pricePerKmCentavos: number;
+  minimumFareCentavos: number;
+  roundingIncrementCentavos: number;
+  roundingMode: RoundingMode;
+  additionalCharges: Array<{ code: string; label: string; amountCentavos: number }>;
+};
+
+type PricingConfiguration = {
+  version: number;
+  currency: "PHP";
+  delivery: DeliveryPricingRule;
+  rides: Record<string, RidePricingRule>;
+  commissions: {
+    foodBps: number;
+    goodsBps: number;
+    deliveryBps: number;
+    ridesBps: number;
+  };
+  additionalCharges: {
+    foodCentavos: number;
+    goodsCentavos: number;
+    deliveryCentavos: number;
+    ridesCentavos: number;
+  };
+  cancellationFees: {
+    foodCentavos: number;
+    goodsCentavos: number;
+    deliveryCentavos: number;
+    ridesCentavos: number;
+    customerCancellationBps: number;
+    merchantCancellationBps: number;
+  };
+  refundPolicy: {
+    freeCancellationBeforeAcceptance: boolean;
+    refundDeliveryFeeOnCancellation: boolean;
+    refundWindowHours: number;
+  };
+};
+
+type RouteResult = {
+  provider: "GOOGLE_ROUTES_API";
+  distanceMeters: number;
+  duration: string;
+};
+
+const MAX_SAFE_CENTAVOS = Number.MAX_SAFE_INTEGER;
+const QUOTE_LIFETIME_MS = 10 * 60 * 1000;
+
+function nonNegativeInteger(value: unknown, field: string): number {
+  const number = asNumber(value, field);
+  if (!Number.isSafeInteger(number) || number < 0 || number > MAX_SAFE_CENTAVOS) {
+    throw new HttpsError("invalid-argument", field + " must be a non-negative integer.");
+  }
+  return number;
+}
+
+function boundedBasisPoints(value: unknown, field: string): number {
+  const number = nonNegativeInteger(value, field);
+  if (number > 10000) {
+    throw new HttpsError("invalid-argument", field + " must be between 0 and 10000 basis points.");
+  }
+  return number;
+}
+
+function parseRoundingMode(value: unknown, field: string): RoundingMode {
+  const mode = asString(value).toUpperCase();
+  if (mode !== "CEIL" && mode !== "NEAREST" && mode !== "FLOOR") {
+    throw new HttpsError("invalid-argument", field + " must be CEIL, NEAREST, or FLOOR.");
+  }
+  return mode;
+}
+
+function parseDeliveryRule(value: unknown, prefix: string): DeliveryPricingRule {
+  const record = asRecord(value);
+  const increment = nonNegativeInteger(record.roundingIncrementCentavos, prefix + " rounding increment");
+  if (increment < 1) {
+    throw new HttpsError("invalid-argument", prefix + " rounding increment must be at least one centavo.");
+  }
+  return {
+    baseFeeCentavos: nonNegativeInteger(record.baseFeeCentavos, prefix + " base fee"),
+    pricePerKmCentavos: nonNegativeInteger(record.pricePerKmCentavos, prefix + " price per kilometre"),
+    minimumFeeCentavos: nonNegativeInteger(record.minimumFeeCentavos, prefix + " minimum fee"),
+    roundingIncrementCentavos: increment,
+    roundingMode: parseRoundingMode(record.roundingMode, prefix + " rounding mode"),
+  };
+}
+
+function parseRideRule(value: unknown, serviceType: string): RidePricingRule {
+  const record = asRecord(value);
+  const increment = nonNegativeInteger(record.roundingIncrementCentavos, serviceType + " rounding increment");
+  if (increment < 1) {
+    throw new HttpsError("invalid-argument", serviceType + " rounding increment must be at least one centavo.");
+  }
+  const rawCharges = Array.isArray(record.additionalCharges) ? record.additionalCharges : [];
+  const additionalCharges = rawCharges.map((raw, index) => {
+    const charge = asRecord(raw);
+    const code = asString(charge.code);
+    const label = asString(charge.label);
+    if (!/^[a-z0-9_-]{2,40}$/.test(code) || !label) {
+      throw new HttpsError("invalid-argument", serviceType + " additional charge " + index + " needs a valid code and label.");
+    }
+    return {
+      code,
+      label: label.slice(0, 80),
+      amountCentavos: nonNegativeInteger(charge.amountCentavos, serviceType + " additional charge"),
+    };
+  });
+  return {
+    baseFareCentavos: nonNegativeInteger(record.baseFareCentavos, serviceType + " base fare"),
+    pricePerKmCentavos: nonNegativeInteger(record.pricePerKmCentavos, serviceType + " price per kilometre"),
+    minimumFareCentavos: nonNegativeInteger(record.minimumFareCentavos, serviceType + " minimum fare"),
+    roundingIncrementCentavos: increment,
+    roundingMode: parseRoundingMode(record.roundingMode, serviceType + " rounding mode"),
+    additionalCharges,
+  };
+}
+
+function normalizePricingConfiguration(value: unknown): PricingConfiguration {
+  const record = asRecord(value);
+  const ridesRecord = asRecord(record.rides);
+  const rideEntries = Object.entries(ridesRecord);
+  if (rideEntries.length === 0) {
+    throw new HttpsError("invalid-argument", "At least one ride service pricing rule is required.");
+  }
+
+  const rides: Record<string, RidePricingRule> = {};
+  for (const [serviceType, rule] of rideEntries) {
+    if (!/^[a-z0-9_-]{2,24}$/.test(serviceType)) {
+      throw new HttpsError("invalid-argument", "Invalid ride service pricing key: " + serviceType);
+    }
+    rides[serviceType] = parseRideRule(rule, serviceType);
+  }
+
+  const commissions = asRecord(record.commissions);
+  const additional = asRecord(record.additionalCharges);
+  const cancellation = asRecord(record.cancellationFees);
+  const refunds = asRecord(record.refundPolicy);
+
+  return {
+    version: nonNegativeInteger(record.version ?? 0, "pricing version"),
+    currency: "PHP",
+    delivery: parseDeliveryRule(record.delivery, "delivery"),
+    rides,
+    commissions: {
+      foodBps: boundedBasisPoints(commissions.foodBps, "food commission"),
+      goodsBps: boundedBasisPoints(commissions.goodsBps, "goods commission"),
+      deliveryBps: boundedBasisPoints(commissions.deliveryBps, "delivery commission"),
+      ridesBps: boundedBasisPoints(commissions.ridesBps, "ride commission"),
+    },
+    additionalCharges: {
+      foodCentavos: nonNegativeInteger(additional.foodCentavos, "food additional charges"),
+      goodsCentavos: nonNegativeInteger(additional.goodsCentavos, "goods additional charges"),
+      deliveryCentavos: nonNegativeInteger(additional.deliveryCentavos, "delivery additional charges"),
+      ridesCentavos: nonNegativeInteger(additional.ridesCentavos, "ride additional charges"),
+    },
+    cancellationFees: {
+      foodCentavos: nonNegativeInteger(cancellation.foodCentavos, "food cancellation fee"),
+      goodsCentavos: nonNegativeInteger(cancellation.goodsCentavos, "goods cancellation fee"),
+      deliveryCentavos: nonNegativeInteger(cancellation.deliveryCentavos, "delivery cancellation fee"),
+      ridesCentavos: nonNegativeInteger(cancellation.ridesCentavos, "ride cancellation fee"),
+      customerCancellationBps: boundedBasisPoints(cancellation.customerCancellationBps, "customer cancellation rate"),
+      merchantCancellationBps: boundedBasisPoints(cancellation.merchantCancellationBps, "merchant cancellation rate"),
+    },
+    refundPolicy: {
+      freeCancellationBeforeAcceptance: refunds.freeCancellationBeforeAcceptance === true,
+      refundDeliveryFeeOnCancellation: refunds.refundDeliveryFeeOnCancellation === true,
+      refundWindowHours: nonNegativeInteger(refunds.refundWindowHours, "refund window hours"),
+    },
+  };
+}
+
+function requireAdmin(request: { auth?: { uid: string; token?: unknown } | null }): string {
+  const uid = requireUid(request);
+  const claims = asRecord(request.auth?.token);
+  if (claims.admin !== true) {
+    throw new HttpsError(
+      "permission-denied",
+      "Administrator access is required. Set the Firebase Authentication custom claim admin=true for this administrator."
+    );
+  }
+  return uid;
+}
+
+async function getCurrentPricingConfiguration(): Promise<PricingConfiguration> {
+  const snapshot = await db.ref("config/pricing/current").get();
+  if (!snapshot.exists()) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Administrator pricing is not configured. An administrator must publish config/pricing/current first."
+    );
+  }
+  const config = normalizePricingConfiguration(snapshot.val());
+  if (config.version < 1) {
+    throw new HttpsError("failed-precondition", "Administrator pricing has not been initialized.");
+  }
+  return config;
+}
+
+function centsFromPhp(value: number, field: string): number {
+  if (!Number.isFinite(value) || value < 0 || value > MAX_SAFE_CENTAVOS / 100) {
+    throw new HttpsError("failed-precondition", field + " is outside the supported PHP amount range.");
+  }
+  return Math.round(value * 100);
+}
+
+function phpFromCents(centavos: number): number {
+  return Number((centavos / 100).toFixed(2));
+}
+
+function roundCentavos(amount: number, increment: number, mode: RoundingMode): number {
+  const units = amount / increment;
+  const roundedUnits = mode === "CEIL"
+    ? Math.ceil(units)
+    : mode === "FLOOR"
+      ? Math.floor(units)
+      : Math.round(units);
+  return roundedUnits * increment;
+}
+
+function commissionCentavos(amountCentavos: number, basisPoints: number): number {
+  return Math.round(amountCentavos * basisPoints / 10000);
+}
+
+function calculateDeliveryFeeCentavos(distanceMeters: number, rule: DeliveryPricingRule): number {
+  const distanceCharge = Math.round(rule.pricePerKmCentavos * distanceMeters / 1000);
+  const unrounded = Math.max(rule.minimumFeeCentavos, rule.baseFeeCentavos + distanceCharge);
+  return roundCentavos(unrounded, rule.roundingIncrementCentavos, rule.roundingMode);
+}
+
+function calculateRideFareCentavos(
+  distanceMeters: number,
+  rule: RidePricingRule,
+  sharedRideChargeCentavos: number
+): { fareCentavos: number; optionalChargesCentavos: number } {
+  const perKm = Math.round(rule.pricePerKmCentavos * distanceMeters / 1000);
+  const optionalChargesCentavos =
+    sharedRideChargeCentavos +
+    rule.additionalCharges.reduce((sum, charge) => sum + charge.amountCentavos, 0);
+  const unrounded = Math.max(
+    rule.minimumFareCentavos,
+    rule.baseFareCentavos + perKm + optionalChargesCentavos
+  );
+  return {
+    fareCentavos: roundCentavos(unrounded, rule.roundingIncrementCentavos, rule.roundingMode),
+    optionalChargesCentavos,
+  };
+}
+
+function pricingSnapshot(
+  config: PricingConfiguration,
+  category: string,
+  route: RouteResult,
+  extra: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    version: config.version,
+    currency: config.currency,
+    category,
+    rules: config,
+    route: {
+      provider: route.provider,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      duration: route.duration,
+    },
+    calculatedAtTimestamp: Date.now(),
+    ...extra,
+  };
+}
+
+async function calculateGoogleRoute(
+  originLat: number,
+  originLng: number,
+  destinationLat: number,
+  destinationLng: number
+): Promise<RouteResult> {
+  const apiKey = GOOGLE_ROUTES_API_KEY.value();
+  if (!apiKey) {
+    throw new HttpsError("failed-precondition", "The Google Routes API key is not configured in Firebase Functions secrets.");
+  }
+
+  const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": apiKey,
+      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+    },
+    body: JSON.stringify({
+      origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
+      destination: { location: { latLng: { latitude: destinationLat, longitude: destinationLng } } },
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_UNAWARE",
+      computeAlternativeRoutes: false,
+      languageCode: "en",
+      units: "METRIC",
+    }),
+  });
+
+  const body = asRecord(await response.json().catch(() => ({})));
+  if (!response.ok) {
+    logger.error("Google Routes API request failed", {
+      httpStatus: response.status,
+      providerStatus: asRecord(body.error).status,
+      message: asRecord(body.error).message,
+    });
+    throw new HttpsError("unavailable", "The route service could not calculate this trip. Please try again.");
+  }
+
+  const routes = Array.isArray(body.routes) ? body.routes : [];
+  const firstRoute = asRecord(routes[0]);
+  const distanceMeters = Number(firstRoute.distanceMeters);
+  const duration = asString(firstRoute.duration);
+  if (!Number.isSafeInteger(distanceMeters) || distanceMeters <= 0 || distanceMeters > 300000) {
+    throw new HttpsError("failed-precondition", "The route service did not return a valid route distance.");
+  }
+  return { provider: "GOOGLE_ROUTES_API", distanceMeters, duration };
+}
+
+function closeCoordinate(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 0.00005;
+}
+
+async function loadOwnedPricingQuote(
+  uid: string,
+  quoteId: string,
+  quoteType: "DELIVERY" | "RIDE",
+  pickupLat: number,
+  pickupLng: number,
+  dropoffLat: number,
+  dropoffLng: number,
+  serviceType?: string
+): Promise<Record<string, unknown>> {
+  const snapshot = await db.ref("pricingQuotes/" + quoteId).get();
+  if (!snapshot.exists()) {
+    throw new HttpsError("not-found", "The pricing quote was not found. Please request a new quote.");
+  }
+  const quote = asRecord(snapshot.val());
+  if (asString(quote.userId) !== uid || asString(quote.quoteType) !== quoteType) {
+    throw new HttpsError("permission-denied", "This pricing quote cannot be used for this checkout.");
+  }
+  if (Number(quote.expiresAtTimestamp) < Date.now()) {
+    throw new HttpsError("deadline-exceeded", "The pricing quote expired. Please request a new quote.");
+  }
+  if (
+    !closeCoordinate(Number(quote.pickupLat), pickupLat) ||
+    !closeCoordinate(Number(quote.pickupLng), pickupLng) ||
+    !closeCoordinate(Number(quote.dropoffLat), dropoffLat) ||
+    !closeCoordinate(Number(quote.dropoffLng), dropoffLng)
+  ) {
+    throw new HttpsError("invalid-argument", "The pickup or drop-off location changed. Please request a new quote.");
+  }
+  if (serviceType && asString(quote.serviceType).toLowerCase() !== serviceType.toLowerCase()) {
+    throw new HttpsError("invalid-argument", "The quote does not match this ride service.");
+  }
+  return quote;
+}
+
+export const getPricingConfiguration = onCall(
+  { region: REGION },
+  async (request) => {
+    requireAdmin(request);
+    const snapshot = await db.ref("config/pricing/current").get();
+    return {
+      configured: snapshot.exists(),
+      configuration: snapshot.exists() ? snapshot.val() : null,
+    };
+  }
+);
+
+export const updatePricingConfiguration = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = requireAdmin(request);
+    const data = asRecord(request.data);
+    const input = data.configuration ?? data.pricingConfiguration;
+    if (!input || typeof input !== "object") {
+      throw new HttpsError("invalid-argument", "A complete pricing configuration is required.");
+    }
+    const normalized = normalizePricingConfiguration(input);
+    const currentRef = db.ref("config/pricing/current");
+    const transaction = await currentRef.transaction((currentValue) => ({
+      ...normalized,
+      version: Number(asRecord(currentValue).version ?? 0) + 1,
+      updatedAtTimestamp: Date.now(),
+      updatedBy: uid,
+    }));
+
+    if (!transaction.committed || !transaction.snapshot.exists()) {
+      throw new HttpsError("aborted", "Pricing configuration could not be published. Please retry.");
+    }
+    const published = asRecord(transaction.snapshot.val());
+    const version = Number(published.version);
+    await db.ref("config/pricing/versions/" + version).set(published);
+
+    logger.info("Administrator published pricing configuration", { uid, version });
+    return { success: true, version, updatedAtTimestamp: published.updatedAtTimestamp };
+  }
+);
+
+export const createPricingQuote = onCall(
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const quoteType = asString(data.quoteType).toUpperCase();
+    if (quoteType !== "DELIVERY" && quoteType !== "RIDE") {
+      throw new HttpsError("invalid-argument", "Quote type must be DELIVERY or RIDE.");
+    }
+
+    const pickupLat = asNumber(data.pickupLat, "pickup latitude");
+    const pickupLng = asNumber(data.pickupLng, "pickup longitude");
+    const dropoffLat = asNumber(data.dropoffLat, "drop-off latitude");
+    const dropoffLng = asNumber(data.dropoffLng, "drop-off longitude");
+    validateCoordinates(pickupLat, pickupLng, "Pickup");
+    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
+
+    const config = await getCurrentPricingConfiguration();
+    const serviceType = (asString(data.serviceType) || "ride").toLowerCase();
+    const route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng);
+    let amountCentavos: number;
+    let feeKind: "deliveryFeeCentavos" | "fareCentavos";
+    let snapshot: Record<string, unknown>;
+
+    if (quoteType === "DELIVERY") {
+      amountCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
+      feeKind = "deliveryFeeCentavos";
+      snapshot = pricingSnapshot(config, "DELIVERY", route);
+    } else {
+      const rule = config.rides[serviceType];
+      if (!rule) {
+        throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
+      }
+      const fare = calculateRideFareCentavos(route.distanceMeters, rule, config.additionalCharges.ridesCentavos);
+      amountCentavos = fare.fareCentavos;
+      feeKind = "fareCentavos";
+      snapshot = pricingSnapshot(config, "RIDES", route, {
+        serviceType,
+        optionalChargesCentavos: fare.optionalChargesCentavos,
+      });
+    }
+
+    const quoteId = db.ref("pricingQuotes").push().key || randomUUID();
+    const timestamp = Date.now();
+    const quote = {
+      id: quoteId,
+      userId: uid,
+      quoteType,
+      serviceType: quoteType === "RIDE" ? serviceType : null,
+      pickupLat,
+      pickupLng,
+      dropoffLat,
+      dropoffLng,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      routeDuration: route.duration,
+      [feeKind]: amountCentavos,
+      amountCentavos,
+      amount: phpFromCents(amountCentavos),
+      pricingVersion: config.version,
+      pricingConfiguration: config,
+      pricingSnapshot: snapshot,
+      createdAtTimestamp: timestamp,
+      expiresAtTimestamp: timestamp + QUOTE_LIFETIME_MS,
+    };
+    await db.ref("pricingQuotes/" + quoteId).set(quote);
+
+    return {
+      quoteId,
+      quoteType,
+      amountCentavos,
+      amount: phpFromCents(amountCentavos),
+      distanceMeters: route.distanceMeters,
+      distanceKm: quote.distanceKm,
+      routeDuration: route.duration,
+      pricingVersion: config.version,
+      expiresAtTimestamp: quote.expiresAtTimestamp,
+    };
+  }
+);
+
 export const createOrderPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY] },
+  { region: REGION, secrets: [XENDIT_SECRET_KEY, GOOGLE_ROUTES_API_KEY] },
   async (request) => {
     const uid = requireUid(request);
     const data = asRecord(request.data);
@@ -389,12 +885,88 @@ export const createOrderPayment = onCall(
     if (!dropoffLocation) throw new HttpsError("invalid-argument", "A drop-off address is required.");
 
     const catalog = await loadOrderCatalog(uid, orderType, sourceId, requestedItems);
-    const subtotal = roundMoney(catalog.items.reduce((sum, item) => sum + item.basePrice * item.quantity, 0));
-    const deliveryFee = catalog.deliveryFee;
-    const totalPrice = roundMoney(subtotal + deliveryFee);
-    if (totalPrice <= 0) {
-      throw new HttpsError("failed-precondition", "The order total must be greater than zero.");
+    validateCoordinates(catalog.pickupLat, catalog.pickupLng, "Merchant pickup");
+    const pricingQuoteId = asString(data.pricingQuoteId);
+    let config: PricingConfiguration;
+    let route: RouteResult;
+    let deliveryFeeCentavos: number;
+    let savedPricingSnapshot: Record<string, unknown>;
+
+    if (pricingQuoteId) {
+      const quote = await loadOwnedPricingQuote(
+        uid, pricingQuoteId, "DELIVERY",
+        catalog.pickupLat, catalog.pickupLng, dropoffLat, dropoffLng
+      );
+      config = normalizePricingConfiguration(quote.pricingConfiguration);
+      route = {
+        provider: "GOOGLE_ROUTES_API",
+        distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
+        duration: asString(quote.routeDuration),
+      };
+      deliveryFeeCentavos = nonNegativeInteger(quote.deliveryFeeCentavos, "quoted delivery fee");
+      savedPricingSnapshot = asRecord(quote.pricingSnapshot);
+    } else {
+      config = await getCurrentPricingConfiguration();
+      route = await calculateGoogleRoute(catalog.pickupLat, catalog.pickupLng, dropoffLat, dropoffLng);
+      deliveryFeeCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
+      savedPricingSnapshot = pricingSnapshot(config, orderType === "FOOD" ? "FOOD_DELIVERY" : "GOODS_DELIVERY", route);
     }
+
+    const subtotalCentavos = catalog.items.reduce(
+      (sum, item) => sum + centsFromPhp(item.basePrice, "catalog item price") * item.quantity,
+      0
+    );
+    if (!Number.isSafeInteger(subtotalCentavos) || subtotalCentavos <= 0) {
+      throw new HttpsError("failed-precondition", "The server-calculated item subtotal is invalid.");
+    }
+    const categoryChargeCentavos = orderType === "FOOD"
+      ? config.additionalCharges.foodCentavos
+      : config.additionalCharges.goodsCentavos;
+    const additionalChargesCentavos =
+      categoryChargeCentavos + config.additionalCharges.deliveryCentavos;
+    const totalCentavos = subtotalCentavos + deliveryFeeCentavos + additionalChargesCentavos;
+    if (!Number.isSafeInteger(totalCentavos) || totalCentavos <= 0) {
+      throw new HttpsError("failed-precondition", "The server-calculated order total is invalid.");
+    }
+
+    const itemCommissionBps = orderType === "FOOD"
+      ? config.commissions.foodBps
+      : config.commissions.goodsBps;
+    const merchantCommissionCentavos = commissionCentavos(subtotalCentavos, itemCommissionBps);
+    const deliveryCommissionCentavos = commissionCentavos(deliveryFeeCentavos, config.commissions.deliveryBps);
+    const merchantShareCentavos = subtotalCentavos - merchantCommissionCentavos;
+    const courierShareCentavos = deliveryFeeCentavos - deliveryCommissionCentavos;
+    const platformShareCentavos =
+      merchantCommissionCentavos + deliveryCommissionCentavos + additionalChargesCentavos;
+
+    const subtotal = phpFromCents(subtotalCentavos);
+    const deliveryFee = phpFromCents(deliveryFeeCentavos);
+    const totalPrice = phpFromCents(totalCentavos);
+    const breakdown = {
+      currency: "PHP",
+      subtotalCentavos,
+      deliveryFeeCentavos,
+      additionalChargesCentavos,
+      totalCentavos,
+      merchantCommissionCentavos,
+      deliveryCommissionCentavos,
+      merchantShareCentavos,
+      courierShareCentavos,
+      driverShareCentavos: 0,
+      platformShareCentavos,
+      gatewayFeeCentavos: 0,
+    };
+    savedPricingSnapshot = {
+      ...savedPricingSnapshot,
+      category: orderType === "FOOD" ? "FOOD_DELIVERY" : "GOODS_DELIVERY",
+      commissionRatesBps: {
+        merchant: itemCommissionBps,
+        delivery: config.commissions.deliveryBps,
+      },
+      additionalChargesCentavos,
+      cancellationFees: config.cancellationFees,
+      refundPolicy: config.refundPolicy,
+    };
 
     const timestamp = Date.now();
     let providerReference = "cash_" + id;
@@ -429,6 +1001,16 @@ export const createOrderPayment = onCall(
       subtotal,
       deliveryFee,
       totalPrice,
+      subtotalCentavos,
+      deliveryFeeCentavos,
+      totalPriceCentavos: totalCentavos,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      routeDuration: route.duration,
+      pricingVersion: config.version,
+      pricingQuoteId: pricingQuoteId || null,
+      pricingSnapshot: savedPricingSnapshot,
+      breakdown,
       status: orderStatus,
       deliveryId: "",
       deliveryName: "",
@@ -454,6 +1036,9 @@ export const createOrderPayment = onCall(
       channelCode: paymentMethod,
       status: paymentStatus,
       amount: totalPrice,
+      amountCentavos: totalCentavos,
+      breakdown,
+      pricingVersion: config.version,
       currency: "PHP",
       checkoutUrl,
       createdAtTimestamp: timestamp,
@@ -470,53 +1055,17 @@ export const createOrderPayment = onCall(
       paymentId: providerReference,
       paymentStatus,
       amount: totalPrice,
+      amountCentavos: totalCentavos,
+      breakdown,
+      distanceMeters: route.distanceMeters,
+      pricingVersion: config.version,
       checkoutUrl: checkoutUrl || null,
     };
   }
 );
 
-function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const radians = (degrees: number) => degrees * Math.PI / 180;
-  const dLat = radians(lat2 - lat1);
-  const dLng = radians(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(radians(lat1)) * Math.cos(radians(lat2)) *
-    Math.sin(dLng / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-async function calculateRideFare(
-  serviceType: string,
-  pickupLat: number,
-  pickupLng: number,
-  dropoffLat: number,
-  dropoffLng: number
-): Promise<{ fare: number; distanceKm: number }> {
-  const key = serviceType.toLowerCase();
-  const snapshot = await db.ref("config/pricing/rides/" + key).get();
-  if (!snapshot.exists()) {
-    throw new HttpsError(
-      "failed-precondition",
-      "Ride pricing is not configured. Ask an administrator to configure config/pricing/rides/" + key + "."
-    );
-  }
-
-  const pricing = asRecord(snapshot.val());
-  const baseFare = asNumber(pricing.baseFare, "ride base fare");
-  const perKm = asNumber(pricing.perKm, "ride price per kilometre");
-  const minimumFare = asNumber(pricing.minimumFare, "ride minimum fare");
-  if (baseFare < 0 || perKm < 0 || minimumFare < 0) {
-    throw new HttpsError("failed-precondition", "Ride pricing configuration cannot contain negative values.");
-  }
-
-  const distance = distanceKm(pickupLat, pickupLng, dropoffLat, dropoffLng);
-  const fare = roundMoney(Math.max(minimumFare, baseFare + distance * perKm));
-  return { fare, distanceKm: roundMoney(distance) };
-}
-
 export const createTripPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY] },
+  { region: REGION, secrets: [XENDIT_SECRET_KEY, GOOGLE_ROUTES_API_KEY] },
   async (request) => {
     const uid = requireUid(request);
     const data = asRecord(request.data);
@@ -542,10 +1091,79 @@ export const createTripPayment = onCall(
       throw new HttpsError("invalid-argument", "Pickup and drop-off addresses are required.");
     }
 
-    const fareResult = await calculateRideFare(serviceType, pickupLat, pickupLng, dropoffLat, dropoffLng);
-    if (fareResult.fare <= 0) {
+    const pricingQuoteId = asString(data.pricingQuoteId);
+    let config: PricingConfiguration;
+    let route: RouteResult;
+    let fareCentavos: number;
+    let optionalChargesCentavos: number;
+    let savedPricingSnapshot: Record<string, unknown>;
+    let rideRule: RidePricingRule;
+
+    if (pricingQuoteId) {
+      const quote = await loadOwnedPricingQuote(
+        uid, pricingQuoteId, "RIDE",
+        pickupLat, pickupLng, dropoffLat, dropoffLng, serviceType
+      );
+      config = normalizePricingConfiguration(quote.pricingConfiguration);
+      route = {
+        provider: "GOOGLE_ROUTES_API",
+        distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
+        duration: asString(quote.routeDuration),
+      };
+      fareCentavos = nonNegativeInteger(quote.fareCentavos, "quoted ride fare");
+      savedPricingSnapshot = asRecord(quote.pricingSnapshot);
+      rideRule = config.rides[serviceType];
+    } else {
+      config = await getCurrentPricingConfiguration();
+      rideRule = config.rides[serviceType];
+      if (!rideRule) {
+        throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
+      }
+      route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng);
+      const fare = calculateRideFareCentavos(route.distanceMeters, rideRule, config.additionalCharges.ridesCentavos);
+      fareCentavos = fare.fareCentavos;
+      optionalChargesCentavos = fare.optionalChargesCentavos;
+      savedPricingSnapshot = pricingSnapshot(config, "RIDES", route, {
+        serviceType,
+        optionalChargesCentavos,
+      });
+    }
+
+    if (!rideRule) {
+      throw new HttpsError("failed-precondition", "Ride pricing snapshot is missing this service type.");
+    }
+    if (pricingQuoteId) {
+      optionalChargesCentavos = Number(asRecord(savedPricingSnapshot).optionalChargesCentavos ?? 0);
+    }
+    if (fareCentavos <= 0) {
       throw new HttpsError("failed-precondition", "The server-calculated ride fare must be greater than zero.");
     }
+
+    const rideCommissionCentavos = commissionCentavos(fareCentavos, config.commissions.ridesBps);
+    const driverShareCentavos = fareCentavos - rideCommissionCentavos;
+    const rideBreakdown = {
+      currency: "PHP",
+      subtotalCentavos: fareCentavos - optionalChargesCentavos,
+      deliveryFeeCentavos: 0,
+      additionalChargesCentavos: optionalChargesCentavos,
+      totalCentavos: fareCentavos,
+      merchantCommissionCentavos: 0,
+      deliveryCommissionCentavos: 0,
+      merchantShareCentavos: 0,
+      courierShareCentavos: 0,
+      driverShareCentavos,
+      platformShareCentavos: rideCommissionCentavos,
+      gatewayFeeCentavos: 0,
+    };
+    savedPricingSnapshot = {
+      ...savedPricingSnapshot,
+      category: "RIDES",
+      serviceType,
+      commissionRatesBps: { rides: config.commissions.ridesBps },
+      cancellationFees: config.cancellationFees,
+      refundPolicy: config.refundPolicy,
+    };
+    const fareAmount = phpFromCents(fareCentavos);
 
     const timestamp = Date.now();
     let providerReference = "cash_" + id;
@@ -581,8 +1199,15 @@ export const createTripPayment = onCall(
       pickupLng,
       dropoffLat,
       dropoffLng,
-      fare: fareResult.fare,
-      distanceKm: fareResult.distanceKm,
+      fare: fareAmount,
+      fareCentavos,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      routeDuration: route.duration,
+      pricingVersion: config.version,
+      pricingQuoteId: pricingQuoteId || null,
+      pricingSnapshot: savedPricingSnapshot,
+      breakdown: rideBreakdown,
       serviceType: serviceType.toUpperCase(),
       driverId: targetDriverId,
       status: tripStatus,
@@ -599,7 +1224,10 @@ export const createTripPayment = onCall(
       providerReference,
       channelCode: paymentMethod,
       status: paymentStatus,
-      amount: fareResult.fare,
+      amount: fareAmount,
+      amountCentavos: fareCentavos,
+      breakdown: rideBreakdown,
+      pricingVersion: config.version,
       currency: "PHP",
       checkoutUrl,
       createdAtTimestamp: timestamp,
@@ -615,8 +1243,14 @@ export const createTripPayment = onCall(
       tripId: id,
       paymentId: providerReference,
       paymentStatus,
-      fare: fareResult.fare,
-      amount: fareResult.fare,
+      fare: fareAmount,
+      fareCentavos,
+      amount: fareAmount,
+      amountCentavos: fareCentavos,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      pricingVersion: config.version,
+      breakdown: rideBreakdown,
       checkoutUrl: checkoutUrl || null,
     };
   }
