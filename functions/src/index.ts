@@ -3694,14 +3694,18 @@ export const confirmCashCollected = onCall(
     }
 
     const paymentSnapshot = await db.ref("payments/" + entityId).get();
-    if (paymentSnapshot.exists()) {
-      const payment = asRecord(paymentSnapshot.val());
-      if (
-        asString(payment.provider).toUpperCase() === "XENDIT" ||
-        asString(payment.channelCode).toUpperCase() === "GCASH"
-      ) {
-        throw new HttpsError("failed-precondition", "A GCash payment cannot be confirmed as a cash collection.");
-      }
+    if (!paymentSnapshot.exists()) {
+      throw new HttpsError("failed-precondition", "The server-created cash payment record is missing.");
+    }
+    const payment = asRecord(paymentSnapshot.val());
+    if (
+      asString(payment.provider).toUpperCase() !== "CASH" ||
+      asString(payment.channelCode).toUpperCase() !== "CASH"
+    ) {
+      throw new HttpsError("failed-precondition", "Only a server-created Cash payment can be confirmed through the cash collection flow.");
+    }
+    if (["PAID", "COLLECTED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(asString(payment.status).toUpperCase())) {
+      throw new HttpsError("failed-precondition", "This payment is already settled or refunded.");
     }
 
     const amountCentavos = cashAmountCentavos(entityType, entity);
