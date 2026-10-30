@@ -5343,6 +5343,7 @@ export const processAutomaticPayouts = onSchedule(
     });
     for (const uid of entries) {
       try {
+        await requireApprovedEarningsRole(uid);
         const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
         const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
         const available = walletNumber(wallet, "availableCentavos");
