@@ -42,6 +42,7 @@ class AdminPaymentsScreen : Screen {
                 Metric("Cash owed by collectors", "₱" + peso(dashboard.cashOwedCentavos))
                 Metric("Platform cash due", "₱" + peso(dashboard.cashPlatformOwedCentavos))
                 Metric("Confirmed payouts", "₱" + peso(dashboard.paidOutCentavos))
+                Metric("Recorded GCash commissions", "₱" + peso(dashboard.platformCommissionCentavos))
 
                 Text("Payout-account reviews", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 if (dashboard.payoutAccountReviews.isEmpty()) Text("No payout accounts queued for review.")
