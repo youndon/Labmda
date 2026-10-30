@@ -19,6 +19,58 @@ pricing configuration from Realtime Database; clients never send order totals or
 The callable and webhook functions are deployed in `asia-southeast1`. The payment currency is
 PHP and the online channel in this first collection flow is GCash.
 
+## Callable Functions API
+
+The initial quote-first API is:
+
+| Callable | Purpose | Input |
+|---|---|---|
+| `quoteOrder` | Validates a food/goods basket, reads the approved merchant/shop catalogue, obtains road distance and returns a locked order quote | `orderType`, `sourceId`, `items[]`, `dropoffLocation`, `dropoffLat`, `dropoffLng` |
+| `createOrder` | Rechecks merchant approval, item availability and stock, then creates an order from the unexpired server-issued quote | `quoteId`, `idempotencyKey` |
+| `quoteTrip` | Calculates a ride quote from server route distance and the configured service rate | `pickupLat`, `pickupLng`, `dropoffLat`, `dropoffLng`, optional `serviceType` |
+| `createTrip` | Creates a trip using the unexpired ride quote and its pricing snapshot | `quoteId`, `idempotencyKey`, optional passenger/driver display fields |
+| `adminUpdatePricing` | Publishes the complete pricing configuration | `configuration` |
+| `adminSetCommissionRules` | Updates one or more commission rates without changing other pricing rules | `commissions.foodBps`, `goodsBps`, `deliveryBps`, `ridesBps` |
+
+For `quoteOrder`, each item is a catalogue identifier and quantity, for example
+`{ "id": "meal_123", "quantity": 2 }`. Do not send unit prices, subtotals, delivery fees,
+distances, commission amounts or totals as authoritative values.
+
+Quote records are created by the server and expire after 10 minutes. `createOrder` and
+`createTrip` accept only the owning user's quote, revalidate availability/stock and use the
+saved price and pricing-rule snapshot. Reusing an idempotency key returns the existing record
+for the same authenticated owner.
+
+The original payment-compatible callables (`createOrderPayment`, `createTripPayment`) remain
+available for older Android screens. The quote-first `createOrder`/`createTrip` API creates
+the authoritative order/trip data; the payment lifecycle can then be started through the
+payment-specific flow.
+
+## Local Firebase emulators
+
+Install Node.js 22 and the Firebase CLI (`npm install -g firebase-tools`), then from the
+repository root run:
+
+```sh
+npm --prefix functions install
+npm --prefix functions run serve
+```
+
+The script builds TypeScript and starts the Functions, Realtime Database and Auth emulators
+with the demo project ID `demo-labmda`, so local requests do not target your production
+Firebase project. Emulator ports are configured in the root `firebase.json`: Functions
+5001, Realtime Database 9000, Auth 9099, and Emulator UI 4000.
+
+For local secret-backed functions, copy `functions/.secret.local.example` to
+`functions/.secret.local` and fill in test credentials. The real `.secret.local` file is
+ignored by Git. For local return-page environment values, copy `functions/.env.example` to
+`functions/.env.local`. Never commit real API keys or payment secrets.
+
+To deploy to your linked Firebase project, first select it with `firebase use --add`, then run
+`npm --prefix functions run deploy`. This deploys Functions only; it does not change your
+Realtime Database rules. Keep the existing app rules and add the quote/config write protections
+documented below before enabling production checkout.
+
 ## Administrator pricing configuration
 
 All platform pricing is stored server-side at `config/pricing/current`. The Android app must
