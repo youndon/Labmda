@@ -169,12 +169,12 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         ) {
                             Column {
                                 Text(
-                                    "$itemCount item(s) selected",
+                                    "$itemCount item(s) · estimated subtotal",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    "₱${"%.2f".format(grandTotal)}",
+                                    "₱${"%.2f".format(subtotal)}",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )

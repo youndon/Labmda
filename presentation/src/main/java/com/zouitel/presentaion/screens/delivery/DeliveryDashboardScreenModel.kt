@@ -6,7 +6,7 @@ import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
-import com.zouitel.presentaion.screens.payment.PaymentRepository
+import com.zouitel.presentaion.payments.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database

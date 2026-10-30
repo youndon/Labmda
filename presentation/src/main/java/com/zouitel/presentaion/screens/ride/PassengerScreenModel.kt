@@ -186,7 +186,7 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
 
         screenModelScope.launch {
             try {
-                // The client-side fare is intentionally ignored. Cloud Functions calculate it
+                // No client fare is accepted by this request. Cloud Functions calculate the amount
                 // from server-managed service pricing and the submitted route coordinates.
                 val result = payments.createTrip(
                     idempotencyKey = idempotencyKey,
