@@ -229,7 +229,7 @@ async function createXenditGcashRequest(args: {
         : initialStatus === "FAILED"
           ? "FAILED"
           : "PENDING";
-  return { paymentId, checkoutUrl, status };
+  return { paymentId, checkoutUrl, status, webCheckoutUrl, checkoutActionDescriptor };
 }
 
 function buildPaymentResponse(
