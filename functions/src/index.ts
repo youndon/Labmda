@@ -4665,9 +4665,18 @@ async function reconcileRefundedPaymentEarnings(entityId: string, refundAttemptI
   const merchantId = asString(entity.merchantId) || asString(entity.sourceId);
   const courierId = asString(entity.deliveryId);
   const driverId = asString(entity.driverId);
-  if (merchantRefund > 0 && merchantId) recipients.push({ uid: merchantId, type: "MERCHANT", amount: merchantRefund });
-  if (courierRefund > 0 && courierId) recipients.push({ uid: courierId, type: "COURIER", amount: courierRefund });
-  if (driverRefund > 0 && driverId) recipients.push({ uid: driverId, type: "DRIVER", amount: driverRefund });
+  if (merchantRefund > 0 && !merchantId) {
+    throw new HttpsError("failed-precondition", "The refund cannot be reconciled because the original merchant recipient is missing.");
+  }
+  if (courierRefund > 0 && !courierId) {
+    throw new HttpsError("failed-precondition", "The refund is waiting for the original courier assignment before it can be reconciled.");
+  }
+  if (driverRefund > 0 && !driverId) {
+    throw new HttpsError("failed-precondition", "The refund cannot be reconciled because the original driver recipient is missing.");
+  }
+  if (merchantRefund > 0) recipients.push({ uid: merchantId, type: "MERCHANT", amount: merchantRefund });
+  if (courierRefund > 0) recipients.push({ uid: courierId, type: "COURIER", amount: courierRefund });
+  if (driverRefund > 0) recipients.push({ uid: driverId, type: "DRIVER", amount: driverRefund });
 
   const lines: LedgerLine[] = [];
   for (const recipient of recipients) {
