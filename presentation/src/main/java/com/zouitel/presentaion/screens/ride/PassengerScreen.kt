@@ -202,7 +202,12 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     selectedDriver = null
                     tappedDriverId = null
                     result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                        runCatching { uriHandler.openUri(url) }
+                        val opened = runCatching { uriHandler.openUri(url) }.isSuccess
+                        if (!opened) {
+                            result.webCheckoutUrl?.takeIf { it.isNotBlank() && it != url }?.let { fallback ->
+                                runCatching { uriHandler.openUri(fallback) }
+                            }
+                        }
                     }
                     scope.launch {
                         snackbarHostState.showSnackbar(
