@@ -223,7 +223,7 @@ class AccountScreen : Screen {
                             Column {
                                 GroupedAccountRow(Icons.Filled.History, "Orders & Ride History") { navigator.push(ActivityHistoryScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                GroupedAccountRow(Icons.Filled.CreditCard, "Payment Activity") { navigator.push(PaymentCenterScreen()) }
+                                GroupedAccountRow(Icons.Filled.CreditCard, "Payments & Activity") { navigator.push(PaymentCenterScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { /* TODO */ }
                             }

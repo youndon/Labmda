@@ -4,7 +4,7 @@ import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.screens.account.LogInScreenModel
 import com.zouitel.presentaion.screens.delivery.deliveryModule
 import com.zouitel.presentaion.screens.food.foodModule
-import com.zouitel.presentaion.screens.payment.paymentModule
+import com.zouitel.presentaion.payments.paymentModule
 import com.zouitel.presentaion.screens.ride.rideModule
 import com.zouitel.presentaion.screens.shops.shopsModule
 import dev.gitlive.firebase.Firebase

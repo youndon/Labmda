@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.google.android.gms.location.LocationServices
@@ -52,6 +53,13 @@ import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
+import com.zouitel.presentaion.payments.PayButton
+import com.zouitel.presentaion.payments.PaymentEventEffect
+import com.zouitel.presentaion.payments.PaymentMethodSelector
+import com.zouitel.presentaion.payments.PaymentRepository
+import com.zouitel.presentaion.payments.PaymentResultSheet
+import com.zouitel.presentaion.payments.PaymentScreenModel
+import org.koin.core.context.GlobalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,7 +81,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         val uriHandler = LocalUriHandler.current
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        val screenModel = rememberScreenModel { PassengerScreenModel() }
+        val paymentRepository = remember { GlobalContext.get().get<PaymentRepository>() }
+        val screenModel = rememberScreenModel { PassengerScreenModel(paymentRepository) }
+        val paymentScreenModel = koinScreenModel<PaymentScreenModel>()
+        val paymentUiState by paymentScreenModel.uiState.collectAsState()
 
         val trips by screenModel.trips.collectAsState()
         val onlineDrivers by screenModel.onlineDrivers.collectAsState()
@@ -82,6 +93,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
 
         val cameraPositionState = rememberCameraPositionState()
         val snackbarHostState = remember { SnackbarHostState() }
+        PaymentEventEffect(paymentScreenModel, uriHandler)
         val routeColor = MaterialTheme.colorScheme.primary
 
         var pickup by remember { mutableStateOf<LatLng?>(null) }
@@ -93,7 +105,6 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember(openHistoryOnStart) { mutableStateOf(openHistoryOnStart) }
         var hasCenteredOnPickup by remember { mutableStateOf(false) }
-        var paymentMethod by remember { mutableStateOf("CASH") }
 
         var hasLocationPermission by remember {
             mutableStateOf(
@@ -184,6 +195,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             val p = pickup
             val d = destination
             if (p == null || d == null) return
+            paymentScreenModel.checkoutStarted()
             screenModel.requestTrip(
                 pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
                 pickupLat = p.latitude,
@@ -191,24 +203,17 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
                 dropoffLat = d.latitude,
                 dropoffLng = d.longitude,
-                fare = fare,
                 passengerName = name,
                 passengerPhone = phone,
                 targetDriver = driver,
-                paymentMethod = paymentMethod,
+                paymentMethod = paymentUiState.selectedMethod.name,
                 onSuccess = { result ->
+                    paymentScreenModel.checkoutCreated(result)
                     destination = null
                     destinationAddress = ""
                     selectedDriver = null
                     tappedDriverId = null
-                    result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                        val opened = runCatching { uriHandler.openUri(url) }.isSuccess
-                        if (!opened) {
-                            result.webCheckoutUrl?.takeIf { it.isNotBlank() && it != url }?.let { fallback ->
-                                runCatching { uriHandler.openUri(fallback) }
-                            }
-                        }
-                    }
+                    requestSheetDriver = null
                     scope.launch {
                         snackbarHostState.showSnackbar(
                             "Ride requested. Server fare: ₱${"%.2f".format(result.amount)}"
@@ -216,6 +221,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     }
                 },
                 onFailure = { message ->
+                    paymentScreenModel.checkoutFailed(message)
                     scope.launch { snackbarHostState.showSnackbar(message) }
                 }
             )
@@ -352,6 +358,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                     hasDestination = destination != null,
                                     distanceKm = distanceKm,
                                     fare = fare,
+                                    isSubmitting = paymentUiState.isSubmitting,
                                     vehicleType = vehicleType,
                                     selectedDriver = selectedDriver,
                                     initialName = passengerInfo.name,
@@ -367,18 +374,11 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                     },
                                     onSubmit = { name, phone -> submitTrip(name, phone, selectedDriver) }
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilterChip(
-                                        selected = paymentMethod == "GCASH",
-                                        onClick = { paymentMethod = "GCASH" },
-                                        label = { Text("GCash") }
-                                    )
-                                    FilterChip(
-                                        selected = paymentMethod == "CASH",
-                                        onClick = { paymentMethod = "CASH" },
-                                        label = { Text("Cash") }
-                                    )
-                                }
+                                PaymentMethodSelector(
+                                    selectedMethod = paymentUiState.selectedMethod,
+                                    onMethodSelected = paymentScreenModel::selectMethod,
+                                    enabled = !paymentUiState.isSubmitting
+                                )
                             }
                         }
                     }
@@ -398,44 +398,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         destinationAddress = destinationAddress,
                         distanceKm = distanceKm,
                         fare = fare,
+                        isSubmitting = paymentUiState.isSubmitting,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
-                        onRequest = { name, phone ->
-                            val p = pickup
-                            val d = destination
-                            if (p != null && d != null) {
-                                screenModel.requestTrip(
-                                    pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
-                                    pickupLat = p.latitude,
-                                    pickupLng = p.longitude,
-                                    dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
-                                    dropoffLat = d.latitude,
-                                    dropoffLng = d.longitude,
-                                    fare = fare,
-                                    passengerName = name,
-                                    passengerPhone = phone,
-                                    targetDriver = driver,
-                                    paymentMethod = paymentMethod,
-                                    onSuccess = { result ->
-                                        destination = null
-                                        destinationAddress = ""
-                                        selectedDriver = null
-                                        requestSheetDriver = null
-                                        result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                                            runCatching { uriHandler.openUri(url) }
-                                        }
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar(
-                                                "Trip requested with ${driver.fullName}. Server fare: ₱${"%.2f".format(result.amount)}"
-                                            )
-                                        }
-                                    },
-                                    onFailure = { message ->
-                                        scope.launch { snackbarHostState.showSnackbar(message) }
-                                    }
-                                )
-                            }
-                        }
+                        onRequest = { name, phone -> submitTrip(name, phone, driver) }
                     )
                 }
             }
@@ -477,6 +443,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         destinationAddress = destinationAddress,
                         tripDistanceKm = distanceKm,
                         fare = fare,
+                        isSubmitting = paymentUiState.isSubmitting,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
                         onPickDestination = { tappedDriverId = null },
@@ -485,6 +452,19 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 }
             }
         }
+
+        PaymentResultSheet(
+            state = paymentUiState,
+            onDismiss = {
+                paymentScreenModel.dismissResult()
+                showHistory = true
+            },
+            onOpenCheckout = { payment ->
+                (payment.checkoutUrl ?: payment.webCheckoutUrl)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { url -> runCatching { uriHandler.openUri(url) } }
+            }
+        )
     }
 
     @Composable
@@ -495,6 +475,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         hasDestination: Boolean,
         distanceKm: Double,
         fare: Double,
+        isSubmitting: Boolean,
         vehicleType: VehicleType,
         selectedDriver: UserProfile?,
         initialName: String,
@@ -591,20 +572,18 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "₱${"%.2f".format(fare)}",
+                        "Est. ₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
 
-                Button(
-                    onClick = { onSubmit(name.trim(), phone.trim()) },
+                PayButton(
+                    label = if (selectedDriver != null) "Request ${selectedDriver.fullName}" else "Request Ride",
                     enabled = name.isNotBlank() && distanceKm > 0.05,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    Text(if (selectedDriver != null) "Request ${selectedDriver.fullName}" else "Request Ride", fontWeight = FontWeight.Bold)
-                }
+                    isLoading = isSubmitting,
+                    onClick = { onSubmit(name.trim(), phone.trim()) }
+                )
             }
         }
     }
@@ -617,6 +596,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         destinationAddress: String,
         tripDistanceKm: Double,
         fare: Double,
+        isSubmitting: Boolean,
         initialName: String,
         initialPhone: String,
         onPickDestination: () -> Unit,
@@ -679,20 +659,18 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 ) {
                     Text("Distance: ${"%.1f".format(tripDistanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "₱${"%.2f".format(fare)}",
+                        "Est. ₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
 
-                Button(
-                    onClick = { onRequest(name.trim(), phone.trim()) },
+                PayButton(
+                    label = "Request ${driver.fullName}",
                     enabled = name.isNotBlank() && tripDistanceKm > 0.05,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    Text("Request ${driver.fullName}", fontWeight = FontWeight.Bold)
-                }
+                    isLoading = isSubmitting,
+                    onClick = { onRequest(name.trim(), phone.trim()) }
+                )
             }
         }
     }
@@ -706,6 +684,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         destinationAddress: String,
         distanceKm: Double,
         fare: Double,
+        isSubmitting: Boolean,
         initialName: String,
         initialPhone: String,
         onRequest: (String, String) -> Unit
@@ -770,7 +749,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "₱${"%.2f".format(fare)}",
+                        "Est. ₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -796,14 +775,12 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 )
             }
 
-            Button(
-                onClick = { onRequest(name.trim(), phone.trim()) },
+            PayButton(
+                label = "Request ${driver.fullName}",
                 enabled = hasPickup && hasDestination && name.isNotBlank() && distanceKm > 0.05,
-                shape = RoundedCornerShape(14.dp),
-                modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) {
-                Text("Request ${driver.fullName}", fontWeight = FontWeight.Bold)
-            }
+                isLoading = isSubmitting,
+                onClick = { onRequest(name.trim(), phone.trim()) }
+            )
         }
     }
 
@@ -853,7 +830,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Fare amount", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Server fare", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         "₱${"%.2f".format(trip.fare)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
