@@ -4,21 +4,71 @@ import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.functions.functions
 
 /**
- * Callable-function boundary for creating orders and trips.
- *
- * The client sends catalog identifiers, quantities and route metadata only. Prices and fares
- * are calculated by Cloud Functions using the Realtime Database catalogue/configuration.
+ * Result returned by a server-created order or trip payment.
+ * The amount field remains in PHP for old UI code; amountCentavos is authoritative
+ * for money formatting/calculation in new UI code.
  */
 data class PaymentCreationResult(
     val entityId: String,
     val paymentId: String,
     val paymentStatus: String,
     val amount: Double,
-    val checkoutUrl: String?
+    val checkoutUrl: String?,
+    val amountCentavos: Long = 0L,
+    val distanceMeters: Long = 0L,
+    val pricingVersion: Long = 0L
+)
+
+/** A route and rate quote produced by Firebase Functions. */
+data class PricingQuoteResult(
+    val quoteId: String,
+    val quoteType: String,
+    val amount: Double,
+    val amountCentavos: Long,
+    val distanceMeters: Long,
+    val distanceKm: Double,
+    val pricingVersion: Long,
+    val expiresAtTimestamp: Long
 )
 
 class PaymentRepository {
     private val functions = Firebase.functions("asia-southeast1")
+
+    /**
+     * Requests a delivery or ride quote. The server obtains road distance from Google Routes
+     * and applies the current administrator pricing version.
+     */
+    suspend fun createPricingQuote(
+        quoteType: String,
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffLat: Double,
+        dropoffLng: Double,
+        serviceType: String = "ride"
+    ): PricingQuoteResult {
+        val response = functions.httpsCallable("createPricingQuote")(
+            mapOf(
+                "quoteType" to quoteType.trim().uppercase(),
+                "serviceType" to serviceType,
+                "pickupLat" to pickupLat,
+                "pickupLng" to pickupLng,
+                "dropoffLat" to dropoffLat,
+                "dropoffLng" to dropoffLng
+            )
+        )
+        val result = response.data<Map<String, Any?>>()
+        return PricingQuoteResult(
+            quoteId = result["quoteId"] as? String
+                ?: error("Pricing service did not return a quote ID."),
+            quoteType = result["quoteType"] as? String ?: quoteType.uppercase(),
+            amount = (result["amount"] as? Number)?.toDouble() ?: 0.0,
+            amountCentavos = (result["amountCentavos"] as? Number)?.toLong() ?: 0L,
+            distanceMeters = (result["distanceMeters"] as? Number)?.toLong() ?: 0L,
+            distanceKm = (result["distanceKm"] as? Number)?.toDouble() ?: 0.0,
+            pricingVersion = (result["pricingVersion"] as? Number)?.toLong() ?: 0L,
+            expiresAtTimestamp = (result["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L
+        )
+    }
 
     suspend fun createOrder(
         idempotencyKey: String,
@@ -31,23 +81,25 @@ class PaymentRepository {
         pickupLng: Double,
         dropoffLocation: String,
         dropoffLat: Double,
-        dropoffLng: Double
+        dropoffLng: Double,
+        pricingQuoteId: String? = null
     ): PaymentCreationResult {
-        val response = functions.httpsCallable("createOrderPayment")(
-            mapOf(
-                "idempotencyKey" to idempotencyKey,
-                "orderType" to orderType,
-                "sourceId" to sourceId,
-                "items" to items,
-                "paymentMethod" to paymentMethod.toPaymentCode(),
-                "pickupLocation" to pickupLocation,
-                "pickupLat" to pickupLat,
-                "pickupLng" to pickupLng,
-                "dropoffLocation" to dropoffLocation,
-                "dropoffLat" to dropoffLat,
-                "dropoffLng" to dropoffLng
-            )
+        val payload = mutableMapOf<String, Any>(
+            "idempotencyKey" to idempotencyKey,
+            "orderType" to orderType,
+            "sourceId" to sourceId,
+            "items" to items,
+            "paymentMethod" to paymentMethod.toPaymentCode(),
+            "pickupLocation" to pickupLocation,
+            "pickupLat" to pickupLat,
+            "pickupLng" to pickupLng,
+            "dropoffLocation" to dropoffLocation,
+            "dropoffLat" to dropoffLat,
+            "dropoffLng" to dropoffLng
         )
+        pricingQuoteId?.takeIf { it.isNotBlank() }?.let { payload["pricingQuoteId"] = it }
+
+        val response = functions.httpsCallable("createOrderPayment")(payload)
         return response.data<Map<String, Any?>>().toPaymentCreationResult("orderId")
     }
 
@@ -63,24 +115,26 @@ class PaymentRepository {
         passengerName: String,
         passengerPhone: String,
         targetDriverId: String?,
-        paymentMethod: String
+        paymentMethod: String,
+        pricingQuoteId: String? = null
     ): PaymentCreationResult {
-        val response = functions.httpsCallable("createTripPayment")(
-            mapOf(
-                "idempotencyKey" to idempotencyKey,
-                "serviceType" to serviceType,
-                "pickupLocation" to pickupLocation,
-                "pickupLat" to pickupLat,
-                "pickupLng" to pickupLng,
-                "dropoffLocation" to dropoffLocation,
-                "dropoffLat" to dropoffLat,
-                "dropoffLng" to dropoffLng,
-                "passengerName" to passengerName,
-                "passengerPhone" to passengerPhone,
-                "targetDriverId" to targetDriverId,
-                "paymentMethod" to paymentMethod.toPaymentCode()
-            )
+        val payload = mutableMapOf<String, Any?>(
+            "idempotencyKey" to idempotencyKey,
+            "serviceType" to serviceType,
+            "pickupLocation" to pickupLocation,
+            "pickupLat" to pickupLat,
+            "pickupLng" to pickupLng,
+            "dropoffLocation" to dropoffLocation,
+            "dropoffLat" to dropoffLat,
+            "dropoffLng" to dropoffLng,
+            "passengerName" to passengerName,
+            "passengerPhone" to passengerPhone,
+            "targetDriverId" to targetDriverId,
+            "paymentMethod" to paymentMethod.toPaymentCode()
         )
+        pricingQuoteId?.takeIf { it.isNotBlank() }?.let { payload["pricingQuoteId"] = it }
+
+        val response = functions.httpsCallable("createTripPayment")(payload)
         return response.data<Map<String, Any?>>().toPaymentCreationResult("tripId")
     }
 
@@ -102,6 +156,17 @@ class PaymentRepository {
             ?: (this["fare"] as? Number)?.toDouble()
             ?: 0.0
         val checkoutUrl = this["checkoutUrl"] as? String
-        return PaymentCreationResult(id, paymentId, status, amount, checkoutUrl)
+        return PaymentCreationResult(
+            entityId = id,
+            paymentId = paymentId,
+            paymentStatus = status,
+            amount = amount,
+            checkoutUrl = checkoutUrl,
+            amountCentavos = (this["amountCentavos"] as? Number)?.toLong()
+                ?: (this["fareCentavos"] as? Number)?.toLong()
+                ?: 0L,
+            distanceMeters = (this["distanceMeters"] as? Number)?.toLong() ?: 0L,
+            pricingVersion = (this["pricingVersion"] as? Number)?.toLong() ?: 0L
+        )
     }
 }
