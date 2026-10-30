@@ -1127,7 +1127,7 @@ export const createTripPayment = onCall(
     let config: PricingConfiguration;
     let route: RouteResult;
     let fareCentavos: number;
-    let optionalChargesCentavos: number;
+    let optionalChargesCentavos = 0;
     let savedPricingSnapshot: Record<string, unknown>;
     let rideRule: RidePricingRule;
 
