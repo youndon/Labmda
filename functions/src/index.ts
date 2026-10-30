@@ -3601,6 +3601,7 @@ async function finalizeCashCollection(
   await ensureImmutableCashLedgerEntry(asString(collectionLedger.entryId), collectionLedger);
   await postImmutableCashLedgerEntry(asString(collectionLedger.entryId));
 
+  const collectionRef = db.ref("cashCollections/" + collectionId);
   const events = asRecord(collection.remittanceEvents);
   for (const [remittanceId, raw] of Object.entries(events)) {
     const remittance = {
@@ -3612,12 +3613,26 @@ async function finalizeCashCollection(
       collectorId: asString(collection.collectorId),
     };
     await finalizeCashRemittance(collection, remittance);
+    await collectionRef.child("remittanceEvents").child(remittanceId).update({
+      reconciliationStatus: "POSTED",
+      postedAtTimestamp: Date.now(),
+    });
   }
 
-  await db.ref("cashCollections/" + collectionId).update({
-    ledgerEntryId: asString(collectionLedger.entryId),
-    reconciliationStatus: "POSTED",
-    postedAtTimestamp: Date.now(),
+  // Re-read transactionally so a concurrent remittance cannot be hidden by a stale
+  // finalizer setting the parent collection back to POSTED.
+  await collectionRef.transaction((currentValue) => {
+    const current = asRecord(currentValue);
+    const latestEvents = asRecord(current.remittanceEvents);
+    const hasPendingRemittances = Object.values(latestEvents).some((rawEvent) =>
+      asString(asRecord(rawEvent).reconciliationStatus).toUpperCase() !== "POSTED"
+    );
+    return {
+      ...current,
+      ledgerEntryId: asString(collectionLedger.entryId),
+      reconciliationStatus: hasPendingRemittances ? "PENDING" : "POSTED",
+      postedAtTimestamp: hasPendingRemittances ? Number(current.postedAtTimestamp ?? 0) : Date.now(),
+    };
   });
 }
 
