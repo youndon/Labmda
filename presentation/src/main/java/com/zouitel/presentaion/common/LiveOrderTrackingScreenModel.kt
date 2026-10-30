@@ -79,7 +79,17 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                         paymentId = str("paymentId"),
                         deliveryId = str("deliveryId"),
                         deliveryName = str("deliveryName"),
-                        deliveryPhone = str("deliveryPhone")
+                        deliveryPhone = str("deliveryPhone"),
+                        cashCollectionStatus = str("cashCollectionStatus"),
+                        cashCollectedBy = str("cashCollectedBy"),
+                        cashCollectedByRole = str("cashCollectedByRole"),
+                        cashCollectedAmountCentavos = runCatching { snapshot.child("cashCollectedAmountCentavos").value<Long>() }.getOrDefault(0L),
+                        cashMerchantOwedCentavos = runCatching { snapshot.child("cashMerchantOwedCentavos").value<Long>() }.getOrDefault(0L),
+                        cashPlatformOwedCentavos = runCatching { snapshot.child("cashPlatformOwedCentavos").value<Long>() }.getOrDefault(0L),
+                        cashCollectorEarningsCentavos = runCatching { snapshot.child("cashCollectorEarningsCentavos").value<Long>() }.getOrDefault(0L),
+                        cashRemittedCentavos = runCatching { snapshot.child("cashRemittedCentavos").value<Long>() }.getOrDefault(0L),
+                        cashOutstandingRemittanceCentavos = runCatching { snapshot.child("cashOutstandingRemittanceCentavos").value<Long>() }.getOrDefault(0L),
+                        cashRemittanceStatus = str("cashRemittanceStatus")
                     )
                 } catch (e: Exception) {
                     _order.value = null
