@@ -204,9 +204,13 @@ async function createXenditGcashRequest(args: {
   const initialStatus = asString(request.status).toUpperCase();
   const status = initialStatus === "SUCCEEDED"
     ? "SUCCEEDED"
-    : ["FAILED", "EXPIRED", "CANCELED", "CANCELLED"].includes(initialStatus)
-      ? "FAILED"
-      : "PENDING";
+    : initialStatus === "EXPIRED"
+      ? "EXPIRED"
+      : ["CANCELED", "CANCELLED"].includes(initialStatus)
+        ? "CANCELLED"
+        : initialStatus === "FAILED"
+          ? "FAILED"
+          : "PENDING";
   return { paymentId, checkoutUrl, status };
 }
 
@@ -1015,7 +1019,7 @@ export const createOrderPayment = onCall(
       providerReference = xendit.paymentId;
       checkoutUrl = xendit.checkoutUrl;
       paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
-      orderStatus = paymentStatus === "PAID" ? "PLACED" : paymentStatus === "FAILED" ? "CANCELLED" : "AWAITING_PAYMENT";
+      orderStatus = paymentStatus === "PAID" ? "PLACED" : ["FAILED", "CANCELLED", "EXPIRED"].includes(paymentStatus) ? "CANCELLED" : "AWAITING_PAYMENT";
     }
 
     const order = {
@@ -1212,7 +1216,7 @@ export const createTripPayment = onCall(
       providerReference = xendit.paymentId;
       checkoutUrl = xendit.checkoutUrl;
       paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
-      tripStatus = paymentStatus === "PAID" ? "REQUESTED" : paymentStatus === "FAILED" ? "CANCELLED" : "AWAITING_PAYMENT";
+      tripStatus = paymentStatus === "PAID" ? "REQUESTED" : ["FAILED", "CANCELLED", "EXPIRED"].includes(paymentStatus) ? "CANCELLED" : "AWAITING_PAYMENT";
     }
 
     const targetDriverId = asString(data.targetDriverId);
@@ -1376,7 +1380,13 @@ export const xenditWebhook = onRequest(
       return;
     }
 
-    const paymentStatus = succeeded ? "PAID" : "FAILED";
+    const paymentStatus = succeeded
+      ? "PAID"
+      : status === "EXPIRED"
+        ? "EXPIRED"
+        : ["CANCELED", "CANCELLED"].includes(status)
+          ? "CANCELLED"
+          : "FAILED";
     const updates: Record<string, unknown> = {};
     updates["payments/" + entityId + "/status"] = paymentStatus;
     updates["payments/" + entityId + "/updatedAtTimestamp"] = Date.now();
