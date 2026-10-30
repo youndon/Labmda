@@ -24,5 +24,14 @@ data class Trip(
     val paymentMethod: String = "",
     val paymentStatus: String = "UNPAID",
     val paymentId: String = "",
-    val createdAtTimestamp: Long = 0L
+    val createdAtTimestamp: Long = 0L,
+    val cashCollectionStatus: String = "",
+    val cashCollectedBy: String = "",
+    val cashCollectedByRole: String = "",
+    val cashCollectedAmountCentavos: Long = 0L,
+    val cashPlatformOwedCentavos: Long = 0L,
+    val cashCollectorEarningsCentavos: Long = 0L,
+    val cashRemittedCentavos: Long = 0L,
+    val cashOutstandingRemittanceCentavos: Long = 0L,
+    val cashRemittanceStatus: String = ""
 )

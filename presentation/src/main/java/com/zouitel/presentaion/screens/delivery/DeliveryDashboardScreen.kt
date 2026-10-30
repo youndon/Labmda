@@ -457,6 +457,18 @@ class DeliveryDashboardScreen : Screen {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (order.cashCollectionStatus == "COLLECTED") {
+                    Text(
+                        "Cash received: ₱${"%.2f".format(order.cashCollectedAmountCentavos / 100.0)} · Merchant owed: ₱${"%.2f".format(order.cashMerchantOwedCentavos / 100.0)} · Platform: ₱${"%.2f".format(order.cashPlatformOwedCentavos / 100.0)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Your courier earnings: ₱${"%.2f".format(order.cashCollectorEarningsCentavos / 100.0)} · Remittance outstanding: ₱${"%.2f".format(order.cashOutstandingRemittanceCentavos / 100.0)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,

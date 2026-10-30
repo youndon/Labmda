@@ -3157,3 +3157,792 @@ export const reconcilePendingPayments = onSchedule(
     });
   }
 );
+
+
+
+// -----------------------------------------------------------------------------
+// Cash collection, custody, settlement accounting and immutable double-entry
+// journal. Cash is not processed through Xendit.
+// -----------------------------------------------------------------------------
+
+type CashEntityType = "ORDER" | "TRIP";
+type CashLedgerLine = {
+  accountId: string;
+  accountType: string;
+  ownerId: string;
+  normalSide: "DEBIT" | "CREDIT";
+  debitCentavos: number;
+  creditCentavos: number;
+};
+
+function parseCashEntityType(value: unknown): CashEntityType {
+  const type = asString(value).toUpperCase();
+  if (type === "ORDER" || type === "TRIP") return type;
+  throw new HttpsError("invalid-argument", "entityType must be ORDER or TRIP.");
+}
+
+function cashEntityPath(type: CashEntityType): "orders" | "trips" {
+  return type === "ORDER" ? "orders" : "trips";
+}
+
+function cashCollectionKey(type: CashEntityType, entityId: string): string {
+  return type + "_" + entityId;
+}
+
+function cashLedgerAccountId(type: string, ownerId = "PLATFORM"): string {
+  const owner = ownerId || "UNASSIGNED";
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(owner)) {
+    throw new HttpsError("failed-precondition", "A ledger account owner ID is invalid.");
+  }
+  return type + "_" + owner;
+}
+
+function cashAmountCentavos(entityType: CashEntityType, entity: Record<string, unknown>): number {
+  const raw = entityType === "ORDER" ? entity.totalPriceCentavos : entity.fareCentavos;
+  const amount = raw !== undefined && raw !== null
+    ? nonNegativeInteger(raw, "server-calculated cash amount")
+    : centsFromPhp(
+      asNumber(entityType === "ORDER" ? entity.totalPrice : entity.fare, "server-calculated cash amount"),
+      "server-calculated cash amount"
+    );
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new HttpsError("failed-precondition", "The server-calculated cash amount is invalid.");
+  }
+  return amount;
+}
+
+function cashShareCentavos(
+  entityType: CashEntityType,
+  entity: Record<string, unknown>,
+  amountCentavos: number
+): { merchantOwedCentavos: number; platformOwedCentavos: number; collectorEarningsCentavos: number; merchantId: string } {
+  const breakdown = asRecord(entity.breakdown);
+  let merchantOwedCentavos = 0;
+  let platformOwedCentavos = nonNegativeInteger(
+    breakdown.platformShare ?? 0,
+    "platform share"
+  );
+  let collectorEarningsCentavos = entityType === "ORDER"
+    ? nonNegativeInteger(breakdown.courierShare ?? 0, "courier share")
+    : nonNegativeInteger(breakdown.driverShare ?? 0, "driver share");
+  let merchantId = "";
+
+  if (entityType === "ORDER") {
+    merchantOwedCentavos = nonNegativeInteger(breakdown.merchantShare ?? 0, "merchant share");
+    merchantId = asString(entity.merchantId) || asString(entity.sourceId);
+  }
+
+  const splitTotal = merchantOwedCentavos + platformOwedCentavos + collectorEarningsCentavos;
+  if (
+    !Number.isSafeInteger(splitTotal) ||
+    splitTotal !== amountCentavos ||
+    (entityType === "ORDER" && merchantOwedCentavos > 0 && !merchantId)
+  ) {
+    throw new HttpsError(
+      "failed-precondition",
+      "The stored cash breakdown does not reconcile to the server-calculated total. Do not collect until pricing is corrected."
+    );
+  }
+
+  return {
+    merchantOwedCentavos,
+    platformOwedCentavos,
+    collectorEarningsCentavos,
+    merchantId,
+  };
+}
+
+function cashLedgerEntryId(type: "COLLECTION" | "REMITTANCE", referenceId: string): string {
+  return "cash_" + type.toLowerCase() + "_" + referenceId;
+}
+
+async function ensureImmutableCashLedgerEntry(
+  entryId: string,
+  entry: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const entryRef = db.ref("cashLedgerEntries/" + entryId);
+  const payloadHash = createHash("sha256").update(JSON.stringify(entry)).digest("hex");
+  const immutableEntry = { ...entry, payloadHash };
+  const transaction = await entryRef.transaction((currentValue) => {
+    if (currentValue !== null && currentValue !== undefined) return;
+    return immutableEntry;
+  });
+  if (transaction.committed && transaction.snapshot.exists()) {
+    return asRecord(transaction.snapshot.val());
+  }
+  const existingSnapshot = await entryRef.get();
+  const existing = asRecord(existingSnapshot.val());
+  if (
+    !existingSnapshot.exists() ||
+    asString(existing.operationId) !== asString(entry.operationId) ||
+    Number(existing.totalCentavos) !== Number(entry.totalCentavos) ||
+    asString(existing.payloadHash) !== payloadHash
+  ) {
+    throw new HttpsError("data-loss", "An immutable cash ledger entry ID already exists with different accounting data.");
+  }
+  return existing;
+}
+
+async function postImmutableCashLedgerEntry(entryId: string): Promise<void> {
+  const entrySnapshot = await db.ref("cashLedgerEntries/" + entryId).get();
+  if (!entrySnapshot.exists()) {
+    throw new HttpsError("not-found", "The immutable cash ledger entry is missing.");
+  }
+  const entry = asRecord(entrySnapshot.val());
+  const lines = Array.isArray(entry.lines) ? entry.lines : [];
+  if (lines.length < 2) {
+    throw new HttpsError("failed-precondition", "A cash journal entry must contain at least two ledger lines.");
+  }
+
+  const normalizedLines: Array<{
+    line: Record<string, unknown>;
+    accountId: string;
+    debit: number;
+    credit: number;
+  }> = [];
+  let debitTotal = 0;
+  let creditTotal = 0;
+
+  // Validate the complete journal before creating any account posting.
+  for (const rawLine of lines) {
+    const line = asRecord(rawLine);
+    const debit = nonNegativeInteger(line.debitCentavos ?? 0, "ledger debit");
+    const credit = nonNegativeInteger(line.creditCentavos ?? 0, "ledger credit");
+    const accountId = asString(line.accountId);
+    if ((debit > 0 && credit > 0) || debit + credit <= 0) {
+      throw new HttpsError("failed-precondition", "Each ledger line must contain one positive debit or credit.");
+    }
+    if (!/^[A-Za-z0-9_-]{1,160}$/.test(accountId)) {
+      throw new HttpsError("failed-precondition", "A cash ledger account ID is invalid.");
+    }
+    debitTotal += debit;
+    creditTotal += credit;
+    normalizedLines.push({ line, accountId, debit, credit });
+  }
+
+  if (
+    !Number.isSafeInteger(debitTotal) ||
+    !Number.isSafeInteger(creditTotal) ||
+    debitTotal <= 0 ||
+    debitTotal !== creditTotal ||
+    debitTotal !== Number(entry.totalCentavos)
+  ) {
+    throw new HttpsError("failed-precondition", "The cash ledger journal entry is not balanced.");
+  }
+
+  for (const normalized of normalizedLines) {
+    const line = normalized.line;
+    const postingId = entryId;
+    const postingRef = db.ref("cashLedgerAccounts/" + normalized.accountId + "/" + postingId);
+    const posting = {
+      entryId,
+      operationId: asString(entry.operationId),
+      accountId: normalized.accountId,
+      accountType: asString(line.accountType),
+      ownerId: asString(line.ownerId),
+      normalSide: asString(line.normalSide),
+      debitCentavos: normalized.debit,
+      creditCentavos: normalized.credit,
+      currency: "PHP",
+      createdAtTimestamp: Number(entry.createdAtTimestamp ?? Date.now()),
+    };
+    const transaction = await postingRef.transaction((currentValue) => {
+      if (currentValue !== null && currentValue !== undefined) return;
+      return posting;
+    });
+    if (!transaction.committed) {
+      const existingSnapshot = await postingRef.get();
+      const existing = asRecord(existingSnapshot.val());
+      if (
+        !existingSnapshot.exists() ||
+        asString(existing.entryId) !== entryId ||
+        asString(existing.operationId) !== asString(entry.operationId) ||
+        Number(existing.debitCentavos) !== normalized.debit ||
+        Number(existing.creditCentavos) !== normalized.credit
+      ) {
+        throw new HttpsError("data-loss", "A cash account posting conflicts with an existing immutable posting.");
+      }
+    }
+  }
+
+  await db.ref("cashLedgerPostingStatus/" + entryId).set({
+    status: "POSTED",
+    debitTotalCentavos: debitTotal,
+    creditTotalCentavos: creditTotal,
+    postedAtTimestamp: Date.now(),
+  });
+}
+
+function buildCashCollectionLedgerEntry(collection: Record<string, unknown>): Record<string, unknown> {
+  const entityType = asString(collection.entityType).toUpperCase() as CashEntityType;
+  const entityId = asString(collection.entityId);
+  const collectionId = asString(collection.collectionId);
+  const collectorId = asString(collection.collectorId);
+  const total = nonNegativeInteger(collection.collectedAmountCentavos, "collected cash amount");
+  const merchantOwed = nonNegativeInteger(collection.merchantOwedCentavos ?? 0, "merchant cash payable");
+  const platformOwed = nonNegativeInteger(collection.platformOwedCentavos, "platform cash amount");
+  const collectorEarnings = nonNegativeInteger(collection.collectorEarningsCentavos, "collector cash earnings");
+  const lines: CashLedgerLine[] = [
+    {
+      accountId: cashLedgerAccountId("CASH_CUSTODY", collectorId),
+      accountType: "CASH_CUSTODY",
+      ownerId: collectorId,
+      normalSide: "DEBIT",
+      debitCentavos: total,
+      creditCentavos: 0,
+    },
+  ];
+  if (entityType === "ORDER" && merchantOwed > 0) {
+    lines.push({
+      accountId: cashLedgerAccountId("MERCHANT_PAYABLE", asString(collection.merchantId)),
+      accountType: "MERCHANT_PAYABLE",
+      ownerId: asString(collection.merchantId),
+      normalSide: "CREDIT",
+      debitCentavos: 0,
+      creditCentavos: merchantOwed,
+    });
+  }
+  if (collectorEarnings > 0) {
+    lines.push({
+      accountId: cashLedgerAccountId(entityType === "ORDER" ? "COURIER_EARNINGS" : "DRIVER_EARNINGS", collectorId),
+      accountType: entityType === "ORDER" ? "COURIER_EARNINGS" : "DRIVER_EARNINGS",
+      ownerId: collectorId,
+      normalSide: "CREDIT",
+      debitCentavos: 0,
+      creditCentavos: collectorEarnings,
+    });
+  }
+  if (platformOwed > 0) {
+    lines.push({
+      accountId: cashLedgerAccountId("PLATFORM_COMMISSION"),
+      accountType: "PLATFORM_COMMISSION",
+      ownerId: "PLATFORM",
+      normalSide: "CREDIT",
+      debitCentavos: 0,
+      creditCentavos: platformOwed,
+    });
+  }
+
+  return {
+    entryId: cashLedgerEntryId("COLLECTION", collectionId),
+    operationId: "CASH_COLLECTION:" + collectionId,
+    entryType: "CASH_COLLECTION",
+    entityType,
+    entityId,
+    collectionId,
+    collectorId,
+    collectorRole: asString(collection.collectorRole),
+    amountCentavos: total,
+    totalCentavos: total,
+    currency: "PHP",
+    lines,
+    memo: entityType === "ORDER"
+      ? "Cash on delivery collected by assigned courier"
+      : "Cash ride fare collected by assigned driver",
+    createdAtTimestamp: Number(collection.collectedAtTimestamp ?? Date.now()),
+  };
+}
+
+function buildCashRemittanceLedgerEntry(
+  remittance: Record<string, unknown>
+): Record<string, unknown> {
+  const amount = nonNegativeInteger(remittance.amountCentavos, "cash remittance amount");
+  const collectorId = asString(remittance.collectorId);
+  const adminUid = asString(remittance.receivedBy);
+  const remittanceId = asString(remittance.remittanceId);
+  const lines: CashLedgerLine[] = [
+    {
+      accountId: cashLedgerAccountId("PLATFORM_CASH_CUSTODY"),
+      accountType: "PLATFORM_CASH_CUSTODY",
+      ownerId: "PLATFORM",
+      normalSide: "DEBIT",
+      debitCentavos: amount,
+      creditCentavos: 0,
+    },
+    {
+      accountId: cashLedgerAccountId("CASH_CUSTODY", collectorId),
+      accountType: "CASH_CUSTODY",
+      ownerId: collectorId,
+      normalSide: "DEBIT",
+      debitCentavos: 0,
+      creditCentavos: amount,
+    },
+  ];
+  return {
+    entryId: cashLedgerEntryId("REMITTANCE", remittanceId),
+    operationId: "CASH_REMITTANCE:" + remittanceId,
+    entryType: "CASH_REMITTANCE",
+    entityType: asString(remittance.entityType),
+    entityId: asString(remittance.entityId),
+    collectionId: asString(remittance.collectionId),
+    remittanceId,
+    collectorId,
+    receivedBy: adminUid,
+    amountCentavos: amount,
+    totalCentavos: amount,
+    currency: "PHP",
+    lines,
+    memo: "Cash remitted by collector and received by platform administrator",
+    createdAtTimestamp: Number(remittance.createdAtTimestamp ?? Date.now()),
+  };
+}
+
+async function finalizeCashRemittance(
+  collection: Record<string, unknown>,
+  remittance: Record<string, unknown>
+): Promise<void> {
+  const remittanceId = asString(remittance.remittanceId);
+  if (!remittanceId) throw new HttpsError("failed-precondition", "A cash remittance ID is missing.");
+  const ledgerEntry = buildCashRemittanceLedgerEntry(remittance);
+  await ensureImmutableCashLedgerEntry(asString(ledgerEntry.entryId), ledgerEntry);
+  await postImmutableCashLedgerEntry(asString(ledgerEntry.entryId));
+
+  const remittanceRecord = {
+    ...remittance,
+    ledgerEntryId: asString(ledgerEntry.entryId),
+    reconciliationStatus: "POSTED",
+    postedAtTimestamp: Date.now(),
+  };
+  const remittanceRef = db.ref("cashRemittances/" + remittanceId);
+  const transaction = await remittanceRef.transaction((currentValue) => {
+    if (currentValue !== null && currentValue !== undefined) {
+      const current = asRecord(currentValue);
+      if (
+        asString(current.operationId) !== asString(remittance.operationId) ||
+        Number(current.amountCentavos) !== Number(remittance.amountCentavos) ||
+        asString(current.collectionId) !== asString(remittance.collectionId)
+      ) return;
+      return {
+        ...current,
+        ...remittanceRecord,
+      };
+    }
+    return {
+      ...remittanceRecord,
+      operationId: asString(remittance.operationId),
+    };
+  });
+  if (!transaction.committed) {
+    const existing = asRecord(transaction.snapshot.val());
+    if (
+      !transaction.snapshot.exists() ||
+      asString(existing.operationId) !== asString(remittance.operationId) ||
+      Number(existing.amountCentavos) !== Number(remittance.amountCentavos) ||
+      asString(existing.collectionId) !== asString(remittance.collectionId)
+    ) {
+      throw new HttpsError("data-loss", "The cash remittance record conflicts with an earlier operation.");
+    }
+  }
+
+  const entityPath = cashEntityPath(asString(collection.entityType).toUpperCase() as CashEntityType);
+  const entityId = asString(collection.entityId);
+  const updates: Record<string, unknown> = {};
+  updates[entityPath + "/" + entityId + "/cashRemittedCentavos"] =
+    nonNegativeInteger(collection.remittedCentavos ?? 0, "remitted cash amount");
+  updates[entityPath + "/" + entityId + "/cashOutstandingRemittanceCentavos"] =
+    nonNegativeInteger(collection.remittableCentavos, "cash remittance due") -
+    nonNegativeInteger(collection.remittedCentavos ?? 0, "remitted cash amount");
+  updates[entityPath + "/" + entityId + "/cashRemittanceStatus"] =
+    Number(collection.remittedCentavos ?? 0) >= Number(collection.remittableCentavos ?? 0)
+      ? "REMITTED"
+      : "PARTIALLY_REMITTED";
+  await db.ref().update(updates);
+}
+
+async function applyCashCollectionMirror(collection: Record<string, unknown>): Promise<void> {
+  const entityType = asString(collection.entityType).toUpperCase() as CashEntityType;
+  const entityId = asString(collection.entityId);
+  const collectorId = asString(collection.collectorId);
+  const entityPath = cashEntityPath(entityType);
+  const collectedAmountCentavos = nonNegativeInteger(collection.collectedAmountCentavos, "collected cash amount");
+  const remittedCentavos = nonNegativeInteger(collection.remittedCentavos ?? 0, "remitted cash amount");
+  const remittableCentavos = nonNegativeInteger(collection.remittableCentavos ?? 0, "cash remittance due");
+  const outstandingRemittanceCentavos = Math.max(0, remittableCentavos - remittedCentavos);
+  const updates: Record<string, unknown> = {};
+  updates[entityPath + "/" + entityId + "/status"] =
+    entityType === "ORDER" ? "DELIVERED" : "COMPLETED";
+  updates[entityPath + "/" + entityId + "/paymentStatus"] = "COLLECTED";
+  updates[entityPath + "/" + entityId + "/cashCollectionStatus"] = "COLLECTED";
+  updates[entityPath + "/" + entityId + "/cashCollectionId"] = asString(collection.collectionId);
+  updates[entityPath + "/" + entityId + "/cashCollectedBy"] = collectorId;
+  updates[entityPath + "/" + entityId + "/cashCollectedByRole"] = asString(collection.collectorRole);
+  updates[entityPath + "/" + entityId + "/cashCollectedAmountCentavos"] = collectedAmountCentavos;
+  updates[entityPath + "/" + entityId + "/cashCollectedAtTimestamp"] = Number(collection.collectedAtTimestamp ?? 0);
+  updates[entityPath + "/" + entityId + "/cashMerchantOwedCentavos"] =
+    nonNegativeInteger(collection.merchantOwedCentavos ?? 0, "merchant cash payable");
+  updates[entityPath + "/" + entityId + "/cashPlatformOwedCentavos"] =
+    nonNegativeInteger(collection.platformOwedCentavos ?? 0, "platform cash amount");
+  updates[entityPath + "/" + entityId + "/cashCollectorEarningsCentavos"] =
+    nonNegativeInteger(collection.collectorEarningsCentavos ?? 0, "collector cash earnings");
+  updates[entityPath + "/" + entityId + "/cashRemittedCentavos"] = remittedCentavos;
+  updates[entityPath + "/" + entityId + "/cashOutstandingRemittanceCentavos"] = outstandingRemittanceCentavos;
+  updates[entityPath + "/" + entityId + "/cashRemittanceStatus"] =
+    remittableCentavos === 0 ? "NOT_DUE" :
+      outstandingRemittanceCentavos === 0 ? "REMITTED" :
+        remittedCentavos > 0 ? "PARTIALLY_REMITTED" : "DUE";
+  updates["payments/" + entityId + "/status"] = "COLLECTED";
+  updates["payments/" + entityId + "/cashCollectedBy"] = collectorId;
+  updates["payments/" + entityId + "/cashCollectedByRole"] = asString(collection.collectorRole);
+  updates["payments/" + entityId + "/cashCollectedAmountCentavos"] = collectedAmountCentavos;
+  updates["payments/" + entityId + "/cashCollectedAtTimestamp"] = Number(collection.collectedAtTimestamp ?? 0);
+  updates["payments/" + entityId + "/cashRemittedCentavos"] = remittedCentavos;
+  updates["payments/" + entityId + "/cashOutstandingRemittanceCentavos"] = outstandingRemittanceCentavos;
+  await db.ref().update(updates);
+}
+
+async function finalizeCashCollection(
+  collection: Record<string, unknown>
+): Promise<void> {
+  const collectionId = asString(collection.collectionId);
+  if (!collectionId) throw new HttpsError("failed-precondition", "A cash collection ID is missing.");
+  await applyCashCollectionMirror(collection);
+
+  const collectionLedger = buildCashCollectionLedgerEntry(collection);
+  await ensureImmutableCashLedgerEntry(asString(collectionLedger.entryId), collectionLedger);
+  await postImmutableCashLedgerEntry(asString(collectionLedger.entryId));
+
+  const collectionRef = db.ref("cashCollections/" + collectionId);
+  const events = asRecord(collection.remittanceEvents);
+  for (const [remittanceId, raw] of Object.entries(events)) {
+    const remittance = {
+      ...asRecord(raw),
+      remittanceId,
+      collectionId,
+      entityType: asString(collection.entityType),
+      entityId: asString(collection.entityId),
+      collectorId: asString(collection.collectorId),
+    };
+    await finalizeCashRemittance(collection, remittance);
+    await collectionRef.child("remittanceEvents").child(remittanceId).update({
+      reconciliationStatus: "POSTED",
+      postedAtTimestamp: Date.now(),
+    });
+  }
+
+  // Re-read transactionally so a concurrent remittance cannot be hidden by a stale
+  // finalizer setting the parent collection back to POSTED.
+  await collectionRef.transaction((currentValue) => {
+    const current = asRecord(currentValue);
+    const latestEvents = asRecord(current.remittanceEvents);
+    const hasPendingRemittances = Object.values(latestEvents).some((rawEvent) =>
+      asString(asRecord(rawEvent).reconciliationStatus).toUpperCase() !== "POSTED"
+    );
+    return {
+      ...current,
+      ledgerEntryId: asString(collectionLedger.entryId),
+      reconciliationStatus: hasPendingRemittances ? "PENDING" : "POSTED",
+      postedAtTimestamp: hasPendingRemittances ? Number(current.postedAtTimestamp ?? 0) : Date.now(),
+    };
+  });
+}
+
+export const confirmCashCollected = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const entityType = parseCashEntityType(data.entityType);
+    const entityId = asString(data.entityId);
+    if (!/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
+      throw new HttpsError("invalid-argument", "A valid order or trip ID is required.");
+    }
+
+    const collectionId = cashCollectionKey(entityType, entityId);
+    const collectionRef = db.ref("cashCollections/" + collectionId);
+    const existingSnapshot = await collectionRef.get();
+    if (existingSnapshot.exists()) {
+      const existing = asRecord(existingSnapshot.val());
+      if (asString(existing.collectorId) !== uid) {
+        throw new HttpsError("permission-denied", "This cash collection was confirmed by another collector.");
+      }
+      await finalizeCashCollection(existing);
+      return {
+        collectionId,
+        entityId,
+        collectionStatus: "COLLECTED",
+        collectedAmountCentavos: Number(existing.collectedAmountCentavos ?? 0),
+        merchantOwedCentavos: Number(existing.merchantOwedCentavos ?? 0),
+        platformOwedCentavos: Number(existing.platformOwedCentavos ?? 0),
+        collectorEarningsCentavos: Number(existing.collectorEarningsCentavos ?? 0),
+        remittableCentavos: Number(existing.remittableCentavos ?? 0),
+        remittedCentavos: Number(existing.remittedCentavos ?? 0),
+        outstandingRemittanceCentavos:
+          Number(existing.remittableCentavos ?? 0) - Number(existing.remittedCentavos ?? 0),
+        reused: true,
+      };
+    }
+
+    const entityPath = cashEntityPath(entityType);
+    const entitySnapshot = await db.ref(entityPath + "/" + entityId).get();
+    if (!entitySnapshot.exists()) throw new HttpsError("not-found", "The order or trip was not found.");
+    const entity = asRecord(entitySnapshot.val());
+
+    const assignedCollector = entityType === "ORDER"
+      ? asString(entity.deliveryId)
+      : asString(entity.driverId);
+    if (assignedCollector !== uid) {
+      throw new HttpsError("permission-denied", "Only the assigned courier or ride driver can confirm this cash collection.");
+    }
+    const expectedStatus = entityType === "ORDER"
+      ? ["OUT_FOR_DELIVERY", "DELIVERED"]
+      : ["IN_PROGRESS", "COMPLETED"];
+    if (!expectedStatus.includes(asString(entity.status).toUpperCase())) {
+      throw new HttpsError("failed-precondition", "The order or trip is not at the cash collection stage.");
+    }
+    if (asString(entity.paymentMethod).toUpperCase() !== "CASH") {
+      throw new HttpsError("failed-precondition", "This order or trip was not created with Cash.");
+    }
+
+    const paymentSnapshot = await db.ref("payments/" + entityId).get();
+    if (!paymentSnapshot.exists()) {
+      throw new HttpsError("failed-precondition", "The server-created cash payment record is missing.");
+    }
+    const payment = asRecord(paymentSnapshot.val());
+    if (
+      asString(payment.provider).toUpperCase() !== "CASH" ||
+      asString(payment.channelCode).toUpperCase() !== "CASH"
+    ) {
+      throw new HttpsError("failed-precondition", "Only a server-created Cash payment can be confirmed through the cash collection flow.");
+    }
+    if (["PAID", "COLLECTED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(asString(payment.status).toUpperCase())) {
+      throw new HttpsError("failed-precondition", "This payment is already settled or refunded.");
+    }
+
+    const amountCentavos = cashAmountCentavos(entityType, entity);
+    const shares = cashShareCentavos(entityType, entity, amountCentavos);
+    const collectorRole = entityType === "ORDER" ? "COURIER" : "DRIVER";
+    const timestamp = Date.now();
+    const remittableCentavos = shares.merchantOwedCentavos + shares.platformOwedCentavos;
+    const collection = {
+      collectionId,
+      entityType,
+      entityId,
+      collectorId: uid,
+      collectorRole,
+      clientId: entityType === "ORDER" ? asString(entity.clientId) : asString(entity.passengerId),
+      merchantId: shares.merchantId,
+      collectedAmountCentavos: amountCentavos,
+      merchantOwedCentavos: shares.merchantOwedCentavos,
+      platformOwedCentavos: shares.platformOwedCentavos,
+      collectorEarningsCentavos: shares.collectorEarningsCentavos,
+      remittableCentavos,
+      remittedCentavos: 0,
+      outstandingRemittanceCentavos: remittableCentavos,
+      remittanceEvents: {},
+      currency: "PHP",
+      status: "COLLECTED",
+      confirmedBy: uid,
+      collectedAtTimestamp: timestamp,
+      reconciliationStatus: "PENDING",
+      ledgerEntryId: cashLedgerEntryId("COLLECTION", collectionId),
+    };
+
+    const reservation = await collectionRef.transaction((currentValue) => {
+      if (currentValue !== null && currentValue !== undefined) return;
+      return collection;
+    });
+    if (!reservation.committed) {
+      const latestSnapshot = await collectionRef.get();
+      if (!latestSnapshot.exists()) {
+        throw new HttpsError("aborted", "Cash collection could not be reserved. Retry.");
+      }
+      const latest = asRecord(latestSnapshot.val());
+      if (asString(latest.collectorId) !== uid) {
+        throw new HttpsError("permission-denied", "This cash collection was already confirmed by another collector.");
+      }
+      await finalizeCashCollection(latest);
+      return {
+        collectionId,
+        entityId,
+        collectionStatus: "COLLECTED",
+        collectedAmountCentavos: Number(latest.collectedAmountCentavos ?? 0),
+        merchantOwedCentavos: Number(latest.merchantOwedCentavos ?? 0),
+        platformOwedCentavos: Number(latest.platformOwedCentavos ?? 0),
+        collectorEarningsCentavos: Number(latest.collectorEarningsCentavos ?? 0),
+        remittableCentavos: Number(latest.remittableCentavos ?? 0),
+        remittedCentavos: Number(latest.remittedCentavos ?? 0),
+        outstandingRemittanceCentavos:
+          Number(latest.remittableCentavos ?? 0) - Number(latest.remittedCentavos ?? 0),
+        reused: true,
+      };
+    }
+
+    const updates: Record<string, unknown> = {};
+    updates[entityPath + "/" + entityId + "/status"] =
+      entityType === "ORDER" ? "DELIVERED" : "COMPLETED";
+    updates[entityPath + "/" + entityId + "/paymentStatus"] = "COLLECTED";
+    updates[entityPath + "/" + entityId + "/cashCollectionStatus"] = "COLLECTED";
+    updates[entityPath + "/" + entityId + "/cashCollectionId"] = collectionId;
+    updates[entityPath + "/" + entityId + "/cashCollectedBy"] = uid;
+    updates[entityPath + "/" + entityId + "/cashCollectedByRole"] = collectorRole;
+    updates[entityPath + "/" + entityId + "/cashCollectedAmountCentavos"] = amountCentavos;
+    updates[entityPath + "/" + entityId + "/cashCollectedAtTimestamp"] = timestamp;
+    updates[entityPath + "/" + entityId + "/cashMerchantOwedCentavos"] = shares.merchantOwedCentavos;
+    updates[entityPath + "/" + entityId + "/cashPlatformOwedCentavos"] = shares.platformOwedCentavos;
+    updates[entityPath + "/" + entityId + "/cashCollectorEarningsCentavos"] = shares.collectorEarningsCentavos;
+    updates[entityPath + "/" + entityId + "/cashRemittedCentavos"] = 0;
+    updates[entityPath + "/" + entityId + "/cashOutstandingRemittanceCentavos"] = remittableCentavos;
+    updates[entityPath + "/" + entityId + "/cashRemittanceStatus"] = remittableCentavos > 0 ? "DUE" : "NOT_DUE";
+    updates["payments/" + entityId + "/status"] = "COLLECTED";
+    updates["payments/" + entityId + "/cashCollectedBy"] = uid;
+    updates["payments/" + entityId + "/cashCollectedByRole"] = collectorRole;
+    updates["payments/" + entityId + "/cashCollectedAmountCentavos"] = amountCentavos;
+    updates["payments/" + entityId + "/cashCollectedAtTimestamp"] = timestamp;
+    await db.ref().update(updates);
+
+    await finalizeCashCollection(collection);
+    return {
+      collectionId,
+      entityId,
+      collectionStatus: "COLLECTED",
+      collectedAmountCentavos: amountCentavos,
+      merchantOwedCentavos: shares.merchantOwedCentavos,
+      platformOwedCentavos: shares.platformOwedCentavos,
+      collectorEarningsCentavos: shares.collectorEarningsCentavos,
+      remittableCentavos,
+      remittedCentavos: 0,
+      outstandingRemittanceCentavos: remittableCentavos,
+      reused: false,
+    };
+  }
+);
+
+export const recordCashRemittance = onCall(
+  { region: REGION },
+  async (request) => {
+    const adminUid = requireAdmin(request);
+    const data = asRecord(request.data);
+    const entityType = parseCashEntityType(data.entityType);
+    const entityId = asString(data.entityId);
+    if (!/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
+      throw new HttpsError("invalid-argument", "A valid order or trip ID is required.");
+    }
+    const idempotencyKey = parseIdempotencyKey(data.idempotencyKey);
+    const amountCentavos = nonNegativeInteger(data.amountCentavos, "cash remittance amount");
+    if (amountCentavos <= 0) {
+      throw new HttpsError("invalid-argument", "Cash remittance amount must be greater than zero.");
+    }
+    const collectionId = cashCollectionKey(entityType, entityId);
+    const collectionRef = db.ref("cashCollections/" + collectionId);
+    const collectionSnapshot = await collectionRef.get();
+    if (!collectionSnapshot.exists()) {
+      throw new HttpsError("not-found", "The cash collection does not exist.");
+    }
+    const remittanceId = createHash("sha256")
+      .update(adminUid + "|" + collectionId + "|" + idempotencyKey)
+      .digest("hex")
+      .slice(0, 32);
+
+    let reservationError = "";
+    let remittance: Record<string, unknown> = {};
+    const transaction = await collectionRef.transaction((rawValue) => {
+      const current = asRecord(rawValue);
+      const events = asRecord(current.remittanceEvents);
+      const existing = asRecord(events[remittanceId]);
+      if (Object.keys(existing).length > 0) {
+        if (Number(existing.amountCentavos) !== amountCentavos || asString(existing.receivedBy) !== adminUid) {
+          reservationError = "This remittance request key was already used with different details.";
+          return;
+        }
+        remittance = existing;
+        return current;
+      }
+
+      const remittable = nonNegativeInteger(current.remittableCentavos, "cash remittance due");
+      const alreadyRemitted = nonNegativeInteger(current.remittedCentavos ?? 0, "cash already remitted");
+      const outstanding = remittable - alreadyRemitted;
+      if (amountCentavos > outstanding) {
+        reservationError = "The remittance exceeds the remaining cash owed by this collector.";
+        return;
+      }
+
+      const timestamp = Date.now();
+      remittance = {
+        remittanceId,
+        operationId: "CASH_REMITTANCE:" + remittanceId,
+        collectionId,
+        entityType,
+        entityId,
+        collectorId: asString(current.collectorId),
+        receivedBy: adminUid,
+        amountCentavos,
+        currency: "PHP",
+        createdAtTimestamp: timestamp,
+        reconciliationStatus: "PENDING",
+      };
+      return {
+        ...current,
+        remittedCentavos: alreadyRemitted + amountCentavos,
+        outstandingRemittanceCentavos: outstanding - amountCentavos,
+        remittanceEvents: {
+          ...events,
+          [remittanceId]: remittance,
+        },
+        cashRemittanceStatus: outstanding - amountCentavos === 0 ? "REMITTED" : "PARTIALLY_REMITTED",
+        reconciliationStatus: "PENDING",
+        updatedAtTimestamp: timestamp,
+      };
+    });
+
+    if (!transaction.committed && !transaction.snapshot.exists() || reservationError) {
+      throw new HttpsError("failed-precondition", reservationError || "The remittance could not be recorded.");
+    }
+    const latestCollection = asRecord(transaction.snapshot.val() ?? (await collectionRef.get()).val());
+    if (Object.keys(remittance).length === 0) {
+      remittance = asRecord(asRecord(latestCollection.remittanceEvents)[remittanceId]);
+    }
+    await finalizeCashCollection(latestCollection);
+    const updatedCollection = asRecord((await collectionRef.get()).val());
+
+    return {
+      remittanceId,
+      entityId,
+      amountCentavos,
+      remittedCentavos: Number(updatedCollection.remittedCentavos ?? 0),
+      outstandingRemittanceCentavos: Number(updatedCollection.outstandingRemittanceCentavos ?? 0),
+      status: asString(updatedCollection.cashRemittanceStatus) || "DUE",
+      reused: !transaction.committed,
+    };
+  }
+);
+
+export const reconcileCash = onSchedule(
+  {
+    schedule: "every 10 minutes",
+    timeZone: "Asia/Manila",
+    region: REGION,
+  },
+  async () => {
+    const pending = await db.ref("cashCollections")
+      .orderByChild("reconciliationStatus")
+      .equalTo("PENDING")
+      .limitToFirst(100)
+      .get();
+    const collections: Record<string, unknown>[] = [];
+    pending.forEach((snapshot) => {
+      if (snapshot.exists()) collections.push(asRecord(snapshot.val()));
+      return false;
+    });
+
+    let reconciled = 0;
+    let failed = 0;
+    for (const collection of collections) {
+      try {
+        await finalizeCashCollection(collection);
+        reconciled++;
+      } catch (error) {
+        failed++;
+        logger.error("Cash ledger reconciliation failed", {
+          collectionId: asString(collection.collectionId),
+          error,
+        });
+      }
+    }
+
+    logger.info("Cash ledger reconciliation finished", {
+      pendingCollections: collections.length,
+      reconciled,
+      failed,
+    });
+  }
+);

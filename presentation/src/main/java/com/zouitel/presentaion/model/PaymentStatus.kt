@@ -15,6 +15,7 @@ enum class PaymentStatus {
     INITIATION_FAILED,
     PENDING,
     PAID,
+    COLLECTED,
     FAILED,
     CANCELLED,
     EXPIRED,

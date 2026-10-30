@@ -3,6 +3,7 @@ package com.zouitel.presentaion.screens.ride
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
+import com.zouitel.presentaion.screens.payment.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -18,6 +19,7 @@ import kotlinx.coroutines.launch
 class DriverDashboardScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUser = Firebase.auth.currentUser
+    private val payments = PaymentRepository()
 
     private val _availableTrips = MutableStateFlow<List<Trip>>(emptyList())
     val availableTrips: StateFlow<List<Trip>> = _availableTrips.asStateFlow()
@@ -26,6 +28,8 @@ class DriverDashboardScreenModel : ScreenModel {
     val activeTrips: StateFlow<List<Trip>> = _activeTrips.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
+    private val _cashActionError = MutableStateFlow<String?>(null)
+    val cashActionError: StateFlow<String?> = _cashActionError.asStateFlow()
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     // Mirrors users/{uid}/driverService/isOnline so the switch always shows the real stored value
@@ -109,7 +113,16 @@ class DriverDashboardScreenModel : ScreenModel {
                             paymentMethod = str("paymentMethod"),
                             paymentStatus = str("paymentStatus").ifBlank { "UNPAID" },
                             paymentId = str("paymentId"),
-                            createdAtTimestamp = child.child("createdAtTimestamp").value<Long>()
+                            createdAtTimestamp = child.child("createdAtTimestamp").value<Long>(),
+                            cashCollectionStatus = str("cashCollectionStatus"),
+                            cashCollectedBy = str("cashCollectedBy"),
+                            cashCollectedByRole = str("cashCollectedByRole"),
+                            cashCollectedAmountCentavos = runCatching { child.child("cashCollectedAmountCentavos").value<Long>() }.getOrDefault(0L),
+                            cashPlatformOwedCentavos = runCatching { child.child("cashPlatformOwedCentavos").value<Long>() }.getOrDefault(0L),
+                            cashCollectorEarningsCentavos = runCatching { child.child("cashCollectorEarningsCentavos").value<Long>() }.getOrDefault(0L),
+                            cashRemittedCentavos = runCatching { child.child("cashRemittedCentavos").value<Long>() }.getOrDefault(0L),
+                            cashOutstandingRemittanceCentavos = runCatching { child.child("cashOutstandingRemittanceCentavos").value<Long>() }.getOrDefault(0L),
+                            cashRemittanceStatus = str("cashRemittanceStatus")
                         )
 
                         if (status == "REQUESTED" && driverId.isBlank()) {
@@ -174,6 +187,20 @@ class DriverDashboardScreenModel : ScreenModel {
 
     fun updateTripStatus(tripId: String, newStatus: String) {
         screenModelScope.launch {
+            if (newStatus.equals("COMPLETED", ignoreCase = true)) {
+                val tripRef = db.child("trips").child(tripId)
+                val paymentMethod = runCatching {
+                    tripRef.child("paymentMethod").valueEvents.first().value<String>()
+                }.getOrDefault("")
+                if (paymentMethod.equals("CASH", ignoreCase = true)) {
+                    // Driver identity, fare and split are verified/recomputed by Functions.
+                    runCatching { payments.confirmCashCollected("TRIP", tripId) }
+                        .onFailure { error ->
+                            _cashActionError.value = error.message ?: "Cash collection could not be confirmed."
+                        }
+                    return@launch
+                }
+            }
             db.child("trips").child(tripId).child("status").setValue(newStatus)
         }
     }

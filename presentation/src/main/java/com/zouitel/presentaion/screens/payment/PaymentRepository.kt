@@ -78,6 +78,32 @@ data class RefundPaymentResult(
     val amountCentavos: Long
 )
 
+/** Server-confirmed physical cash collection and outstanding remittance split. */
+data class CashCollectionResult(
+    val collectionId: String,
+    val entityId: String,
+    val collectionStatus: String,
+    val collectedAmountCentavos: Long,
+    val merchantOwedCentavos: Long,
+    val platformOwedCentavos: Long,
+    val collectorEarningsCentavos: Long,
+    val remittableCentavos: Long,
+    val remittedCentavos: Long,
+    val outstandingRemittanceCentavos: Long,
+    val reused: Boolean
+)
+
+/** Administrator-confirmed cash remittance received from a courier or driver. */
+data class CashRemittanceResult(
+    val remittanceId: String,
+    val entityId: String,
+    val amountCentavos: Long,
+    val remittedCentavos: Long,
+    val outstandingRemittanceCentavos: Long,
+    val status: String,
+    val reused: Boolean
+)
+
 class PaymentRepository {
     private val functions = Firebase.functions("asia-southeast1")
     private val db = Firebase.database.reference()
@@ -314,6 +340,71 @@ class PaymentRepository {
             refundId = result["refundId"] as? String ?: "",
             refundStatus = result["refundStatus"] as? String ?: "PENDING",
             amountCentavos = (result["amountCentavos"] as? Number)?.toLong() ?: 0L
+        )
+    }
+
+    /**
+     * Confirms physical cash received by the assigned courier (ORDER) or ride driver (TRIP).
+     * No amount is accepted from the device; Functions reads the saved PHP-centavo total.
+     */
+    suspend fun confirmCashCollected(
+        entityType: String,
+        entityId: String
+    ): CashCollectionResult {
+        val normalizedType = entityType.trim().uppercase()
+        require(normalizedType == "ORDER" || normalizedType == "TRIP") {
+            "entityType must be ORDER or TRIP."
+        }
+        val response = functions.httpsCallable("confirmCashCollected")(
+            mapOf(
+                "entityType" to normalizedType,
+                "entityId" to entityId
+            )
+        )
+        val result = response.data<Map<String, Any?>>()
+        return CashCollectionResult(
+            collectionId = result["collectionId"] as? String ?: "",
+            entityId = result["entityId"] as? String ?: entityId,
+            collectionStatus = result["collectionStatus"] as? String ?: "COLLECTED",
+            collectedAmountCentavos = (result["collectedAmountCentavos"] as? Number)?.toLong() ?: 0L,
+            merchantOwedCentavos = (result["merchantOwedCentavos"] as? Number)?.toLong() ?: 0L,
+            platformOwedCentavos = (result["platformOwedCentavos"] as? Number)?.toLong() ?: 0L,
+            collectorEarningsCentavos = (result["collectorEarningsCentavos"] as? Number)?.toLong() ?: 0L,
+            remittableCentavos = (result["remittableCentavos"] as? Number)?.toLong() ?: 0L,
+            remittedCentavos = (result["remittedCentavos"] as? Number)?.toLong() ?: 0L,
+            outstandingRemittanceCentavos = (result["outstandingRemittanceCentavos"] as? Number)?.toLong() ?: 0L,
+            reused = result["reused"] as? Boolean ?: false
+        )
+    }
+
+    /**
+     * Administrator records the actual amount received from a cash collector.
+     * Functions checks that it does not exceed the entity's remaining remittance due.
+     */
+    suspend fun recordCashRemittance(
+        entityType: String,
+        entityId: String,
+        amountCentavos: Long,
+        idempotencyKey: String
+    ): CashRemittanceResult {
+        require(amountCentavos > 0L) { "Remittance amount must be positive." }
+        val response = functions.httpsCallable("recordCashRemittance")(
+            mapOf(
+                "entityType" to entityType.trim().uppercase(),
+                "entityId" to entityId,
+                "amountCentavos" to amountCentavos,
+                "idempotencyKey" to idempotencyKey
+            )
+        )
+        val result = response.data<Map<String, Any?>>()
+        return CashRemittanceResult(
+            remittanceId = result["remittanceId"] as? String ?: "",
+            entityId = result["entityId"] as? String ?: entityId,
+            amountCentavos = (result["amountCentavos"] as? Number)?.toLong() ?: amountCentavos,
+            remittedCentavos = (result["remittedCentavos"] as? Number)?.toLong() ?: 0L,
+            outstandingRemittanceCentavos = (result["outstandingRemittanceCentavos"] as? Number)?.toLong() ?: 0L,
+            status = result["status"] as? String ?: "PENDING",
+            reused = result["reused"] as? Boolean ?: false
         )
     }
 

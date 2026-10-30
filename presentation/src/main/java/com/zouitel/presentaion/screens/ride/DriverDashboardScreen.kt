@@ -384,6 +384,18 @@ class DriverDashboardScreen : Screen {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (trip.cashCollectionStatus == "COLLECTED") {
+                    Text(
+                        "Cash received: ₱${"%.2f".format(trip.cashCollectedAmountCentavos / 100.0)} · Driver earnings: ₱${"%.2f".format(trip.cashCollectorEarningsCentavos / 100.0)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "Platform commission: ₱${"%.2f".format(trip.cashPlatformOwedCentavos / 100.0)} · Remittance outstanding: ₱${"%.2f".format(trip.cashOutstandingRemittanceCentavos / 100.0)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
 
                 Spacer(Modifier.height(16.dp))
 

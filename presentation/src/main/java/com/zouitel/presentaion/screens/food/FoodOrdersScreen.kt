@@ -127,6 +127,21 @@ class FoodOrdersScreen : Screen {
                     Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Payment status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall)
+                    if (order.cashCollectionStatus == "COLLECTED") {
+                        Text(
+                            text = "Cash collected by ${order.cashCollectedByRole.lowercase()}: ₱${"%.2f".format(order.cashCollectedAmountCentavos / 100.0)}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "Merchant payable: ₱${"%.2f".format(order.cashMerchantOwedCentavos / 100.0)} · Platform: ₱${"%.2f".format(order.cashPlatformOwedCentavos / 100.0)}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            text = "Remitted: ₱${"%.2f".format(order.cashRemittedCentavos / 100.0)} · Remaining due: ₱${"%.2f".format(order.cashOutstandingRemittanceCentavos / 100.0)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
 
                     if (order.deliveryName.isNotBlank()) {
                         Spacer(modifier = Modifier.height(2.dp))

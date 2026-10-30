@@ -65,5 +65,15 @@ data class Order(
     val paymentId: String = "",
     val deliveryId: String = "",
     val deliveryName: String = "",
-    val deliveryPhone: String = ""
+    val deliveryPhone: String = "",
+    val cashCollectionStatus: String = "",
+    val cashCollectedBy: String = "",
+    val cashCollectedByRole: String = "",
+    val cashCollectedAmountCentavos: Long = 0L,
+    val cashMerchantOwedCentavos: Long = 0L,
+    val cashPlatformOwedCentavos: Long = 0L,
+    val cashCollectorEarningsCentavos: Long = 0L,
+    val cashRemittedCentavos: Long = 0L,
+    val cashOutstandingRemittanceCentavos: Long = 0L,
+    val cashRemittanceStatus: String = ""
 )

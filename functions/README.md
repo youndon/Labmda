@@ -331,3 +331,115 @@ This payment step records collections and refunds; it does not distribute wallet
 run merchant/courier payouts. Use the existing order/trip completion workflow as the gate for
 future controlled settlement and payout. Do not model GCash collection as money held for a
 later manual capture.
+
+
+## Cash collection and immutable accounting ledger
+
+Cash orders and rides do not call Xendit. After physical collection, the assigned courier or ride
+driver calls the authenticated `confirmCashCollected` function:
+
+```kotlin
+paymentRepository.confirmCashCollected(
+    entityType = "ORDER", // "TRIP" for a ride
+    entityId = orderOrTripId
+)
+```
+
+The callable accepts no amount. It loads the server-created order/trip, verifies the signed-in
+courier is `orders/{id}/deliveryId` or the signed-in driver is `trips/{id}/driverId`, requires
+the order/trip to be at delivery/completion, and requires `paymentMethod == CASH`. It reads
+`totalPriceCentavos` or `fareCentavos` and requires the stored breakdown to balance exactly to
+that amount. A GCash/Xendit payment cannot be confirmed through this path.
+
+On confirmation, Functions marks the order `DELIVERED` or trip `COMPLETED`, updates its
+payment status to `COLLECTED`, and records:
+
+- `cashCollectedBy` and `cashCollectedByRole` — the assigned courier or driver.
+- `cashCollectedAmountCentavos` — the server-calculated gross cash collected.
+- `cashMerchantOwedCentavos` and `cashPlatformOwedCentavos` — amounts still payable to the
+  merchant and platform.
+- `cashCollectorEarningsCentavos` — the courier or driver share.
+- `cashRemittedCentavos` and `cashOutstandingRemittanceCentavos` — what has been handed to
+  the platform and what is still due.
+
+### Double-entry cash journal
+
+Every collection creates one immutable `cashLedgerEntries/{entryId}` journal. A cash order debits
+the collector's cash-custody account for the gross collected amount and credits merchant payable,
+courier earnings and platform commission. A cash ride debits the driver's cash-custody account
+and credits driver earnings and platform commission. All lines are in integer PHP centavos and
+must balance exactly.
+
+Each journal line is also written once beneath
+`cashLedgerAccounts/{accountId}/{entryId}`. Both the journal and account postings use RTDB
+transactions with deterministic IDs, so a retry cannot count the same collection, commission or
+remittance twice. Posting progress is tracked separately at `cashLedgerPostingStatus/{entryId}`;
+the source journal is never edited after creation.
+
+### Recording a cash remittance
+
+An administrator uses the **Admin Panel → Cash Ledger & Remittances** screen to record the cash
+actually received from a courier or driver. The callable accepts the entity, amount in centavos
+and an idempotency key:
+
+```kotlin
+paymentRepository.recordCashRemittance(
+    entityType = "ORDER",
+    entityId = orderId,
+    amountCentavos = 12500L,
+    idempotencyKey = uniqueRequestKey
+)
+```
+
+The function requires the `admin: true` Firebase Auth custom claim and rejects a remittance
+greater than that collection's remaining amount due. For an order, the courier's remittance due
+is merchant payable plus platform commission/fees; the courier share is retained as earnings.
+For a ride, the driver's remittance due is the platform commission; the driver share remains
+their earnings. Partial remittances are supported. A remittance creates its own immutable
+balanced journal entry moving cash from the collector's custody account to platform cash custody.
+Merchant payables remain recorded separately for the later merchant settlement/payout workflow.
+
+### Cash reconciliation
+
+`reconcileCash` runs every ten minutes in `Asia/Manila`. It finds cash collection records whose
+ledger posting is still pending, recreates any missing immutable journal/account postings using
+the same deterministic IDs, and repairs the order/trip collection mirrors. This recovers an
+interrupted function execution without duplicating a collection or remittance.
+
+### Realtime Database rules for cash accounting
+
+Merge these branches into the deployed RTDB rules document; do not replace your existing user,
+merchant, order or trip rules. The cash collection/ledger nodes are administrator-readable and
+server-write-only. The scheduler uses `cashCollections.reconciliationStatus`, so keep that index.
+
+```json
+{
+  "rules": {
+    "cashCollections": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false,
+      ".indexOn": ["reconciliationStatus"]
+    },
+    "cashRemittances": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "cashLedgerEntries": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "cashLedgerAccounts": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "cashLedgerPostingStatus": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    }
+  }
+}
+```
+
+This step records cash custody, collector earnings, merchant/platform payables and remittances.
+It does not pay the merchant or transfer wallet funds. Merchant disbursement remains a separate
+authorized payout process.

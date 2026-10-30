@@ -114,6 +114,21 @@ class ShopOrdersScreen() : Screen {
 
                 Text("Payment Method: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Payment Status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (order.cashCollectionStatus == "COLLECTED") {
+                    Text(
+                        "Cash collected by ${order.cashCollectedByRole.lowercase()}: ₱${"%.2f".format(order.cashCollectedAmountCentavos / 100.0)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Merchant payable: ₱${"%.2f".format(order.cashMerchantOwedCentavos / 100.0)} · Platform: ₱${"%.2f".format(order.cashPlatformOwedCentavos / 100.0)}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text(
+                        "Remitted: ₱${"%.2f".format(order.cashRemittedCentavos / 100.0)} · Remaining due: ₱${"%.2f".format(order.cashOutstandingRemittanceCentavos / 100.0)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary
+                    )
+                }
                 if (order.deliveryName.isNotBlank()) {
                     Text("Assigned Delivery: ${order.deliveryName} (${order.deliveryPhone})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Medium)
                 }
