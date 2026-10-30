@@ -9,6 +9,37 @@
         ".write": "auth != null && (auth.token.admin === true || (auth.uid === $uid && newData.child('isAdmin').val() === data.child('isAdmin').val() && newData.child('admin').val() === data.child('admin').val() && newData.child('adminRole').val() === data.child('adminRole').val() && newData.child('isAdministrator').val() === data.child('isAdministrator').val() && newData.child('administrator').val() === data.child('administrator').val() && newData.child('role').val() === data.child('role').val() && newData.child('roles').val() === data.child('roles').val() && newData.child('permissions').val() === data.child('permissions').val() && newData.child('isSuperAdmin').val() === data.child('isSuperAdmin').val() && (newData.child('foodStatus').val() === data.child('foodStatus').val() || ((data.child('foodStatus').val() === null || data.child('foodStatus').val() === 'NONE' || data.child('foodStatus').val() === 'REJECTED') && newData.child('foodStatus').val() === 'PENDING')) && newData.child('shopStatus').val() === data.child('shopStatus').val() && (newData.child('deliveryServices').child('status').val() === data.child('deliveryServices').child('status').val() || ((data.child('deliveryServices').child('status').val() === null || data.child('deliveryServices').child('status').val() === 'NONE' || data.child('deliveryServices').child('status').val() === 'REJECTED') && newData.child('deliveryServices').child('status').val() === 'PENDING')) && (newData.child('driverService').child('status').val() === data.child('driverService').child('status').val() || ((data.child('driverService').child('status').val() === null || data.child('driverService').child('status').val() === 'NONE' || data.child('driverService').child('status').val() === 'REJECTED') && newData.child('driverService').child('status').val() === 'PENDING'))))",
         "$other": {
           ".validate": "($other !== 'isAdmin' && $other !== 'admin' && $other !== 'adminRole' && $other !== 'isAdministrator' && $other !== 'administrator' && $other !== 'role' && $other !== 'roles' && $other !== 'permissions' && $other !== 'isSuperAdmin') || newData.val() === data.val()"
+        },
+        "foodStatus": {
+          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || ((data.val() === null || data.val() === 'NONE' || data.val() === 'REJECTED') && newData.val() === 'PENDING')))"
+        },
+        "shopStatus": {
+          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && newData.val() === data.val()))"
+        },
+        "deliveryServices": {
+          "status": {
+            ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || ((data.val() === null || data.val() === 'NONE' || data.val() === 'REJECTED') && newData.val() === 'PENDING'))))"
+          },
+          "isOnline": {
+            ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() !== true || (root.child('users').child($uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'ACTIVE'))))"
+          }
+        },
+        "driverService": {
+          "status": {
+            ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || ((data.val() === null || data.val() === 'NONE' || data.val() === 'REJECTED') && newData.val() === 'PENDING'))))"
+          },
+          "isOnline": {
+            ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() !== true || (root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE'))))"
+          }
+        },
+        "isFoodServiceOnline": {
+          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() !== true || (root.child('users').child($uid).child('foodStatus').val() === 'APPROVED' || root.child('users').child($uid).child('foodStatus').val() === 'ACTIVE'))))"
+        },
+        "isShopServiceOnline": {
+          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() !== true || (root.child('users').child($uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child($uid).child('shopStatus').val() === 'ACTIVE'))))"
+        },
+        "currentLocation": {
+          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || (root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE'))))"
         }
       },
       ".indexOn": [
