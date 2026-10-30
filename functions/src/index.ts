@@ -4351,11 +4351,38 @@ async function applyCashRemittanceWalletEffects(
   const merchantId = asString(collection.merchantId);
   const merchantOwed = nonNegativeInteger(collection.merchantOwedCentavos ?? 0, "merchant cash payable");
   if (outstanding === 0 && merchantId && merchantOwed > 0) {
-    await applyWalletDeltas(merchantId, "cash_merchant_release_" + collectionId, {
-      pendingCentavos: -merchantOwed,
-      availableCentavos: merchantOwed,
+    const walletRelease = await applyWalletEarningCredit(
+      merchantId,
+      "cash_merchant_release_" + collectionId + "_" + merchantId,
+      merchantOwed,
+      true
+    );
+    const availableCredit = merchantOwed - walletRelease.recoveredCentavos;
+    const releaseEntryId = "cash_merchant_release_" + collectionId;
+    const releaseEntry = {
+      operationId: "CASH_MERCHANT_RELEASE:" + collectionId,
+      entryType: "CASH_MERCHANT_RELEASE",
+      collectionId,
+      merchantId,
+      totalCentavos: merchantOwed,
+      lines: [
+        ledgerLine("MERCHANT_PENDING_PAYABLE", merchantId, "DEBIT", merchantOwed),
+        ...(availableCredit > 0 ? [ledgerLine("MERCHANT_AVAILABLE_PAYABLE", merchantId, "CREDIT", availableCredit)] : []),
+        ...(walletRelease.recoveredCentavos > 0 ? [ledgerLine("MERCHANT_REFUND_RECEIVABLE", merchantId, "CREDIT", walletRelease.recoveredCentavos)] : []),
+      ],
+      memo: "Release merchant cash earnings after collector remittance is complete",
+      createdAtTimestamp: Number(collection.createdAtTimestamp ?? 1),
+    };
+    await ensureMarketplaceLedgerEntry(releaseEntryId, releaseEntry);
+    await db.ref("cashCollections/" + collectionId).update({
+      merchantSettlementStatus: "RELEASED",
+      merchantSettlementLedgerEntryId: releaseEntryId,
+      merchantSettledAtTimestamp: Date.now(),
     });
-    enqueueWalletPayout(merchantId);
+    const wallet = asRecord((await db.ref("wallets/" + merchantId).get()).val());
+    if (walletNumber(wallet, "refundDebtCentavos") === 0 && walletNumber(wallet, "availableCentavos") > 0) {
+      enqueueWalletPayout(merchantId);
+    }
   }
 }
 
