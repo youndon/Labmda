@@ -5249,6 +5249,7 @@ export const getMyWallet = onCall(
       cashEarningsCentavos: walletNumber(wallet, "cashEarningsCentavos"),
       pendingPayoutCentavos: walletNumber(wallet, "pendingPayoutCentavos"),
       paidOutCentavos: walletNumber(wallet, "paidOutCentavos"),
+      refundDebtCentavos: walletNumber(wallet, "refundDebtCentavos"),
       payoutAccount: Object.keys(account).length ? payoutAccountSummary(account) : { status: "NOT_CONFIGURED" },
       payouts: payouts.sort((a, b) => Number(b.createdAtTimestamp) - Number(a.createdAtTimestamp)),
     };
@@ -5421,6 +5422,7 @@ export const getAdminPaymentDashboard = onCall(
         cashEarningsCentavos: Number(wallet.cashEarningsCentavos ?? 0),
         pendingPayoutCentavos: Number(wallet.pendingPayoutCentavos ?? 0),
         paidOutCentavos: Number(wallet.paidOutCentavos ?? 0),
+        refundDebtCentavos: Number(wallet.refundDebtCentavos ?? 0),
       })),
       payoutAccountReviews: values(accountReviews),
       cashCollections: values(cashCollections),
