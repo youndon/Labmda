@@ -46,6 +46,7 @@ class DriverEarningsScreen : Screen {
     @Composable override fun Content() = WalletDashboard(title = "Driver Earnings", subtitle = "Ride earnings and cash remittance")
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WalletDashboard(title: String, subtitle: String) {
     val navigator = LocalNavigator.current
