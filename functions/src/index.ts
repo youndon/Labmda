@@ -2857,11 +2857,16 @@ export const xenditPaymentWebhook = onRequest(
     }
 
     const amount = centsFromProviderAmount(data.request_amount);
+    const currency = asString(data.currency).toUpperCase();
+    const country = asString(data.country).toUpperCase();
+    const channelCode = asString(data.channel_code).toUpperCase();
     if (
+      (event === "payment.capture" &&
+        (amount === null || currency !== "PHP" || country !== "PH" || channelCode !== "GCASH")) ||
       (amount !== null && amount !== Number(payment.amountCentavos)) ||
-      (asString(data.currency) && asString(data.currency).toUpperCase() !== "PHP") ||
-      (asString(data.country) && asString(data.country).toUpperCase() !== "PH") ||
-      (asString(data.channel_code) && asString(data.channel_code).toUpperCase() !== "GCASH")
+      (currency && currency !== "PHP") ||
+      (country && country !== "PH") ||
+      (channelCode && channelCode !== "GCASH")
     ) {
       logger.error("Xendit payment webhook amount or channel did not match the stored payment", { referenceId });
       response.status(400).send("Payment details mismatch");
@@ -2870,7 +2875,7 @@ export const xenditPaymentWebhook = onRequest(
 
     let nextStatus: GcashTerminalStatus | null = null;
     if (event === "payment.capture") nextStatus = "PAID";
-    else if (event === "payment.failure") nextStatus = "FAILED";
+    else if (event === "payment.failure") nextStatus = mapProviderPaymentStatus(data.status) ?? "FAILED";
     else if (event === "payment_request.expiry") nextStatus = "EXPIRED";
     else nextStatus = mapProviderPaymentStatus(data.status);
     if (!nextStatus) {
@@ -2933,9 +2938,27 @@ export const reconcilePendingPayments = onSchedule(
       const payment = asRecord(paymentSnapshot.val());
       if (
         asString(payment.provider) !== "XENDIT" ||
-        asString(payment.channelCode).toUpperCase() !== "GCASH" ||
-        asString(payment.status).toUpperCase() !== "PENDING"
+        asString(payment.channelCode).toUpperCase() !== "GCASH"
       ) {
+        await queueRef.remove();
+        continue;
+      }
+      const storedPaymentStatus = mapProviderPaymentStatus(payment.status);
+      if (storedPaymentStatus) {
+        const entityType = asString(payment.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
+        await applyXenditPaymentStatus({
+          entityType,
+          entityId,
+          paymentRequestId: asString(payment.providerReference),
+          referenceId: asString(payment.referenceId),
+          status: storedPaymentStatus,
+          providerPaymentId: asString(payment.providerPaymentId),
+          providerUpdatedAt: asString(payment.providerUpdatedAt),
+          failureCode: asString(payment.failureCode),
+        });
+        continue;
+      }
+      if (asString(payment.status).toUpperCase() !== "PENDING") {
         await queueRef.remove();
         continue;
       }
@@ -3024,8 +3047,19 @@ export const reconcilePendingPayments = onSchedule(
       }
       const payment = asRecord(paymentSnapshot.val());
       const refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
-      if (["SUCCEEDED", "FAILED"].includes(asString(refund.status).toUpperCase())) {
-        await childQueueRef.remove();
+      const storedRefundStatus = asString(refund.status).toUpperCase();
+      if (storedRefundStatus === "SUCCEEDED" || storedRefundStatus === "FAILED") {
+        await applyXenditRefundStatus({
+          entityId,
+          refundAttemptId,
+          referenceId,
+          providerRefundId: asString(refund.providerRefundId) || providerRefundId,
+          providerPaymentId: asString(payment.providerPaymentId),
+          status: storedRefundStatus,
+          amountCentavos: nonNegativeInteger(refund.amountCentavos, "stored refund amount"),
+          providerUpdatedAt: asString(refund.providerUpdatedAt),
+          failureCode: asString(refund.failureCode),
+        });
         continue;
       }
 
