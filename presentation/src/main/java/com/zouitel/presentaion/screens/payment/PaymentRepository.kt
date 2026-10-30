@@ -279,7 +279,7 @@ class PaymentRepository {
         val id = this[idKey] as? String
             ?: error("Payment service did not return $idKey.")
         val paymentId = this["paymentId"] as? String ?: ""
-        val status = this["paymentStatus"] as? String ?: "PENDING"
+        val status = this["paymentStatus"] as? String ?: "UNPAID"
         val amount = (this["amount"] as? Number)?.toDouble()
             ?: (this["fare"] as? Number)?.toDouble()
             ?: 0.0
@@ -291,6 +291,7 @@ class PaymentRepository {
             amount = amount,
             checkoutUrl = checkoutUrl,
             amountCentavos = (this["amountCentavos"] as? Number)?.toLong()
+                ?: (this["totalCentavos"] as? Number)?.toLong()
                 ?: (this["fareCentavos"] as? Number)?.toLong()
                 ?: 0L,
             distanceMeters = (this["distanceMeters"] as? Number)?.toLong() ?: 0L,
