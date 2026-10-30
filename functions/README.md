@@ -142,8 +142,8 @@ and [field-mask guide](https://developers.google.com/maps/documentation/routes/c
 
 ### Realtime Database access
 
-Deny client writes to `config/pricing`, `config/pricing/versions` and
-`pricingQuotes`. Cloud Functions use the Admin SDK and bypass RTDB rules. A quote may be read
+Deny client writes to `config/pricing`, `config/pricing/versions`, `pricingQuotes` and
+`orderQuotes`. Cloud Functions use the Admin SDK and bypass RTDB rules. A quote may be read
 only by its owning signed-in user; clients must not create, alter or extend quote records.
 
 The repository does not currently contain the deployed Realtime Database rules file. Add
@@ -159,6 +159,12 @@ these branches to your existing rules (preserve your participant/order/trip rule
       }
     },
     "pricingQuotes": {
+      "$quoteId": {
+        ".read": "auth != null && data.child('userId').val() === auth.uid",
+        ".write": false
+      }
+    },
+    "orderQuotes": {
       "$quoteId": {
         ".read": "auth != null && data.child('userId').val() === auth.uid",
         ".write": false
