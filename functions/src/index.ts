@@ -603,8 +603,12 @@ function commissionCentavos(amountCentavos: number, basisPoints: number): number
 
 function calculateDeliveryFeeCentavos(distanceMeters: number, rule: DeliveryPricingRule): number {
   const distanceCharge = Math.round(rule.pricePerKmCentavos * distanceMeters / 1000);
-  const unrounded = Math.max(rule.minimumFeeCentavos, rule.baseFeeCentavos + distanceCharge);
-  return roundCentavos(unrounded, rule.roundingIncrementCentavos, rule.roundingMode);
+  const rounded = roundCentavos(
+    rule.baseFeeCentavos + distanceCharge,
+    rule.roundingIncrementCentavos,
+    rule.roundingMode
+  );
+  return Math.max(rule.minimumFeeCentavos, rounded);
 }
 
 function calculateRideFareCentavos(
@@ -616,12 +620,13 @@ function calculateRideFareCentavos(
   const optionalChargesCentavos =
     sharedRideChargeCentavos +
     rule.additionalCharges.reduce((sum, charge) => sum + charge.amountCentavos, 0);
-  const unrounded = Math.max(
-    rule.minimumFareCentavos,
-    rule.baseFareCentavos + perKm + optionalChargesCentavos
+  const rounded = roundCentavos(
+    rule.baseFareCentavos + perKm + optionalChargesCentavos,
+    rule.roundingIncrementCentavos,
+    rule.roundingMode
   );
   return {
-    fareCentavos: roundCentavos(unrounded, rule.roundingIncrementCentavos, rule.roundingMode),
+    fareCentavos: Math.max(rule.minimumFareCentavos, rounded),
     optionalChargesCentavos,
   };
 }
@@ -1174,7 +1179,7 @@ export const createTripPayment = onCall(
     if (paymentMethod === "GCASH") {
       const xendit = await createXenditGcashRequest({
         referenceId: "trip_" + id,
-        amount: fareResult.fare,
+        amount: fareAmount,
         description: "Labmda ride",
         entityType: "TRIP",
         entityId: id,
