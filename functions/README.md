@@ -92,9 +92,30 @@ Deny client writes to `config/pricing`, `config/pricing/versions` and
 `pricingQuotes`. Cloud Functions use the Admin SDK and bypass RTDB rules. A quote may be read
 only by its owning signed-in user; clients must not create, alter or extend quote records.
 
-The repository does not currently contain the deployed Realtime Database rules file. Apply
-these protections in the Firebase Console rules before production; do not replace the rest of
-your existing participant/order/trip rules with a partial example.
+The repository does not currently contain the deployed Realtime Database rules file. Add
+these branches to your existing rules (preserve your participant/order/trip rules):
+
+```json
+{
+  "rules": {
+    "config": {
+      "pricing": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "pricingQuotes": {
+      "$quoteId": {
+        ".read": "auth != null && data.child('userId').val() === auth.uid",
+        ".write": false
+      }
+    }
+  }
+}
+```
+
+The Functions Admin SDK bypasses RTDB rules for server writes. Do not replace your complete
+rules document with this fragment; merge only these paths into the existing rules tree.
 
 ## Realtime Database indexes and rules
 
