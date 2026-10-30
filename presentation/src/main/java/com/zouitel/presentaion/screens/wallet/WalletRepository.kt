@@ -6,7 +6,7 @@ import dev.gitlive.firebase.functions.functions
 data class WalletPayout(val id:String,val amountCentavos:Long,val status:String,val providerPayoutId:String,val failureCode:String,val createdAtTimestamp:Long,val maskedAccountNumber:String)
 data class PayoutAccountSummary(val status:String="NOT_CONFIGURED",val accountType:String="",val channelCode:String="",val accountHolderName:String="",val maskedAccountNumber:String="",val submittedAtTimestamp:Long=0L,val reviewedAtTimestamp:Long=0L,val reviewNote:String="")
 data class WalletSummary(val availableCentavos:Long=0L,val pendingCentavos:Long=0L,val cashOwedCentavos:Long=0L,val cashEarningsCentavos:Long=0L,val pendingPayoutCentavos:Long=0L,val paidOutCentavos:Long=0L,val refundDebtCentavos:Long=0L,val payoutAccount:PayoutAccountSummary=PayoutAccountSummary(),val payouts:List<WalletPayout> = emptyList())
-data class AdminPaymentRow(val id:String,val entityType:String,val status:String,val provider:String,val clientId:String,val merchantId:String,val amountCentavos:Long,val currency:String)
+data class AdminPaymentRow(val id:String,val entityType:String,val status:String,val provider:String,val clientId:String,val merchantId:String,val amountCentavos:Long,val refundedCentavos:Long,val pendingRefundCentavos:Long,val refundStatus:String,val currency:String)
 data class AdminLedgerRow(val id:String,val entryType:String,val operationId:String,val totalCentavos:Long,val createdAtTimestamp:Long,val platformCommissionCentavos:Long)
 data class AdminPayoutRow(val id:String,val userId:String,val status:String,val amountCentavos:Long,val providerPayoutId:String,val maskedAccountNumber:String,val failureCode:String)
 data class AdminPayoutReviewRow(val userId:String,val status:String,val accountHolderName:String,val maskedAccountNumber:String,val reviewNote:String)
@@ -42,7 +42,7 @@ class WalletRepository {
     }
     suspend fun loadAdminDashboard():AdminPaymentsDashboard {
         val r=call("getAdminPaymentDashboard")
-        val payments=rows(r["payments"]).map { AdminPaymentRow(it.s("id"),it.s("entityType"),it.s("status"),it.s("provider"),it.s("clientId"),it.s("merchantId"),it.n("amountCentavos"),it.s("currency")) }
+        val payments=rows(r["payments"]).map { AdminPaymentRow(it.s("id"),it.s("entityType"),it.s("status"),it.s("provider"),it.s("clientId"),it.s("merchantId"),it.n("amountCentavos"),it.n("refundedCentavos"),it.n("pendingRefundCentavos"),it.s("refundStatus"),it.s("currency")) }
         val ledger=rows(r["ledgerEntries"]).map { AdminLedgerRow(it.s("id"),it.s("entryType"),it.s("operationId"),it.n("totalCentavos"),it.n("createdAtTimestamp"),it.commission()) }
         val payouts=rows(r["payouts"]).map { AdminPayoutRow(it.s("id"),it.s("userId"),it.s("status"),it.n("amountCentavos"),it.s("providerPayoutId"),it.s("maskedAccountNumber"),it.s("failureCode")) }
         val reviews=rows(r["payoutAccountReviews"]).map { AdminPayoutReviewRow(it.s("userId"),it.s("status"),it.s("accountHolderName"),it.s("maskedAccountNumber"),it.s("reviewNote")) }
