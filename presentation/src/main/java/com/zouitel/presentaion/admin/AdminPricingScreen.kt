@@ -87,7 +87,7 @@ class AdminPricingScreen : Screen {
 
         LaunchedEffect(Unit) {
             try {
-                val response = functions.httpsCallable("getPricingConfiguration")()
+                val response = functions.httpsCallable("getPricingConfiguration")(emptyMap<String, Any>())
                 val result = response.data<Map<String, Any?>>()
                 configured = result["configured"] as? Boolean ?: false
                 val config = result["configuration"] as? Map<*, *>
