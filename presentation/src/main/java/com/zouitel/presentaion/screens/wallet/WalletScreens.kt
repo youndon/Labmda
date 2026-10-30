@@ -32,25 +32,33 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.koin.koinScreenModel
+import org.koin.core.context.GlobalContext
 import cafe.adriel.voyager.navigator.LocalNavigator
 import java.util.Locale
 
 class MerchantEarningsScreen : Screen {
-    @Composable override fun Content() = WalletDashboard(title = "Merchant Earnings", subtitle = "Food and goods earnings")
+    @Composable override fun Content() {
+        val model = rememberScreenModel { WalletScreenModel(GlobalContext.get().get()) }
+        WalletDashboard(model, "Merchant Earnings", "Food and goods earnings")
+    }
 }
 class CourierEarningsScreen : Screen {
-    @Composable override fun Content() = WalletDashboard(title = "Courier Earnings", subtitle = "Delivery earnings and cash remittance")
+    @Composable override fun Content() {
+        val model = rememberScreenModel { WalletScreenModel(GlobalContext.get().get()) }
+        WalletDashboard(model, "Courier Earnings", "Delivery earnings and cash remittance")
+    }
 }
 class DriverEarningsScreen : Screen {
-    @Composable override fun Content() = WalletDashboard(title = "Driver Earnings", subtitle = "Ride earnings and cash remittance")
+    @Composable override fun Content() {
+        val model = rememberScreenModel { WalletScreenModel(GlobalContext.get().get()) }
+        WalletDashboard(model, "Driver Earnings", "Ride earnings and cash remittance")
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WalletDashboard(title: String, subtitle: String) {
+private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subtitle: String) {
     val navigator = LocalNavigator.current
-    val screenModel = koinScreenModel<WalletScreenModel>()
     val state by screenModel.state.collectAsState()
     val wallet = state.summary
     Scaffold(
