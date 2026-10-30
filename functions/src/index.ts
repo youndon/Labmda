@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
-import { getDatabase } from "firebase-admin/database";
+import { DataSnapshot, getDatabase } from "firebase-admin/database";
 import { logger } from "firebase-functions";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
@@ -4087,7 +4087,7 @@ async function applyPayoutWalletTerminal(
   const transaction = await walletRef.transaction((rawValue) => {
     const current = asRecord(rawValue);
     const applied = asRecord(current.appliedLedgerEntries);
-    const next = { ...current, currency: "PHP", updatedAtTimestamp: Date.now() };
+    const next: Record<string, unknown> = { ...current, currency: "PHP", updatedAtTimestamp: Date.now() };
     if (applied[eventId] !== true) {
       let available = walletNumber(current, "availableCentavos");
       let pending = walletNumber(current, "pendingPayoutCentavos");
