@@ -3,7 +3,10 @@ package com.zouitel.presentaion.screens.payment
 import com.zouitel.presentaion.model.Money
 import com.zouitel.presentaion.model.OrderBreakdown
 import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.database.database
 import dev.gitlive.firebase.functions.functions
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 /**
  * Result returned by a server-created order or trip payment.
@@ -19,7 +22,11 @@ data class PaymentCreationResult(
     val amountCentavos: Long = 0L,
     val distanceMeters: Long = 0L,
     val pricingVersion: Long = 0L,
-    val breakdown: OrderBreakdown? = null
+    val breakdown: OrderBreakdown? = null,
+    val webCheckoutUrl: String? = null,
+    val checkoutActionDescriptor: String? = null,
+    val providerPaymentId: String? = null,
+    val expiresAtTimestamp: Long = 0L
 )
 
 /** Server quote for a food or goods order. Monetary fields are PHP centavos. */
@@ -48,8 +55,32 @@ data class PricingQuoteResult(
     val expiresAtTimestamp: Long
 )
 
+
+/** Server-authoritative payment state observed from payments/{entityId}. */
+data class ObservedPaymentStatus(
+    val status: String,
+    val provider: String,
+    val paymentId: String,
+    val providerPaymentId: String?,
+    val amountCentavos: Long,
+    val refundedCentavos: Long,
+    val pendingRefundCentavos: Long,
+    val currency: String,
+    val failureCode: String,
+    val updatedAtTimestamp: Long
+)
+
+/** Result of an administrator-authorized Xendit refund request. */
+data class RefundPaymentResult(
+    val entityId: String,
+    val refundId: String,
+    val refundStatus: String,
+    val amountCentavos: Long
+)
+
 class PaymentRepository {
     private val functions = Firebase.functions("asia-southeast1")
+    private val db = Firebase.database.reference()
 
     /**
      * Requests a delivery or ride quote. The server obtains road distance from Google Routes
@@ -198,6 +229,91 @@ class PaymentRepository {
         return response.data<Map<String, Any?>>().toPaymentCreationResult("tripId")
     }
 
+
+    /**
+     * Starts one-time GCash collection for an already-created server-priced order or trip.
+     * The checkoutUrl prefers Xendit's GCash deeplink and falls back to the web checkout URL.
+     * Returning from GCash must never be treated as proof of payment; observePaymentStatus()
+     * returns the authoritative server-updated state.
+     */
+    suspend fun createGcashPayment(
+        entityType: String,
+        entityId: String,
+        idempotencyKey: String
+    ): PaymentCreationResult {
+        val normalizedType = entityType.trim().uppercase()
+        require(normalizedType == "ORDER" || normalizedType == "TRIP") {
+            "entityType must be ORDER or TRIP."
+        }
+        val response = functions.httpsCallable("createGcashPayment")(
+            mapOf(
+                "entityType" to normalizedType,
+                "entityId" to entityId,
+                "idempotencyKey" to idempotencyKey
+            )
+        )
+        val result = response.data<Map<String, Any?>>().toMutableMap()
+        val idKey = if (normalizedType == "TRIP") "tripId" else "orderId"
+        result[idKey] = result["entityId"] as? String ?: entityId
+        result["amountCentavos"] = result["amountCentavos"]
+            ?: result["totalCentavos"]
+        return result.toPaymentCreationResult(idKey)
+    }
+
+    /** Observe the payment record written by verified Xendit events and reconciliation. */
+    fun observePaymentStatus(entityId: String): Flow<ObservedPaymentStatus?> {
+        return db.child("payments").child(entityId).valueEvents.map { snapshot ->
+            if (!snapshot.exists) {
+                null
+            } else {
+                fun string(key: String, default: String = ""): String =
+                    runCatching { snapshot.child(key).value<String?>() ?: default }.getOrDefault(default)
+
+                fun long(key: String): Long =
+                    runCatching { snapshot.child(key).value<Number?>()?.toLong() ?: 0L }
+                        .getOrDefault(0L)
+
+                ObservedPaymentStatus(
+                    status = string("status", "UNPAID"),
+                    provider = string("provider"),
+                    paymentId = string("providerReference"),
+                    providerPaymentId = string("providerPaymentId").ifBlank { null },
+                    amountCentavos = long("amountCentavos"),
+                    refundedCentavos = long("refundedCentavos"),
+                    pendingRefundCentavos = long("pendingRefundCentavos"),
+                    currency = string("currency", "PHP"),
+                    failureCode = string("failureCode"),
+                    updatedAtTimestamp = long("updatedAtTimestamp")
+                )
+            }
+        }
+    }
+
+    /** Call this only from an administrator surface; Functions verifies the admin claim. */
+    suspend fun refundPayment(
+        entityType: String,
+        entityId: String,
+        idempotencyKey: String,
+        reason: String = "REQUESTED_BY_CUSTOMER",
+        amountCentavos: Long? = null
+    ): RefundPaymentResult {
+        val payload = mutableMapOf<String, Any>(
+            "entityType" to entityType.trim().uppercase(),
+            "entityId" to entityId,
+            "idempotencyKey" to idempotencyKey,
+            "reason" to reason.trim().uppercase()
+        )
+        amountCentavos?.let { payload["amountCentavos"] = it }
+        val response = functions.httpsCallable("refundPayment")(payload)
+        val result = response.data<Map<String, Any?>>()
+        return RefundPaymentResult(
+            entityId = result["entityId"] as? String ?: entityId,
+            refundId = result["refundId"] as? String ?: "",
+            refundStatus = result["refundStatus"] as? String ?: "PENDING",
+            amountCentavos = (result["amountCentavos"] as? Number)?.toLong() ?: 0L
+        )
+    }
+
     suspend fun createOrder(
         idempotencyKey: String,
         orderType: String,
@@ -284,6 +400,10 @@ class PaymentRepository {
             ?: (this["fare"] as? Number)?.toDouble()
             ?: 0.0
         val checkoutUrl = this["checkoutUrl"] as? String
+        val webCheckoutUrl = this["webCheckoutUrl"] as? String
+        val checkoutActionDescriptor = this["checkoutActionDescriptor"] as? String
+        val providerPaymentId = this["providerPaymentId"] as? String
+        val expiresAtTimestamp = (this["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L
         return PaymentCreationResult(
             entityId = id,
             paymentId = paymentId,
@@ -296,7 +416,11 @@ class PaymentRepository {
                 ?: 0L,
             distanceMeters = (this["distanceMeters"] as? Number)?.toLong() ?: 0L,
             pricingVersion = (this["pricingVersion"] as? Number)?.toLong() ?: 0L,
-            breakdown = this["breakdown"].toOrderBreakdownOrNull()
+            breakdown = this["breakdown"].toOrderBreakdownOrNull(),
+            webCheckoutUrl = webCheckoutUrl,
+            checkoutActionDescriptor = checkoutActionDescriptor,
+            providerPaymentId = providerPaymentId,
+            expiresAtTimestamp = expiresAtTimestamp
         )
     }
 
