@@ -2215,6 +2215,9 @@ async function applyXenditPaymentStatus(args: {
       status: args.status,
       providerPaymentId: args.providerPaymentId || asString(current.providerPaymentId),
       providerUpdatedAt: args.providerUpdatedAt || asString(current.providerUpdatedAt),
+      paidAtTimestamp: args.status === "PAID"
+        ? Number(current.paidAtTimestamp ?? 0) || (Date.parse(args.providerUpdatedAt ?? "") || Date.now())
+        : Number(current.paidAtTimestamp ?? 0),
       failureCode: args.status === "FAILED" ? args.failureCode || asString(current.failureCode) : "",
       attempts: nextAttempt,
       updatedAtTimestamp: Date.now(),
@@ -2600,6 +2603,11 @@ export const refundPayment = onCall(
     ) {
       throw new HttpsError("failed-precondition", "Refunds require a provider-confirmed Xendit payment ID.");
     }
+    const paidAtTimestamp = Number(existingPayment.paidAtTimestamp ?? 0);
+    const gcashRefundWindowMs = 180 * 24 * 60 * 60 * 1000;
+    if (paidAtTimestamp > 0 && Date.now() - paidAtTimestamp > gcashRefundWindowMs) {
+      throw new HttpsError("failed-precondition", "The Xendit GCash refund window of 180 days has elapsed.");
+    }
 
     const secret = XENDIT_SECRET_KEY.value();
     if (!secret) {
@@ -2728,17 +2736,28 @@ export const refundPayment = onCall(
       });
 
       if (refundStatus === "PENDING") {
-        await paymentRef.child("refunds").child(refundAttemptId).update({
-          status: "PENDING",
+        await paymentRef.child("refunds").child(refundAttemptId).transaction((rawValue) => {
+          const current = asRecord(rawValue);
+          if (["SUCCEEDED", "FAILED"].includes(asString(current.status).toUpperCase())) {
+            return current;
+          }
+          return {
+            ...current,
+            status: "PENDING",
+            updatedAtTimestamp: Date.now(),
+          };
         });
-        await db.ref("refundReconciliationQueue/" + entityId + "_" + refundAttemptId).set({
-          entityId,
-          refundAttemptId,
-          providerRefundId,
-          referenceId,
-          dueAtTimestamp: Date.now() + 2 * 60 * 1000,
-          attempts: 0,
-        });
+        const latestRefund = asRecord((await paymentRef.child("refunds").child(refundAttemptId).get()).val());
+        if (!["SUCCEEDED", "FAILED"].includes(asString(latestRefund.status).toUpperCase())) {
+          await db.ref("refundReconciliationQueue/" + entityId + "_" + refundAttemptId).set({
+            entityId,
+            refundAttemptId,
+            providerRefundId,
+            referenceId,
+            dueAtTimestamp: Date.now() + 2 * 60 * 1000,
+            attempts: 0,
+          });
+        }
       } else {
         await applyXenditRefundStatus({
           entityId,
