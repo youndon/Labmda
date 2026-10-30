@@ -2314,7 +2314,13 @@ async function applyXenditRefundStatus(args: {
     };
   });
 
-  if (!transaction.committed || !transaction.snapshot.exists()) return false;
+  if (!transaction.committed || !transaction.snapshot.exists()) {
+    const latest = asRecord((await paymentRef.get()).val());
+    const latestRefund = asRecord(asRecord(latest.refunds)[args.refundAttemptId]);
+    if (args.status !== "SUCCEEDED" || asString(latestRefund.status).toUpperCase() !== "SUCCEEDED") return false;
+    await reconcileRefundedPaymentEarnings(args.entityId, args.refundAttemptId);
+    return true;
+  }
   const saved = asRecord(transaction.snapshot.val());
   const refundQueueKey = args.entityId + "_" + args.refundAttemptId;
   await db.ref("refundReconciliationQueue/" + refundQueueKey).remove();
@@ -2322,6 +2328,9 @@ async function applyXenditRefundStatus(args: {
     const entityType = asString(saved.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
     await db.ref(paymentEntityPath(entityType as GcashEntityType) + "/" + args.entityId + "/paymentStatus")
       .set(asString(saved.status));
+  }
+  if (args.status === "SUCCEEDED") {
+    await reconcileRefundedPaymentEarnings(args.entityId, args.refundAttemptId);
   }
   return true;
 }
@@ -4436,7 +4445,9 @@ async function reconcileCompletedPaymentEarnings(
   }
 
   if (complete) {
-    for (const share of shares) enqueueWalletPayout(share.ownerId);
+    if (payment.suppressPayoutQueue !== true) {
+      for (const share of shares) enqueueWalletPayout(share.ownerId);
+    }
     await db.ref("payments/" + entityId).update({
       earningsPendingStatus: hasPending ? "RELEASED" : asString(payment.earningsPendingStatus),
       earningsSettlementStatus: "RELEASED",
@@ -4460,6 +4471,168 @@ async function reconcileCompletedPaymentEarnings(
     });
   }
   return true;
+}
+
+async function applyWalletRefundDebit(
+  uid: string,
+  eventId: string,
+  sourceField: "pendingCentavos" | "availableCentavos",
+  amountCentavos: number
+): Promise<{ debitedCentavos: number; debtCentavos: number }> {
+  const walletRef = db.ref("wallets/" + uid);
+  let result: { debitedCentavos: number; debtCentavos: number } | null = null;
+  const transaction = await walletRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const applied = asRecord(current.appliedLedgerEntries);
+    const refundAdjustments = asRecord(current.refundAdjustments);
+    const previous = asRecord(refundAdjustments[eventId]);
+    if (applied[eventId] === true || Object.keys(previous).length > 0) {
+      result = {
+        debitedCentavos: Number(previous.debitedCentavos ?? 0),
+        debtCentavos: Number(previous.debtCentavos ?? 0),
+      };
+      return current;
+    }
+    const availableToDebit = walletNumber(current, sourceField);
+    const debitedCentavos = Math.min(availableToDebit, amountCentavos);
+    const debtCentavos = amountCentavos - debitedCentavos;
+    const existingDebt = walletNumber(current, "refundDebtCentavos");
+    if (!Number.isSafeInteger(existingDebt + debtCentavos)) {
+      throw new HttpsError("data-loss", "Refund recovery balance exceeded the supported wallet range.");
+    }
+    result = { debitedCentavos, debtCentavos };
+    return {
+      ...current,
+      [sourceField]: availableToDebit - debitedCentavos,
+      refundDebtCentavos: existingDebt + debtCentavos,
+      appliedLedgerEntries: { ...applied, [eventId]: true },
+      refundAdjustments: {
+        ...refundAdjustments,
+        [eventId]: {
+          sourceField,
+          requestedCentavos: amountCentavos,
+          debitedCentavos,
+          debtCentavos,
+          createdAtTimestamp: Date.now(),
+        },
+      },
+      currency: "PHP",
+      updatedAtTimestamp: Date.now(),
+    };
+  });
+  if (!result) {
+    const current = asRecord((await walletRef.get()).val());
+    const saved = asRecord(asRecord(current.refundAdjustments)[eventId]);
+    if (Object.keys(saved).length === 0) {
+      throw new HttpsError("aborted", "Refund recovery could not be committed to the wallet.");
+    }
+    result = {
+      debitedCentavos: Number(saved.debitedCentavos ?? 0),
+      debtCentavos: Number(saved.debtCentavos ?? 0),
+    };
+  }
+  if (!transaction.committed && !result) {
+    throw new HttpsError("aborted", "Refund recovery transaction did not commit.");
+  }
+  return result;
+}
+
+async function reconcileRefundedPaymentEarnings(entityId: string, refundAttemptId: string): Promise<void> {
+  const paymentRef = db.ref("payments/" + entityId);
+  let payment = asRecord((await paymentRef.get()).val());
+  let refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
+  if (
+    asString(payment.provider).toUpperCase() !== "XENDIT" ||
+    asString(refund.status).toUpperCase() !== "SUCCEEDED"
+  ) return;
+  if (asString(refund.walletSettlementStatus).toUpperCase() === "POSTED") return;
+
+  const entityType = asString(payment.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
+  const entityPath = entityType === "TRIP" ? "trips/" : "orders/";
+  const entitySnapshot = await db.ref(entityPath + entityId).get();
+  if (!entitySnapshot.exists()) throw new HttpsError("not-found", "The refunded order or trip was not found.");
+  const entity = asRecord(entitySnapshot.val());
+
+  if (
+    asString(payment.earningsPendingStatus).toUpperCase() !== "PENDING" &&
+    asString(payment.earningsSettlementStatus).toUpperCase() !== "RELEASED"
+  ) {
+    await reconcileCompletedPaymentEarnings(entityType, entityId, entity, {
+      ...payment,
+      status: "PAID",
+      suppressPayoutQueue: true,
+    });
+    payment = asRecord((await paymentRef.get()).val());
+    refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
+    if (asString(refund.walletSettlementStatus).toUpperCase() === "POSTED") return;
+  }
+
+  const refundAmount = nonNegativeInteger(refund.amountCentavos, "confirmed refund amount");
+  const grossAmount = nonNegativeInteger(payment.amountCentavos, "original payment amount");
+  if (refundAmount <= 0 || grossAmount <= 0 || refundAmount > grossAmount) {
+    throw new HttpsError("data-loss", "The confirmed refund amount does not match the original payment.");
+  }
+  const breakdown = asRecord(payment.breakdown ?? entity.breakdown);
+  const merchantShare = entityType === "ORDER" ? nonNegativeInteger(breakdown.merchantShare ?? 0, "merchant share") : 0;
+  const courierShare = entityType === "ORDER" ? nonNegativeInteger(breakdown.courierShare ?? 0, "courier share") : 0;
+  const driverShare = entityType === "TRIP" ? nonNegativeInteger(breakdown.driverShare ?? 0, "driver share") : 0;
+  const platformShare = nonNegativeInteger(breakdown.platformShare ?? 0, "platform share");
+  const originalShares = merchantShare + courierShare + driverShare + platformShare;
+  if (originalShares !== grossAmount) throw new HttpsError("failed-precondition", "Original payment split does not reconcile.");
+
+  const scaled = (share: number): number =>
+    Number((BigInt(refundAmount) * BigInt(share)) / BigInt(grossAmount));
+  const merchantRefund = scaled(merchantShare);
+  const courierRefund = scaled(courierShare);
+  const driverRefund = scaled(driverShare);
+  const platformRefund = refundAmount - merchantRefund - courierRefund - driverRefund;
+  const isPending = asString(payment.earningsPendingStatus).toUpperCase() === "PENDING";
+  const sourceField: "pendingCentavos" | "availableCentavos" = isPending ? "pendingCentavos" : "availableCentavos";
+  const recipients: Array<{ uid: string; type: string; amount: number }> = [];
+  const merchantId = asString(entity.merchantId) || asString(entity.sourceId);
+  const courierId = asString(entity.deliveryId);
+  const driverId = asString(entity.driverId);
+  if (merchantRefund > 0 && merchantId) recipients.push({ uid: merchantId, type: "MERCHANT", amount: merchantRefund });
+  if (courierRefund > 0 && courierId) recipients.push({ uid: courierId, type: "COURIER", amount: courierRefund });
+  if (driverRefund > 0 && driverId) recipients.push({ uid: driverId, type: "DRIVER", amount: driverRefund });
+
+  const lines: LedgerLine[] = [];
+  for (const recipient of recipients) {
+    const walletResult = await applyWalletRefundDebit(
+      recipient.uid,
+      "refund_" + refundAttemptId + "_" + recipient.uid,
+      sourceField,
+      recipient.amount
+    );
+    if (walletResult.debitedCentavos > 0) {
+      lines.push(ledgerLine(recipient.type + (isPending ? "_PENDING_PAYABLE" : "_AVAILABLE_PAYABLE"), recipient.uid, "DEBIT", walletResult.debitedCentavos));
+    }
+    if (walletResult.debtCentavos > 0) {
+      lines.push(ledgerLine(recipient.type + "_REFUND_RECEIVABLE", recipient.uid, "DEBIT", walletResult.debtCentavos));
+    }
+  }
+  if (platformRefund > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "DEBIT", platformRefund));
+  lines.push(ledgerLine("XENDIT_REFUND_CLEARING", "PLATFORM", "CREDIT", refundAmount));
+
+  const entryId = "refund_settlement_" + entityType.toLowerCase() + "_" + entityId + "_" + refundAttemptId;
+  const entry = {
+    operationId: "REFUND_SETTLEMENT:" + entityType + ":" + entityId + ":" + refundAttemptId,
+    entryType: "REFUND_SETTLEMENT",
+    entityType,
+    entityId,
+    refundAttemptId,
+    refundId: asString(refund.providerRefundId),
+    totalCentavos: refundAmount,
+    lines,
+    memo: "Reconcile a provider-confirmed Xendit refund against participant earnings and commission",
+    createdAtTimestamp: Number(refund.createdAtTimestamp ?? refund.updatedAtTimestamp ?? payment.updatedAtTimestamp ?? 1),
+  };
+  await ensureMarketplaceLedgerEntry(entryId, entry);
+  await db.ref().update({
+    ["payments/" + entityId + "/refunds/" + refundAttemptId + "/walletSettlementStatus"]: "POSTED",
+    ["payments/" + entityId + "/refunds/" + refundAttemptId + "/walletLedgerEntryId"]: entryId,
+    ["payments/" + entityId + "/refunds/" + refundAttemptId + "/walletSettledAtTimestamp"]: Date.now(),
+  });
 }
 
 export const reconcileMarketplaceEarnings = onSchedule(
