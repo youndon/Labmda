@@ -3385,22 +3385,26 @@ function buildCashCollectionLedgerEntry(collection: Record<string, unknown>): Re
       creditCentavos: merchantOwed,
     });
   }
-  lines.push({
-    accountId: cashLedgerAccountId(entityType === "ORDER" ? "COURIER_EARNINGS" : "DRIVER_EARNINGS", collectorId),
-    accountType: entityType === "ORDER" ? "COURIER_EARNINGS" : "DRIVER_EARNINGS",
-    ownerId: collectorId,
-    normalSide: "CREDIT",
-    debitCentavos: 0,
-    creditCentavos: collectorEarnings,
-  });
-  lines.push({
-    accountId: cashLedgerAccountId("PLATFORM_COMMISSION"),
-    accountType: "PLATFORM_COMMISSION",
-    ownerId: "PLATFORM",
-    normalSide: "CREDIT",
-    debitCentavos: 0,
-    creditCentavos: platformOwed,
-  });
+  if (collectorEarnings > 0) {
+    lines.push({
+      accountId: cashLedgerAccountId(entityType === "ORDER" ? "COURIER_EARNINGS" : "DRIVER_EARNINGS", collectorId),
+      accountType: entityType === "ORDER" ? "COURIER_EARNINGS" : "DRIVER_EARNINGS",
+      ownerId: collectorId,
+      normalSide: "CREDIT",
+      debitCentavos: 0,
+      creditCentavos: collectorEarnings,
+    });
+  }
+  if (platformOwed > 0) {
+    lines.push({
+      accountId: cashLedgerAccountId("PLATFORM_COMMISSION"),
+      accountType: "PLATFORM_COMMISSION",
+      ownerId: "PLATFORM",
+      normalSide: "CREDIT",
+      debitCentavos: 0,
+      creditCentavos: platformOwed,
+    });
+  }
 
   return {
     entryId: cashLedgerEntryId("COLLECTION", collectionId),
@@ -3519,11 +3523,53 @@ async function finalizeCashRemittance(
   await db.ref().update(updates);
 }
 
+async function applyCashCollectionMirror(collection: Record<string, unknown>): Promise<void> {
+  const entityType = asString(collection.entityType).toUpperCase() as CashEntityType;
+  const entityId = asString(collection.entityId);
+  const collectorId = asString(collection.collectorId);
+  const entityPath = cashEntityPath(entityType);
+  const collectedAmountCentavos = nonNegativeInteger(collection.collectedAmountCentavos, "collected cash amount");
+  const remittedCentavos = nonNegativeInteger(collection.remittedCentavos ?? 0, "remitted cash amount");
+  const remittableCentavos = nonNegativeInteger(collection.remittableCentavos ?? 0, "cash remittance due");
+  const outstandingRemittanceCentavos = Math.max(0, remittableCentavos - remittedCentavos);
+  const updates: Record<string, unknown> = {};
+  updates[entityPath + "/" + entityId + "/status"] =
+    entityType === "ORDER" ? "DELIVERED" : "COMPLETED";
+  updates[entityPath + "/" + entityId + "/paymentStatus"] = "COLLECTED";
+  updates[entityPath + "/" + entityId + "/cashCollectionStatus"] = "COLLECTED";
+  updates[entityPath + "/" + entityId + "/cashCollectionId"] = asString(collection.collectionId);
+  updates[entityPath + "/" + entityId + "/cashCollectedBy"] = collectorId;
+  updates[entityPath + "/" + entityId + "/cashCollectedByRole"] = asString(collection.collectorRole);
+  updates[entityPath + "/" + entityId + "/cashCollectedAmountCentavos"] = collectedAmountCentavos;
+  updates[entityPath + "/" + entityId + "/cashCollectedAtTimestamp"] = Number(collection.collectedAtTimestamp ?? 0);
+  updates[entityPath + "/" + entityId + "/cashMerchantOwedCentavos"] =
+    nonNegativeInteger(collection.merchantOwedCentavos ?? 0, "merchant cash payable");
+  updates[entityPath + "/" + entityId + "/cashPlatformOwedCentavos"] =
+    nonNegativeInteger(collection.platformOwedCentavos ?? 0, "platform cash amount");
+  updates[entityPath + "/" + entityId + "/cashCollectorEarningsCentavos"] =
+    nonNegativeInteger(collection.collectorEarningsCentavos ?? 0, "collector cash earnings");
+  updates[entityPath + "/" + entityId + "/cashRemittedCentavos"] = remittedCentavos;
+  updates[entityPath + "/" + entityId + "/cashOutstandingRemittanceCentavos"] = outstandingRemittanceCentavos;
+  updates[entityPath + "/" + entityId + "/cashRemittanceStatus"] =
+    remittableCentavos === 0 ? "NOT_DUE" :
+      outstandingRemittanceCentavos === 0 ? "REMITTED" :
+        remittedCentavos > 0 ? "PARTIALLY_REMITTED" : "DUE";
+  updates["payments/" + entityId + "/status"] = "COLLECTED";
+  updates["payments/" + entityId + "/cashCollectedBy"] = collectorId;
+  updates["payments/" + entityId + "/cashCollectedByRole"] = asString(collection.collectorRole);
+  updates["payments/" + entityId + "/cashCollectedAmountCentavos"] = collectedAmountCentavos;
+  updates["payments/" + entityId + "/cashCollectedAtTimestamp"] = Number(collection.collectedAtTimestamp ?? 0);
+  updates["payments/" + entityId + "/cashRemittedCentavos"] = remittedCentavos;
+  updates["payments/" + entityId + "/cashOutstandingRemittanceCentavos"] = outstandingRemittanceCentavos;
+  await db.ref().update(updates);
+}
+
 async function finalizeCashCollection(
   collection: Record<string, unknown>
 ): Promise<void> {
   const collectionId = asString(collection.collectionId);
   if (!collectionId) throw new HttpsError("failed-precondition", "A cash collection ID is missing.");
+  await applyCashCollectionMirror(collection);
 
   const collectionLedger = buildCashCollectionLedgerEntry(collection);
   await ensureImmutableCashLedgerEntry(asString(collectionLedger.entryId), collectionLedger);
