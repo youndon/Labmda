@@ -593,3 +593,22 @@ has not yet reached `walletSettlementStatus: POSTED`.
 
 This means an administrator must not edit a wallet or ledger to compensate for a refund. A refund
 is considered fully reconciled for wallet accounting only when its refund ledger entry is posted.
+
+
+## Step 09 — Security and permissions hardening
+
+The repository includes a default-deny production rules file, `database.rules.json`, and `firebase.json` targets it for database deployments. `database.emulator.rules.json` mirrors the policy. Orders, trips, payment records, pricing configuration, wallets, payouts and recipient details, ledger entries, cash collection/remittance records, reconciliation queues and webhook markers are server-write-only. Participant reads require participant identity or a scoped query. Profile owners cannot change administrator fields or promote their own service approvals; service applications can only transition to PENDING from NONE/REJECTED, while admin approval uses the Firebase Authentication custom claim `admin: true`.
+
+Authenticated callables now own shop application submission, courier assignment/release, merchant order transitions, driver ride acceptance and trip transitions: `submitShopApplication`, `claimDeliveryOrder`, `releaseDeliveryOrder`, `transitionOrderStatus`, `claimTrip` and `transitionTripStatus`. They verify identity, approved role, ownership/assignment and allowed transitions, and use database transactions. Cash completion remains exclusively in `confirmCashCollected`, now with approved courier/driver checks. GCash delivery/ride completion requires the server payment record to be PAID.
+
+Trusted Functions maintain browse-safe `publicDrivers` and `publicShops` views plus redacted `availableDeliveryTasks` and `availableRideRequests` feeds. Xendit payment/payout callbacks authenticate `x-callback-token` against Secret Manager secrets. SHA-256 event reservations serialize concurrent callbacks, remember processed events, and release stale processing leases after two minutes; ledger journal idempotency remains independent.
+
+### Deploy and verify
+
+1. Select the intended Firebase project with `firebase use`.
+2. Start Auth, Realtime Database and Functions emulators; test unauthenticated, customer, pending/approved merchant, pending/approved courier, pending/approved driver and administrator access.
+3. Provision admin access only with the Firebase Admin SDK custom-claims API; do not set an admin profile field from Android.
+4. Deploy rules using `firebase deploy --only database`, then deploy Functions using `firebase deploy --only functions`.
+5. Set `XENDIT_SECRET_KEY`, `XENDIT_WEBHOOK_TOKEN`, `XENDIT_PAYOUT_SECRET_KEY`, `XENDIT_PAYOUT_WEBHOOK_TOKEN` and `PAYOUT_ACCOUNT_ENCRYPTION_KEY` through `firebase functions:secrets:set`, then configure provider webhook URLs.
+
+Deploying Functions does not publish database rules. This PR does not deploy to the live Firebase project. Review the current production RTDB shape and run the emulator authorization tests before deploying; unknown paths are denied by default. CI compilation does not exercise provider callbacks or live payouts.

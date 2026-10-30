@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.delivery
 
+import com.zouitel.presentaion.payments.ServiceActionsRepository
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.CartItem
@@ -24,6 +26,7 @@ data class OrderPoint(val lat: Double, val lng: Double)
 class DeliveryDashboardScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val payments = PaymentRepository()
+    private val serviceActions = ServiceActionsRepository()
     private val currentUid: String? get() = Firebase.auth.currentUser?.uid
 
     private val _activeDeliveries = MutableStateFlow<List<Order>>(emptyList())
@@ -54,7 +57,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
         }
 
         val orders = db.child("orders")
-        val openTasks = orders.orderByChild("deliveryId").equalTo("").valueEvents
+        val openTasks = db.child("availableDeliveryTasks").valueEvents
         val assignedTasks = orders.orderByChild("deliveryId").equalTo(uid).valueEvents
 
         screenModelScope.launch(Dispatchers.IO) {
@@ -181,37 +184,15 @@ class DeliveryDashboardScreenModel : ScreenModel {
         val uid = currentUid ?: return
 
         screenModelScope.launch(Dispatchers.IO) {
-            val existing = runCatching {
-                db.child("orders").child(order.id).child("deliveryId")
-                    .valueEvents.first().value<String>()
-            }.getOrDefault("")
-            if (existing.isNotBlank() && existing != uid) return@launch
-
-            val profileSnapshot = db.child("users").child(uid).valueEvents.first()
-            val name = runCatching { profileSnapshot.child("fullName").value<String>() }
-                .getOrElse { runCatching { profileSnapshot.child("name").value<String>() }.getOrDefault("") }
-            val phone = runCatching { profileSnapshot.child("phoneNumber").value<String>() }
-                .getOrElse { runCatching { profileSnapshot.child("phone").value<String>() }.getOrDefault("") }
-
-            db.child("orders").child(order.id).updateChildren(
-                mapOf(
-                    "deliveryId" to uid,
-                    "deliveryName" to name.ifBlank { "Delivery" },
-                    "deliveryPhone" to phone
-                )
-            )
+            runCatching { serviceActions.claimDeliveryOrder(order.id) }
+                .onFailure { error -> _cashActionError.value = error.message ?: "This delivery could not be claimed." }
         }
     }
 
     fun rejectCourierTask(order: Order) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(order.id).updateChildren(
-                mapOf(
-                    "deliveryId" to "",
-                    "deliveryName" to "",
-                    "deliveryPhone" to ""
-                )
-            )
+            runCatching { serviceActions.releaseDeliveryOrder(order.id) }
+                .onFailure { error -> _cashActionError.value = error.message ?: "This delivery could not be released." }
         }
     }
 
@@ -225,8 +206,8 @@ class DeliveryDashboardScreenModel : ScreenModel {
                         _cashActionError.value = error.message ?: "Cash collection could not be confirmed."
                     }
             } else {
-                db.child("orders").child(order.id).child("status")
-                    .setValue(OrderStatus.DELIVERED.name)
+                runCatching { serviceActions.transitionOrderStatus(order.id, OrderStatus.DELIVERED.name) }
+                    .onFailure { error -> _cashActionError.value = error.message ?: "Delivery could not be completed." }
             }
         }
     }

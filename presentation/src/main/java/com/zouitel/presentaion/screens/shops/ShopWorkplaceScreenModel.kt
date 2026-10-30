@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.shops
 
+import dev.gitlive.firebase.functions.functions
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
@@ -22,6 +24,7 @@ import kotlinx.coroutines.launch
 class ShopWorkplaceScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val auth = Firebase.auth
+    private val functions = Firebase.functions("asia-southeast1")
 
     private val _userShop = MutableStateFlow<Shop?>(null)
     val userShop: StateFlow<Shop?> = _userShop.asStateFlow()
@@ -48,7 +51,7 @@ class ShopWorkplaceScreenModel : ScreenModel {
         }
 
         screenModelScope.launch {
-            db.child("shops").valueEvents.collect { snapshot ->
+            db.child("shops").orderByChild("ownerUid").equalTo(uid).valueEvents.collect { snapshot ->
                 val myShop = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
@@ -164,23 +167,14 @@ class ShopWorkplaceScreenModel : ScreenModel {
         _isLoading.value = true
 
         screenModelScope.launch {
-            val newShopRef = db.child("shops").push()
-            val shopId = newShopRef.key ?: System.currentTimeMillis().toString()
-
-            val shop = Shop(
-                id = shopId,
-                ownerUid = uid,
-                name = name,
-                description = description,
-                category = category,
-                phone = phone,
-                address = address,
-                imageUrl = imageUrl,
-                createdAtTimestamp = System.currentTimeMillis(),
-                isOnline = isOnline
-            )
-
-            newShopRef.setValue(shop)
+            runCatching {
+                functions.httpsCallable("submitShopApplication")(
+                    mapOf("name" to name, "description" to description, "category" to category,
+                        "phone" to phone, "address" to address, "imageUrl" to imageUrl)
+                )
+            }.onFailure { error ->
+                _imageUpload.value = ImageUploadState.Error(error.message ?: "Application could not be submitted.")
+            }
             _isLoading.value = false
         }
     }

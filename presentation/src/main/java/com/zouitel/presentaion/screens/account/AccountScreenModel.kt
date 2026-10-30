@@ -64,10 +64,11 @@ class AccountScreenModel(
 
     // Save or update user profile
     suspend fun saveUserProfile(userProfile: UserProfile) {
-        if (userProfile.uid.isBlank()) return
-        db.child("users")
-            .child(userProfile.uid)
-            .setValue(userProfile)
+        if (userProfile.uid.isBlank() || auth.currentUser?.uid != userProfile.uid) return
+        db.child("users").child(userProfile.uid).updateChildren(
+            mapOf("uid" to userProfile.uid, "fullName" to userProfile.fullName, "email" to userProfile.email,
+                "phoneNumber" to userProfile.phoneNumber, "photoUrl" to userProfile.photoUrl)
+        )
     }
 
     // Fetch user profile

@@ -5,6 +5,7 @@ import { logger } from "firebase-functions";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onValueWritten } from "firebase-functions/v2/database";
 
 initializeApp();
 
@@ -584,6 +585,29 @@ function requireAdmin(request: { auth?: { uid: string; token?: unknown } | null 
     );
   }
   return uid;
+}
+
+
+async function getUserProfileRecord(uid: string): Promise<Record<string, unknown>> {
+  const snapshot = await db.ref("users/" + uid).get();
+  if (!snapshot.exists()) throw new HttpsError("failed-precondition", "Your Labmda profile is missing.");
+  return asRecord(snapshot.val());
+}
+async function requireApprovedMerchant(uid: string, order: Record<string, unknown>): Promise<void> {
+  const profile = await getUserProfileRecord(uid);
+  const status = asString(asString(order.orderType).toUpperCase() === "RETAIL" ? profile.shopStatus : profile.foodStatus).toUpperCase();
+  if (status !== "APPROVED" && status !== "ACTIVE") throw new HttpsError("permission-denied", "Only an administrator-approved merchant can manage this order.");
+}
+async function requireApprovedCourier(uid: string): Promise<void> {
+  const profile = await getUserProfileRecord(uid);
+  const status = asString(asRecord(profile.deliveryServices).status).toUpperCase();
+  if (status !== "APPROVED" && status !== "ACTIVE") throw new HttpsError("permission-denied", "Only an approved courier can perform this delivery action.");
+}
+async function requireApprovedDriver(uid: string): Promise<Record<string, unknown>> {
+  const profile = await getUserProfileRecord(uid);
+  const status = asString(asRecord(profile.driverService).status).toUpperCase();
+  if (status !== "APPROVED" && status !== "ACTIVE") throw new HttpsError("permission-denied", "Only an approved driver can perform this ride action.");
+  return profile;
 }
 
 async function getCurrentPricingConfiguration(): Promise<PricingConfiguration> {
@@ -1949,6 +1973,177 @@ export const createTrip = onCall(
   }
 );
 
+
+export const submitShopApplication = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  const data = asRecord(request.data);
+  const name = asString(data.name).slice(0, 100);
+  const description = asString(data.description).slice(0, 1000);
+  const category = asString(data.category).slice(0, 80);
+  const phone = asString(data.phone).slice(0, 40);
+  const address = asString(data.address).slice(0, 300);
+  const imageUrl = asString(data.imageUrl).slice(0, 2048);
+  if (!name || !category || !phone || !address) throw new HttpsError("invalid-argument", "Shop name, category, phone and address are required.");
+  const existing = await db.ref("shops").orderByChild("ownerUid").equalTo(uid).get();
+  const existingShops: DataSnapshot[] = [];
+  existing.forEach((child) => { existingShops.push(child); return false; });
+  const pendingOrApproved = existingShops.find((child) => ["PENDING", "APPROVED", "ACTIVE"].includes(asString(asRecord(child.val()).status).toUpperCase()));
+  if (pendingOrApproved) {
+    const current = asRecord(pendingOrApproved.val());
+    if (["APPROVED", "ACTIVE"].includes(asString(current.status).toUpperCase())) throw new HttpsError("already-exists", "Your shop is already approved. Edit its details from your Shop Workplace.");
+    throw new HttpsError("already-exists", "Your shop application is already pending review.");
+  }
+  const rejected = existingShops.find((child) => asString(asRecord(child.val()).status).toUpperCase() === "REJECTED");
+  const shopId = rejected?.key ?? db.ref("shops").push().key;
+  if (!shopId) throw new HttpsError("internal", "A shop application ID could not be generated.");
+  const now = Date.now();
+  const ref = db.ref("shops/" + shopId);
+  const tx = await ref.transaction((currentValue) => {
+    const current = asRecord(currentValue);
+    if (currentValue !== null && currentValue !== undefined && asString(current.ownerUid) !== uid) return;
+    return { ...current, id: shopId, ownerUid: uid, name, description, category, phone, address, imageUrl, status: "PENDING", createdAtTimestamp: Number(current.createdAtTimestamp ?? now) || now, isOnline: false };
+  });
+  if (!tx.committed) throw new HttpsError("aborted", "Your shop application could not be saved. Please retry.");
+  await db.ref("users/" + uid + "/shopStatus").set("PENDING");
+  return { shopId, status: "PENDING" };
+});
+
+export const claimDeliveryOrder = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  await requireApprovedCourier(uid);
+  const orderId = asString(asRecord(request.data).orderId);
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(orderId)) throw new HttpsError("invalid-argument", "A valid order ID is required.");
+  const profile = await getUserProfileRecord(uid);
+  const name = asString(profile.fullName) || "Delivery";
+  const phone = asString(profile.phoneNumber) || asString(profile.phone);
+  const ref = db.ref("orders/" + orderId);
+  const tx = await ref.transaction((currentValue) => {
+    if (!currentValue || typeof currentValue !== "object") return;
+    const order = asRecord(currentValue);
+    const assigned = asString(order.deliveryId);
+    if (asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || (assigned && assigned !== uid)) return;
+    return { ...order, deliveryId: uid, deliveryName: name, deliveryPhone: phone };
+  });
+  if (!tx.committed) throw new HttpsError("failed-precondition", "This order is no longer available for delivery.");
+  return { orderId, deliveryId: uid, status: "ASSIGNED" };
+});
+
+export const releaseDeliveryOrder = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  await requireApprovedCourier(uid);
+  const orderId = asString(asRecord(request.data).orderId);
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(orderId)) throw new HttpsError("invalid-argument", "A valid order ID is required.");
+  const ref = db.ref("orders/" + orderId);
+  const tx = await ref.transaction((currentValue) => {
+    if (!currentValue || typeof currentValue !== "object") return;
+    const order = asRecord(currentValue);
+    if (asString(order.deliveryId) !== uid || asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || asString(order.cashCollectionStatus).toUpperCase() === "COLLECTED") return;
+    return { ...order, deliveryId: "", deliveryName: "", deliveryPhone: "" };
+  });
+  if (!tx.committed) throw new HttpsError("failed-precondition", "This delivery cannot be released.");
+  return { orderId, status: "RELEASED" };
+});
+
+export const transitionOrderStatus = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  const data = asRecord(request.data);
+  const orderId = asString(data.orderId);
+  const next = asString(data.nextStatus).toUpperCase();
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(orderId)) throw new HttpsError("invalid-argument", "A valid order ID is required.");
+  const ref = db.ref("orders/" + orderId);
+  const snap = await ref.get();
+  if (!snap.exists()) throw new HttpsError("not-found", "The order was not found.");
+  const order = asRecord(snap.val());
+  const current = asString(order.status).toUpperCase();
+  const method = asString(order.paymentMethod).toUpperCase();
+  const paymentStatus = asString(order.paymentStatus).toUpperCase();
+  let from: string[] = [];
+
+  if (next === "CANCELLED") {
+    if (asString(order.clientId) === uid) from = ["PLACED", "ACCEPTED"];
+    else if (asString(order.sourceId) === uid || asString(order.merchantId) === uid) {
+      await requireApprovedMerchant(uid, order);
+      from = ["PLACED", "ACCEPTED", "PREPARING"];
+    } else throw new HttpsError("permission-denied", "Only the customer or assigned merchant can cancel this order.");
+    if (method === "GCASH" && paymentStatus === "PAID") throw new HttpsError("failed-precondition", "A paid GCash order must go through the administrator refund process before cancellation.");
+  } else if (["ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY"].includes(next)) {
+    if (asString(order.sourceId) !== uid && asString(order.merchantId) !== uid) throw new HttpsError("permission-denied", "Only this order's merchant can update its preparation status.");
+    await requireApprovedMerchant(uid, order);
+    if (next === "ACCEPTED") from = ["PLACED"];
+    if (next === "PREPARING") from = ["ACCEPTED"];
+    if (next === "OUT_FOR_DELIVERY") from = ["ACCEPTED", "PREPARING"];
+    if (method === "GCASH" && paymentStatus !== "PAID") throw new HttpsError("failed-precondition", "The customer must complete GCash payment before dispatch.");
+  } else if (next === "DELIVERED") {
+    if (asString(order.deliveryId) !== uid) throw new HttpsError("permission-denied", "Only the assigned courier can complete this delivery.");
+    await requireApprovedCourier(uid);
+    from = ["OUT_FOR_DELIVERY"];
+    if (method === "CASH") throw new HttpsError("failed-precondition", "Cash delivery completion must use confirmCashCollected.");
+    const payment = asRecord((await db.ref("payments/" + orderId).get()).val());
+    if (paymentStatus !== "PAID" || asString(payment.status).toUpperCase() !== "PAID") throw new HttpsError("failed-precondition", "The server has not confirmed this order's payment.");
+  } else throw new HttpsError("invalid-argument", "This order status transition is not supported.");
+
+  if (!from.includes(current)) throw new HttpsError("failed-precondition", "This order cannot move from " + current + " to " + next + ".");
+  const tx = await ref.child("status").transaction((value) => from.includes(asString(value).toUpperCase()) ? next : undefined);
+  if (!tx.committed) throw new HttpsError("aborted", "The order changed before this action could be saved. Refresh and retry.");
+  return { orderId, previousStatus: current, status: next };
+});
+
+export const claimTrip = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  const profile = await requireApprovedDriver(uid);
+  const driver = asRecord(profile.driverService);
+  if (driver.isOnline !== true) throw new HttpsError("failed-precondition", "Go online before accepting a ride request.");
+  const tripId = asString(asRecord(request.data).tripId);
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(tripId)) throw new HttpsError("invalid-argument", "A valid trip ID is required.");
+  const vehicle = asRecord(driver.vehicleInfo);
+  const vehicleName = [asString(vehicle.color), asString(vehicle.make), asString(vehicle.model)].filter(Boolean).join(" ");
+  const plate = asString(vehicle.licensePlate);
+  const ref = db.ref("trips/" + tripId);
+  const tx = await ref.transaction((currentValue) => {
+    if (!currentValue || typeof currentValue !== "object") return;
+    const trip = asRecord(currentValue);
+    const assigned = asString(trip.driverId);
+    if (asString(trip.status).toUpperCase() !== "REQUESTED" || (assigned && assigned !== uid)) return;
+    return { ...trip, driverId: uid, driverName: asString(profile.fullName) || "Driver", driverPhone: asString(profile.phoneNumber) || asString(profile.phone), vehicleDetails: [vehicleName, plate ? "(" + plate + ")" : ""].filter(Boolean).join(" "), status: "ACCEPTED" };
+  });
+  if (!tx.committed) throw new HttpsError("failed-precondition", "This ride request has already been accepted or is unavailable.");
+  return { tripId, driverId: uid, status: "ACCEPTED" };
+});
+
+export const transitionTripStatus = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  const data = asRecord(request.data);
+  const tripId = asString(data.tripId);
+  const next = asString(data.nextStatus).toUpperCase();
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(tripId)) throw new HttpsError("invalid-argument", "A valid trip ID is required.");
+  const ref = db.ref("trips/" + tripId);
+  const snap = await ref.get();
+  if (!snap.exists()) throw new HttpsError("not-found", "The trip was not found.");
+  const trip = asRecord(snap.val());
+  const current = asString(trip.status).toUpperCase();
+  let from: string[] = [];
+  if (next === "CANCELLED") {
+    if (asString(trip.passengerId) !== uid) throw new HttpsError("permission-denied", "Only the passenger can cancel this ride.");
+    from = ["REQUESTED", "ACCEPTED"];
+    if (asString(trip.paymentStatus).toUpperCase() === "PAID") throw new HttpsError("failed-precondition", "A paid GCash ride must go through the administrator refund process before cancellation.");
+  } else if (next === "ARRIVED" || next === "IN_PROGRESS") {
+    if (asString(trip.driverId) !== uid) throw new HttpsError("permission-denied", "Only the assigned driver can update this ride.");
+    await requireApprovedDriver(uid);
+    from = next === "ARRIVED" ? ["ACCEPTED"] : ["ACCEPTED", "ARRIVED"];
+  } else if (next === "COMPLETED") {
+    if (asString(trip.driverId) !== uid) throw new HttpsError("permission-denied", "Only the assigned driver can complete this ride.");
+    await requireApprovedDriver(uid);
+    from = ["IN_PROGRESS"];
+    if (asString(trip.paymentMethod).toUpperCase() === "CASH") throw new HttpsError("failed-precondition", "Cash ride completion must use confirmCashCollected.");
+    const payment = asRecord((await db.ref("payments/" + tripId).get()).val());
+    if (asString(trip.paymentStatus).toUpperCase() !== "PAID" || asString(payment.status).toUpperCase() !== "PAID") throw new HttpsError("failed-precondition", "The server has not confirmed this ride's payment.");
+  } else throw new HttpsError("invalid-argument", "This trip status transition is not supported.");
+  if (!from.includes(current)) throw new HttpsError("failed-precondition", "This ride cannot move from " + current + " to " + next + ".");
+  const tx = await ref.child("status").transaction((value) => from.includes(asString(value).toUpperCase()) ? next : undefined);
+  if (!tx.committed) throw new HttpsError("aborted", "The ride changed before this action could be saved. Refresh and retry.");
+  return { tripId, previousStatus: current, status: next };
+});
+
 function validCallbackToken(received: string, expected: string): boolean {
   if (!received || !expected) return false;
   const receivedHash = createHash("sha256").update(received).digest();
@@ -2798,6 +2993,29 @@ export const refundPayment = onCall(
   }
 );
 
+
+type WebhookReservation = { key: string; status: "ACQUIRED" | "DUPLICATE" | "BUSY" };
+async function reserveWebhookEvent(provider: string, event: string, body: Record<string, unknown>): Promise<WebhookReservation> {
+  const data = asRecord(body.data);
+  const eventId = asString(body.id) || asString(body.event_id) || asString(body.webhook_id) || asString(data.id) || asString(data.event_id);
+  const key = createHash("sha256").update(provider + "|" + event + "|" + (eventId || JSON.stringify(body))).digest("hex");
+  const ref = db.ref("processedWebhookEvents/" + key);
+  const now = Date.now();
+  const tx = await ref.transaction((currentValue) => {
+    const current = asRecord(currentValue);
+    if (asString(current.status) === "PROCESSED") return;
+    if (asString(current.status) === "PROCESSING" && Number(current.leaseUntilTimestamp ?? 0) > now) return;
+    return { provider, event, status: "PROCESSING", attempts: Number(current.attempts ?? 0) + 1, receivedAtTimestamp: Number(current.receivedAtTimestamp ?? now) || now, updatedAtTimestamp: now, leaseUntilTimestamp: now + 120000 };
+  });
+  if (tx.committed) return { key, status: "ACQUIRED" };
+  const saved = asRecord(tx.snapshot.val());
+  return { key, status: asString(saved.status) === "PROCESSED" ? "DUPLICATE" : "BUSY" };
+}
+async function markWebhookEventProcessed(key: string): Promise<void> {
+  const now = Date.now();
+  await db.ref("processedWebhookEvents/" + key).update({ status: "PROCESSED", processedAtTimestamp: now, updatedAtTimestamp: now, leaseUntilTimestamp: 0 });
+}
+
 export const xenditPaymentWebhook = onRequest(
   { region: REGION, secrets: [XENDIT_WEBHOOK_TOKEN] },
   async (request, response) => {
@@ -2813,12 +3031,17 @@ export const xenditPaymentWebhook = onRequest(
     const body = asRecord(request.body);
     const data = asRecord(body.data);
     const event = asString(body.event).toLowerCase();
+    const reservation = await reserveWebhookEvent("XENDIT_PAYMENT", event, body);
+    if (reservation.status === "DUPLICATE") { response.status(200).send("Duplicate event"); return; }
+    if (reservation.status === "BUSY") { response.status(503).send("Webhook event is being processed"); return; }
+    const webhookEventKey = reservation.key;
     const referenceId = asString(data.reference_id);
 
     if (event === "refund.succeeded" || event === "refund.failed") {
       const match = /^refund_(.+)_([a-f0-9]{32})$/i.exec(referenceId);
       if (!match) {
-        response.status(200).send("Ignored unrelated refund event");
+        await markWebhookEventProcessed(webhookEventKey);
+      response.status(200).send("Ignored unrelated refund event");
         return;
       }
       const entityId = match[1];
@@ -2858,6 +3081,7 @@ export const xenditPaymentWebhook = onRequest(
         response.status(503).send("Refund update could not be applied");
         return;
       }
+      await markWebhookEventProcessed(webhookEventKey);
       response.status(200).send("OK");
       return;
     }
@@ -2873,6 +3097,7 @@ export const xenditPaymentWebhook = onRequest(
       }
     }
     if (!["ORDER", "TRIP"].includes(entityTypeValue) || !/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
+      await markWebhookEventProcessed(webhookEventKey);
       response.status(200).send("Ignored unrelated payment event");
       return;
     }
@@ -2927,6 +3152,7 @@ export const xenditPaymentWebhook = onRequest(
     else if (event === "payment_request.expiry") nextStatus = "EXPIRED";
     else nextStatus = mapProviderPaymentStatus(data.status);
     if (!nextStatus) {
+      await markWebhookEventProcessed(webhookEventKey);
       response.status(200).send("Non-terminal payment event acknowledged");
       return;
     }
@@ -3697,6 +3923,8 @@ export const confirmCashCollected = onCall(
     if (assignedCollector !== uid) {
       throw new HttpsError("permission-denied", "Only the assigned courier or ride driver can confirm this cash collection.");
     }
+    if (entityType === "ORDER") await requireApprovedCourier(uid);
+    else await requireApprovedDriver(uid);
     const expectedStatus = entityType === "ORDER"
       ? ["OUT_FOR_DELIVERY", "DELIVERED"]
       : ["IN_PROGRESS", "COMPLETED"];
@@ -5500,9 +5728,14 @@ export const xenditPayoutWebhook = onRequest(
     const body = asRecord(request.body);
     const event = asString(body.event).toLowerCase();
     const data = asRecord(body.data);
+    const reservation = await reserveWebhookEvent("XENDIT_PAYOUT", event, body);
+    if (reservation.status === "DUPLICATE") { response.status(200).send("Duplicate event"); return; }
+    if (reservation.status === "BUSY") { response.status(503).send("Webhook event is being processed"); return; }
+    const webhookEventKey = reservation.key;
     const referenceId = asString(data.reference_id);
     const match = /^labmda_payout_([a-f0-9]{32})$/i.exec(referenceId);
     if (!match) {
+      await markWebhookEventProcessed(webhookEventKey);
       response.status(200).send("Ignored unrelated payout event");
       return;
     }
@@ -5535,6 +5768,7 @@ export const xenditPayoutWebhook = onRequest(
     };
     const status = mapped[event];
     if (!status) {
+      await markWebhookEventProcessed(webhookEventKey);
       response.status(200).send("Ignored payout event");
       return;
     }
@@ -5548,6 +5782,7 @@ export const xenditPayoutWebhook = onRequest(
         failureCode: asString(data.failure_code),
         providerUpdatedAt: asString(data.updated) || asString(body.created),
       });
+      await markWebhookEventProcessed(webhookEventKey);
       response.status(200).send("OK");
     } catch (error) {
       logger.error("Xendit payout webhook reconciliation failed", { payoutId, event, error });
@@ -5726,3 +5961,43 @@ export const processAutomaticPayouts = onSchedule(
     }
   }
 );
+
+export const syncPublicShop = onValueWritten({ ref: "/shops/{shopId}", region: REGION }, async (event) => {
+  const id = event.params.shopId, after = event.data.after, target = db.ref("publicShops/" + event.params.shopId);
+  if (!after.exists()) { await target.remove(); return; }
+  const shop = asRecord(after.val());
+  if (!["APPROVED", "ACTIVE"].includes(asString(shop.status).toUpperCase())) { await target.remove(); return; }
+  await target.set({ id, name: asString(shop.name), description: asString(shop.description), category: asString(shop.category), phone: asString(shop.phone), address: asString(shop.address), imageUrl: asString(shop.imageUrl), status: "APPROVED", createdAtTimestamp: Number(shop.createdAtTimestamp ?? 0), isOnline: shop.isOnline === true });
+});
+export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", region: REGION }, async (event) => {
+  const uid = event.params.uid, after = event.data.after, target = db.ref("publicDrivers/" + event.params.uid);
+  if (!after.exists()) { await target.remove(); return; }
+  const profile = asRecord(after.val()), driver = asRecord(profile.driverService);
+  if (!["APPROVED", "ACTIVE"].includes(asString(driver.status).toUpperCase()) || driver.isOnline !== true) { await target.remove(); return; }
+  const location = asRecord(profile.currentLocation ?? driver.currentLocation), vehicle = asRecord(driver.vehicleInfo ?? profile.vehicleInfo);
+  await target.set({ uid, fullName: asString(profile.fullName) || "Driver", phoneNumber: asString(profile.phoneNumber) || asString(profile.phone), isOnline: true,
+    currentLocation: { latitude: Number(location.latitude ?? 0), longitude: Number(location.longitude ?? 0), heading: Number(location.heading ?? 0) },
+    vehicleInfo: { type: asString(vehicle.type), make: asString(vehicle.make), model: asString(vehicle.model), color: asString(vehicle.color) }, updatedAtTimestamp: Date.now() });
+});
+export const syncAvailableDeliveryTask = onValueWritten({ ref: "/orders/{orderId}", region: REGION }, async (event) => {
+  const id = event.params.orderId, after = event.data.after, target = db.ref("availableDeliveryTasks/" + event.params.orderId);
+  if (!after.exists()) { await target.remove(); return; }
+  const order = asRecord(after.val());
+  if (asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || asString(order.deliveryId)) { await target.remove(); return; }
+  await target.set({ id, clientId: asString(order.clientId), orderType: asString(order.orderType), sourceId: asString(order.sourceId), sourceName: asString(order.sourceName),
+    items: order.items ?? [], subtotal: Number(order.subtotal ?? 0), deliveryFee: Number(order.deliveryFee ?? 0), totalPrice: Number(order.totalPrice ?? 0),
+    status: "OUT_FOR_DELIVERY", createdAtTimestamp: Number(order.createdAtTimestamp ?? 0), paymentMethod: asString(order.paymentMethod), paymentStatus: asString(order.paymentStatus), paymentId: asString(order.paymentId),
+    deliveryId: "", deliveryName: "", deliveryPhone: "", pickupLocation: asString(order.pickupLocation), pickupLat: Number(order.pickupLat ?? 0), pickupLng: Number(order.pickupLng ?? 0),
+    dropoffLocation: asString(order.dropoffLocation), dropoffLat: Number(order.dropoffLat ?? 0), dropoffLng: Number(order.dropoffLng ?? 0) });
+});
+export const syncAvailableRideRequest = onValueWritten({ ref: "/trips/{tripId}", region: REGION }, async (event) => {
+  const id = event.params.tripId, after = event.data.after, target = db.ref("availableRideRequests/" + event.params.tripId);
+  if (!after.exists()) { await target.remove(); return; }
+  const trip = asRecord(after.val());
+  if (asString(trip.status).toUpperCase() !== "REQUESTED" || asString(trip.driverId)) { await target.remove(); return; }
+  await target.set({ id, passengerId: asString(trip.passengerId), passengerName: asString(trip.passengerName), passengerPhone: "",
+    pickupLocation: asString(trip.pickupLocation), dropoffLocation: asString(trip.dropoffLocation), pickupLat: Number(trip.pickupLat ?? 0), pickupLng: Number(trip.pickupLng ?? 0),
+    dropoffLat: Number(trip.dropoffLat ?? 0), dropoffLng: Number(trip.dropoffLng ?? 0), fare: Number(trip.fare ?? 0), driverId: "", driverName: "", driverPhone: "",
+    vehicleDetails: "", status: "REQUESTED", serviceType: asString(trip.serviceType), paymentMethod: asString(trip.paymentMethod), paymentStatus: asString(trip.paymentStatus),
+    paymentId: asString(trip.paymentId), createdAtTimestamp: Number(trip.createdAtTimestamp ?? 0) });
+});
