@@ -97,6 +97,10 @@ class AdminPaymentsScreen : Screen {
                             Text(payment.entityType + " · " + payment.id, fontWeight = FontWeight.Bold)
                             Text(payment.provider + " · " + payment.status.replace('_', ' '))
                             Text("₱" + peso(payment.amountCentavos))
+                            if (payment.refundedCentavos > 0L || payment.pendingRefundCentavos > 0L) {
+                                Text("Refunded: ₱" + peso(payment.refundedCentavos) + " · pending refund: ₱" + peso(payment.pendingRefundCentavos))
+                            }
+                            if (payment.refundStatus.isNotBlank()) Text("Refund state: " + payment.refundStatus.replace('_', ' '))
                             if (payment.provider == "XENDIT" && payment.status in setOf("PAID", "PARTIALLY_REFUNDED")) {
                                 OutlinedButton(onClick = { model.refund(payment.entityType, payment.id) }, enabled = !state.isSubmitting, modifier = Modifier.fillMaxWidth()) {
                                     Text("Request remaining refund")
