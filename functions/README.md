@@ -287,7 +287,8 @@ refundPayment is a callable protected by Firebase Auth custom claim admin: true.
 entityType, entityId, idempotencyKey, a supported reason, and optional amountCentavos.
 Omitting the amount requests the remaining refundable balance. The function uses the Xendit
 refunds API with the provider payment_id (not the Payment Request ID), reserves the refundable
-balance transactionally, and records a unique refund attempt. Only Xendit confirmation or the
+balance transactionally, and records a unique refund attempt. The 180-day GCash refund window is
+checked against the provider-confirmed payment timestamp. Only Xendit confirmation or the
 server-to-server refund status lookup changes refunded totals.
 
 ### Missed-notification reconciliation
