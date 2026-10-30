@@ -578,3 +578,18 @@ Do not add a broad parent-level read or write grant that would override these ch
 Add the `userId` index to `payouts` if any server or admin query uses
 `orderByChild('userId')`. Client screens do not read private payout account details directly;
 they use `getMyPayoutAccount`, which returns only masked information.
+
+
+### Refunds and wallet recovery
+
+A successful Xendit refund is reconciled against the original order/trip breakdown. The server
+debits the participant's pending earnings first when the earnings have not been released; after
+release it debits available earnings. If some of the participant share has already been paid out,
+the unpaid part is tracked in `wallets/{uid}/refundDebtCentavos` and journaled to a participant
+refund-receivable account. Future earnings are first applied to this recovery balance before
+becoming available. A wallet with outstanding refund recovery cannot request or receive an
+automatic payout. The `reconcileRefundEarnings` scheduled task retries any confirmed refund that
+has not yet reached `walletSettlementStatus: POSTED`.
+
+This means an administrator must not edit a wallet or ledger to compensate for a refund. A refund
+is considered fully reconciled for wallet accounting only when its refund ledger entry is posted.
