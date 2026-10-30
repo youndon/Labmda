@@ -5509,6 +5509,45 @@ export const xenditPayoutWebhook = onRequest(
   }
 );
 
+export const reconcileRefundEarnings = onSchedule(
+  { schedule: "every 5 minutes", timeZone: "Asia/Manila", region: REGION },
+  async () => {
+    let reconciled = 0;
+    let failed = 0;
+    for (const status of ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"]) {
+      const snapshot = await db.ref("payments").orderByChild("status").equalTo(status).limitToLast(300).get();
+      const rows: Array<{ entityId: string; payment: Record<string, unknown> }> = [];
+      snapshot.forEach((child) => {
+        if (child.key) rows.push({ entityId: child.key, payment: asRecord(child.val()) });
+        return false;
+      });
+      for (const row of rows) {
+        const refunds = asRecord(row.payment.refunds);
+        for (const [refundAttemptId, rawRefund] of Object.entries(refunds)) {
+          const refund = asRecord(rawRefund);
+          if (
+            asString(refund.status).toUpperCase() !== "SUCCEEDED" ||
+            asString(refund.walletSettlementStatus).toUpperCase() === "POSTED"
+          ) continue;
+          try {
+            await reconcileRefundedPaymentEarnings(row.entityId, refundAttemptId);
+            const latest = asRecord((await db.ref("payments/" + row.entityId + "/refunds/" + refundAttemptId).get()).val());
+            if (asString(latest.walletSettlementStatus).toUpperCase() === "POSTED") reconciled++;
+          } catch (error) {
+            failed++;
+            logger.warn("Confirmed refund remains queued for wallet reconciliation", {
+              entityId: row.entityId,
+              refundAttemptId,
+              error,
+            });
+          }
+        }
+      }
+    }
+    logger.info("Refund wallet reconciliation finished", { reconciled, failed });
+  }
+);
+
 export const reconcilePayouts = onSchedule(
   {
     schedule: "every 5 minutes",
