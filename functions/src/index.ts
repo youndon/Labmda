@@ -4359,6 +4359,63 @@ async function applyCashRemittanceWalletEffects(
   }
 }
 
+async function applyWalletEarningCredit(
+  uid: string,
+  eventId: string,
+  amountCentavos: number,
+  releasePending: boolean
+): Promise<{ recoveredCentavos: number }> {
+  const walletRef = db.ref("wallets/" + uid);
+  let recoveredCentavos = 0;
+  let priorEvent = false;
+  const transaction = await walletRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const applied = asRecord(current.appliedLedgerEntries);
+    const creditEvents = asRecord(current.earningCreditEvents);
+    const previous = asRecord(creditEvents[eventId]);
+    if (applied[eventId] === true || Object.keys(previous).length > 0) {
+      priorEvent = true;
+      recoveredCentavos = Number(previous.recoveredCentavos ?? 0);
+      return current;
+    }
+    const pending = walletNumber(current, "pendingCentavos");
+    if (releasePending && pending < amountCentavos) {
+      throw new HttpsError("data-loss", "Pending earnings are smaller than the amount being released.");
+    }
+    const debt = walletNumber(current, "refundDebtCentavos");
+    recoveredCentavos = Math.min(debt, amountCentavos);
+    const availableCredit = amountCentavos - recoveredCentavos;
+    const next: Record<string, unknown> = {
+      ...current,
+      availableCentavos: walletNumber(current, "availableCentavos") + availableCredit,
+      refundDebtCentavos: debt - recoveredCentavos,
+      currency: "PHP",
+      updatedAtTimestamp: Date.now(),
+      appliedLedgerEntries: { ...applied, [eventId]: true },
+      earningCreditEvents: {
+        ...creditEvents,
+        [eventId]: {
+          amountCentavos,
+          recoveredCentavos,
+          availableCreditCentavos: availableCredit,
+          releasedPending: releasePending,
+        },
+      },
+    };
+    if (releasePending) next.pendingCentavos = pending - amountCentavos;
+    return next;
+  });
+  if (!transaction.committed && !priorEvent) {
+    const current = asRecord((await walletRef.get()).val());
+    const saved = asRecord(asRecord(current.earningCreditEvents)[eventId]);
+    if (Object.keys(saved).length === 0) {
+      throw new HttpsError("aborted", "Wallet earnings release could not be committed.");
+    }
+    recoveredCentavos = Number(saved.recoveredCentavos ?? 0);
+  }
+  return { recoveredCentavos };
+}
+
 async function reconcileCompletedPaymentEarnings(
   entityType: "ORDER" | "TRIP",
   entityId: string,
@@ -4402,17 +4459,37 @@ async function reconcileCompletedPaymentEarnings(
   const participantTotal = merchantShare + courierShare + driverShare;
   const entryId = (complete ? "earning_release_" : "earning_pending_") + entityType.toLowerCase() + "_" + entityId;
   const lines: LedgerLine[] = [];
+  const recoveredByOwner = new Map<string, number>();
 
-  if (complete && hasPending) {
+  if (complete) {
+    // Apply each wallet mutation idempotently first, then build the immutable journal
+    // from the exact recovered/debt-offset amount returned by that wallet transaction.
     for (const share of shares) {
-      lines.push(ledgerLine(share.accountType + "_PENDING_PAYABLE", share.ownerId, "DEBIT", share.amount));
-      lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", share.amount));
+      const eventId = "earning_release_" + entryId + "_" + share.ownerId;
+      const result = await applyWalletEarningCredit(share.ownerId, eventId, share.amount, hasPending);
+      recoveredByOwner.set(share.ownerId, result.recoveredCentavos);
+    }
+    if (hasPending) {
+      for (const share of shares) {
+        lines.push(ledgerLine(share.accountType + "_PENDING_PAYABLE", share.ownerId, "DEBIT", share.amount));
+        const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
+        const available = share.amount - recovered;
+        if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
+        if (recovered > 0) lines.push(ledgerLine(share.accountType + "_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
+      }
+    } else {
+      lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
+      for (const share of shares) {
+        const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
+        const available = share.amount - recovered;
+        if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
+        if (recovered > 0) lines.push(ledgerLine(share.accountType + "_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
+      }
+      if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
     }
   } else {
     lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
-    for (const share of shares) {
-      lines.push(ledgerLine(share.accountType + (complete ? "_AVAILABLE_PAYABLE" : "_PENDING_PAYABLE"), share.ownerId, "CREDIT", share.amount));
-    }
+    for (const share of shares) lines.push(ledgerLine(share.accountType + "_PENDING_PAYABLE", share.ownerId, "CREDIT", share.amount));
     if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
   }
 
@@ -4434,12 +4511,8 @@ async function reconcileCompletedPaymentEarnings(
   };
   await ensureMarketplaceLedgerEntry(entryId, entry);
 
-  for (const share of shares) {
-    if (complete && hasPending) {
-      await applyWalletDeltas(share.ownerId, "earning_release_" + entryId + "_" + share.ownerId, { pendingCentavos: -share.amount, availableCentavos: share.amount });
-    } else if (complete) {
-      await applyWalletDeltas(share.ownerId, "earning_release_" + entryId + "_" + share.ownerId, { availableCentavos: share.amount });
-    } else {
+  if (!complete) {
+    for (const share of shares) {
       await applyWalletDeltas(share.ownerId, "earning_pending_" + entryId + "_" + share.ownerId, { pendingCentavos: share.amount });
     }
   }
