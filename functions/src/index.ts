@@ -3620,6 +3620,9 @@ export const confirmCashCollected = onCall(
         entityId,
         collectionStatus: "COLLECTED",
         collectedAmountCentavos: Number(existing.collectedAmountCentavos ?? 0),
+        merchantOwedCentavos: Number(existing.merchantOwedCentavos ?? 0),
+        platformOwedCentavos: Number(existing.platformOwedCentavos ?? 0),
+        collectorEarningsCentavos: Number(existing.collectorEarningsCentavos ?? 0),
         remittableCentavos: Number(existing.remittableCentavos ?? 0),
         remittedCentavos: Number(existing.remittedCentavos ?? 0),
         outstandingRemittanceCentavos:
@@ -3708,6 +3711,9 @@ export const confirmCashCollected = onCall(
         entityId,
         collectionStatus: "COLLECTED",
         collectedAmountCentavos: Number(latest.collectedAmountCentavos ?? 0),
+        merchantOwedCentavos: Number(latest.merchantOwedCentavos ?? 0),
+        platformOwedCentavos: Number(latest.platformOwedCentavos ?? 0),
+        collectorEarningsCentavos: Number(latest.collectorEarningsCentavos ?? 0),
         remittableCentavos: Number(latest.remittableCentavos ?? 0),
         remittedCentavos: Number(latest.remittedCentavos ?? 0),
         outstandingRemittanceCentavos:
