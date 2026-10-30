@@ -95,13 +95,18 @@ function normalizeCatalogItems(value: unknown): Array<{ id: string; quantity: nu
     throw new HttpsError("invalid-argument", "Your cart must contain between 1 and 30 items.");
   }
 
+  const seen = new Set<string>();
   return value.map((raw) => {
     const item = asRecord(raw);
     const id = asString(item.id);
     const quantity = Number(item.quantity);
-    if (!id || !Number.isInteger(quantity) || quantity < 1 || quantity > 50) {
-      throw new HttpsError("invalid-argument", "Each item needs a valid catalog ID and quantity.");
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || !Number.isInteger(quantity) || quantity < 1 || quantity > 50) {
+      throw new HttpsError("invalid-argument", "Each item needs a valid catalog ID and quantity between 1 and 50.");
     }
+    if (seen.has(id)) {
+      throw new HttpsError("invalid-argument", "A catalog item must appear only once in the requested items.");
+    }
+    seen.add(id);
     return {
       id,
       quantity,
@@ -833,12 +838,12 @@ export const updatePricingConfiguration = onCall(
   }
 );
 
-export const createPricingQuote = onCall(
-  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
-  async (request) => {
-    const uid = requireUid(request);
-    const data = asRecord(request.data);
-    const quoteType = asString(data.quoteType).toUpperCase();
+async function buildRouteQuote(
+  uid: string,
+  data: Record<string, unknown>,
+  forcedQuoteType?: "DELIVERY" | "RIDE"
+): Promise<Record<string, unknown>> {
+    const quoteType = forcedQuoteType ?? asString(data.quoteType).toUpperCase();
     if (quoteType !== "DELIVERY" && quoteType !== "RIDE") {
       throw new HttpsError("invalid-argument", "Quote type must be DELIVERY or RIDE.");
     }
@@ -856,10 +861,11 @@ export const createPricingQuote = onCall(
     let amountCentavos: number;
     let feeKind: "deliveryFeeCentavos" | "fareCentavos";
     let additionalChargesCentavos = 0;
+    let deliveryFeeCentavos = 0;
     let snapshot: Record<string, unknown>;
 
     if (quoteType === "DELIVERY") {
-      const deliveryFeeCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
+      deliveryFeeCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
       additionalChargesCentavos = config.additionalCharges.deliveryCentavos;
       amountCentavos = deliveryFeeCentavos + additionalChargesCentavos;
       feeKind = "deliveryFeeCentavos";
@@ -885,6 +891,10 @@ export const createPricingQuote = onCall(
       });
     }
 
+    if (!Number.isSafeInteger(amountCentavos) || amountCentavos <= 0) {
+      throw new HttpsError("failed-precondition", "The server-calculated quote must be greater than zero.");
+    }
+
     const quoteId = db.ref("pricingQuotes").push().key || randomUUID();
     const timestamp = Date.now();
     const quote = {
@@ -899,9 +909,7 @@ export const createPricingQuote = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
-      [feeKind]: feeKind === "deliveryFeeCentavos"
-        ? Number(asRecord(snapshot).deliveryFeeCentavos)
-        : amountCentavos,
+      [feeKind]: feeKind === "deliveryFeeCentavos" ? deliveryFeeCentavos : amountCentavos,
       additionalChargesCentavos,
       amountCentavos,
       amount: phpFromCents(amountCentavos),
@@ -918,11 +926,370 @@ export const createPricingQuote = onCall(
       quoteType,
       amountCentavos,
       amount: phpFromCents(amountCentavos),
+      deliveryFeeCentavos,
+      additionalChargesCentavos,
       distanceMeters: route.distanceMeters,
       distanceKm: quote.distanceKm,
       routeDuration: route.duration,
       pricingVersion: config.version,
       expiresAtTimestamp: quote.expiresAtTimestamp,
+    };
+}
+
+export const createPricingQuote = onCall(
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  async (request) => buildRouteQuote(requireUid(request), asRecord(request.data))
+);
+
+export const quoteTrip = onCall(
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  async (request) => buildRouteQuote(requireUid(request), asRecord(request.data), "RIDE")
+);
+
+
+// -----------------------------------------------------------------------------
+// Explicit quoteOrder/createOrder API. The quote stores trusted catalogue lines and
+// the pricing snapshot; createOrder accepts the quote ID, rechecks availability and
+// approval, then persists the quote's locked price snapshot.
+// -----------------------------------------------------------------------------
+
+function orderQuoteBreakdown(
+  orderType: OrderType,
+  items: CatalogLine[],
+  deliveryFeeCentavos: number,
+  config: PricingConfiguration
+): {
+  subtotalCentavos: number;
+  additionalChargesCentavos: number;
+  totalCentavos: number;
+  breakdown: Record<string, number>;
+  commissionRatesBps: { merchant: number; delivery: number };
+} {
+  const subtotalBig = items.reduce(
+    (sum, item) => sum + BigInt(centsFromPhp(item.basePrice, "catalog item price")) * BigInt(item.quantity),
+    0n
+  );
+  const subtotalCentavos = Number(subtotalBig);
+  if (!Number.isSafeInteger(subtotalCentavos) || subtotalCentavos <= 0) {
+    throw new HttpsError("failed-precondition", "The server-calculated item subtotal is invalid.");
+  }
+
+  const categoryChargeCentavos = orderType === "FOOD"
+    ? config.additionalCharges.foodCentavos
+    : config.additionalCharges.goodsCentavos;
+  const additionalChargesCentavos = categoryChargeCentavos + config.additionalCharges.deliveryCentavos;
+  const totalBig = BigInt(subtotalCentavos) + BigInt(deliveryFeeCentavos) + BigInt(additionalChargesCentavos);
+  const totalCentavos = Number(totalBig);
+  if (!Number.isSafeInteger(totalCentavos) || totalCentavos <= 0) {
+    throw new HttpsError("failed-precondition", "The server-calculated order total is invalid.");
+  }
+
+  const merchantRate = orderType === "FOOD" ? config.commissions.foodBps : config.commissions.goodsBps;
+  const merchantCommission = commissionCentavos(subtotalCentavos, merchantRate);
+  const deliveryCommission = commissionCentavos(deliveryFeeCentavos, config.commissions.deliveryBps);
+  const merchantShare = subtotalCentavos - merchantCommission;
+  const courierShare = deliveryFeeCentavos - deliveryCommission;
+  const platformShare = merchantCommission + deliveryCommission + additionalChargesCentavos;
+
+  return {
+    subtotalCentavos,
+    additionalChargesCentavos,
+    totalCentavos,
+    commissionRatesBps: { merchant: merchantRate, delivery: config.commissions.deliveryBps },
+    breakdown: {
+      subtotal: subtotalCentavos,
+      deliveryFee: deliveryFeeCentavos,
+      serviceFee: additionalChargesCentavos,
+      discount: 0,
+      tax: 0,
+      total: totalCentavos,
+      merchantShare,
+      courierShare,
+      driverShare: 0,
+      platformShare,
+      gatewayFee: 0,
+      merchantCommission: merchantCommission,
+      deliveryCommission: deliveryCommission,
+      rideCommission: 0,
+    },
+  };
+}
+
+export const quoteOrder = onCall(
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const orderTypeValue = asString(data.orderType).toUpperCase();
+    if (orderTypeValue !== "FOOD" && orderTypeValue !== "RETAIL") {
+      throw new HttpsError("invalid-argument", "Order type must be FOOD or RETAIL.");
+    }
+    const orderType = orderTypeValue as OrderType;
+    const sourceId = asString(data.sourceId);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(sourceId)) {
+      throw new HttpsError("invalid-argument", "A valid merchant or shop ID is required.");
+    }
+    const requestedItems = normalizeCatalogItems(data.items);
+    const dropoffLocation = asString(data.dropoffLocation);
+    const dropoffLat = asNumber(data.dropoffLat, "drop-off latitude");
+    const dropoffLng = asNumber(data.dropoffLng, "drop-off longitude");
+    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
+    if (!dropoffLocation) {
+      throw new HttpsError("invalid-argument", "A drop-off address is required.");
+    }
+
+    const catalog = await loadOrderCatalog(uid, orderType, sourceId, requestedItems);
+    validateCoordinates(catalog.pickupLat, catalog.pickupLng, "Merchant pickup");
+    const route = await calculateGoogleRoute(catalog.pickupLat, catalog.pickupLng, dropoffLat, dropoffLng);
+    const config = await getCurrentPricingConfiguration();
+    const deliveryFeeCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
+    const calculated = orderQuoteBreakdown(orderType, catalog.items, deliveryFeeCentavos, config);
+
+    const snapshot = {
+      ...pricingSnapshot(config, orderType === "FOOD" ? "FOOD_DELIVERY" : "GOODS_DELIVERY", route),
+      commissionRatesBps: calculated.commissionRatesBps,
+      additionalChargesCentavos: calculated.additionalChargesCentavos,
+      cancellationFees: config.cancellationFees,
+      refundPolicy: config.refundPolicy,
+      catalog: {
+        sourceId,
+        sourceName: catalog.sourceName,
+        merchantId: catalog.merchantId,
+        items: catalog.items.map(item => ({
+          id: item.id,
+          name: item.name,
+          basePriceCentavos: centsFromPhp(item.basePrice, "catalog item price"),
+          quantity: item.quantity,
+          specialInstructions: item.specialInstructions,
+        })),
+      },
+    };
+
+    const quoteId = db.ref("orderQuotes").push().key || randomUUID();
+    const timestamp = Date.now();
+    const quote = {
+      id: quoteId,
+      userId: uid,
+      quoteType: "ORDER",
+      orderType,
+      sourceId,
+      catalog,
+      requestedItems,
+      dropoffLocation,
+      dropoffLat,
+      dropoffLng,
+      pickupLocation: catalog.pickupLocation,
+      pickupLat: catalog.pickupLat,
+      pickupLng: catalog.pickupLng,
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      routeDuration: route.duration,
+      deliveryFeeCentavos,
+      subtotalCentavos: calculated.subtotalCentavos,
+      additionalChargesCentavos: calculated.additionalChargesCentavos,
+      totalCentavos: calculated.totalCentavos,
+      amount: phpFromCents(calculated.totalCentavos),
+      breakdown: calculated.breakdown,
+      commissionRatesBps: calculated.commissionRatesBps,
+      pricingVersion: config.version,
+      pricingConfiguration: config,
+      pricingSnapshot: snapshot,
+      createdAtTimestamp: timestamp,
+      expiresAtTimestamp: timestamp + QUOTE_LIFETIME_MS,
+      status: "QUOTED",
+    };
+    await db.ref("orderQuotes/" + quoteId).set(quote);
+
+    return {
+      quoteId,
+      quoteType: "ORDER",
+      orderType,
+      items: catalog.items.map(item => ({
+        id: item.id,
+        name: item.name,
+        unitPriceCentavos: centsFromPhp(item.basePrice, "catalog item price"),
+        quantity: item.quantity,
+        specialInstructions: item.specialInstructions,
+      })),
+      subtotalCentavos: calculated.subtotalCentavos,
+      deliveryFeeCentavos,
+      additionalChargesCentavos: calculated.additionalChargesCentavos,
+      totalCentavos: calculated.totalCentavos,
+      amount: phpFromCents(calculated.totalCentavos),
+      distanceMeters: route.distanceMeters,
+      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
+      routeDuration: route.duration,
+      pricingVersion: config.version,
+      breakdown: calculated.breakdown,
+      expiresAtTimestamp: quote.expiresAtTimestamp,
+    };
+  }
+);
+
+export const createOrder = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const quoteId = asString(data.quoteId);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(quoteId)) {
+      throw new HttpsError("invalid-argument", "A valid order quote ID is required.");
+    }
+    const orderId = parseIdempotencyKey(data.idempotencyKey);
+    const existingSnapshot = await db.ref("orders/" + orderId).get();
+    if (existingSnapshot.exists()) {
+      const existing = asRecord(existingSnapshot.val());
+      if (asString(existing.clientId) !== uid) {
+        throw new HttpsError("already-exists", "This idempotency key has already been used.");
+      }
+      return {
+        orderId,
+        totalCentavos: Number(existing.totalPriceCentavos ?? 0),
+        amount: Number(existing.totalPrice ?? 0),
+        pricingVersion: Number(existing.pricingVersion ?? 0),
+        breakdown: existing.breakdown ?? null,
+        reused: true,
+      };
+    }
+
+    const quoteRef = db.ref("orderQuotes/" + quoteId);
+    const quoteSnapshot = await quoteRef.get();
+    if (!quoteSnapshot.exists()) {
+      throw new HttpsError("not-found", "The order quote was not found. Request a new quote.");
+    }
+    const quote = asRecord(quoteSnapshot.val());
+    if (asString(quote.userId) !== uid || asString(quote.quoteType) !== "ORDER") {
+      throw new HttpsError("permission-denied", "This order quote does not belong to this account.");
+    }
+    if (Number(quote.expiresAtTimestamp) < Date.now()) {
+      throw new HttpsError("deadline-exceeded", "The order quote expired. Request a new quote.");
+    }
+    if (asString(quote.status) !== "QUOTED" && asString(quote.createdOrderId) !== orderId) {
+      throw new HttpsError("already-exists", "This order quote has already been used.");
+    }
+
+    const orderTypeValue = asString(quote.orderType).toUpperCase();
+    if (orderTypeValue !== "FOOD" && orderTypeValue !== "RETAIL") {
+      throw new HttpsError("failed-precondition", "The order quote contains an invalid order type.");
+    }
+    const orderType = orderTypeValue as OrderType;
+    const sourceId = asString(quote.sourceId);
+    const requestedItems = normalizeCatalogItems(quote.requestedItems);
+    const currentCatalog = await loadOrderCatalog(uid, orderType, sourceId, requestedItems);
+
+    // Recheck current availability/approval/stock, but preserve the quoted unit prices and merchant
+    // details so a catalogue or admin rate change cannot silently modify this accepted quote.
+    const quotedCatalog = asRecord(quote.catalog);
+    const quotedItems = Array.isArray(quotedCatalog.items) ? quotedCatalog.items : [];
+    const items: CatalogLine[] = quotedItems.map((raw) => {
+      const item = asRecord(raw);
+      const id = asString(item.id);
+      const current = currentCatalog.items.find(line => line.id === id);
+      if (!current || current.quantity !== Number(item.quantity)) {
+        throw new HttpsError("failed-precondition", "A quoted item is no longer available in the requested quantity.");
+      }
+      return {
+        id,
+        name: asString(item.name),
+        basePrice: phpFromCents(nonNegativeInteger(item.basePriceCentavos, "quoted unit price")),
+        quantity: Number(item.quantity),
+        specialInstructions: asString(item.specialInstructions),
+      };
+    });
+    if (items.length !== requestedItems.length) {
+      throw new HttpsError("failed-precondition", "The quoted catalogue snapshot is incomplete.");
+    }
+
+    const orderRef = db.ref("orders/" + orderId);
+    const lock = await quoteRef.transaction((currentValue) => {
+      const current = asRecord(currentValue);
+      if (
+        asString(current.userId) !== uid ||
+        asString(current.status) !== "QUOTED" && asString(current.createdOrderId) !== orderId ||
+        Number(current.expiresAtTimestamp) < Date.now()
+      ) {
+        return;
+      }
+      return {
+        ...current,
+        status: "USED",
+        createdOrderId: orderId,
+        usedAtTimestamp: Date.now(),
+      };
+    });
+    if (!lock.committed) {
+      const refreshedOrder = await orderRef.get();
+      if (refreshedOrder.exists() && asString(asRecord(refreshedOrder.val()).clientId) === uid) {
+        const value = asRecord(refreshedOrder.val());
+        return {
+          orderId,
+          totalCentavos: Number(value.totalPriceCentavos ?? 0),
+          amount: Number(value.totalPrice ?? 0),
+          pricingVersion: Number(value.pricingVersion ?? 0),
+          breakdown: value.breakdown ?? null,
+          reused: true,
+        };
+      }
+      throw new HttpsError("already-exists", "This order quote is already being used.");
+    }
+
+    const pricingConfig = normalizePricingConfiguration(quote.pricingConfiguration);
+    const timestamp = Date.now();
+    const subtotalCentavos = nonNegativeInteger(quote.subtotalCentavos, "quoted subtotal");
+    const deliveryFeeCentavos = nonNegativeInteger(quote.deliveryFeeCentavos, "quoted delivery fee");
+    const additionalChargesCentavos = nonNegativeInteger(quote.additionalChargesCentavos, "quoted additional charges");
+    const totalCentavos = nonNegativeInteger(quote.totalCentavos, "quoted order total");
+    const expectedTotal = subtotalCentavos + deliveryFeeCentavos + additionalChargesCentavos;
+    if (expectedTotal !== totalCentavos || !Number.isSafeInteger(expectedTotal) || totalCentavos <= 0) {
+      throw new HttpsError("failed-precondition", "The stored quote breakdown is inconsistent.");
+    }
+    const snapshot = asRecord(quote.pricingSnapshot);
+    const order = {
+      id: orderId,
+      clientId: uid,
+      orderType,
+      sourceId,
+      sourceName: asString(quotedCatalog.sourceName),
+      merchantId: asString(quotedCatalog.merchantId) || currentCatalog.merchantId,
+      items,
+      subtotal: phpFromCents(subtotalCentavos),
+      deliveryFee: phpFromCents(deliveryFeeCentavos),
+      totalPrice: phpFromCents(totalCentavos),
+      subtotalCentavos,
+      deliveryFeeCentavos,
+      totalPriceCentavos: totalCentavos,
+      distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
+      distanceKm: Number(quote.distanceKm),
+      routeDuration: asString(quote.routeDuration),
+      pricingVersion: nonNegativeInteger(quote.pricingVersion, "pricing version"),
+      pricingQuoteId: quoteId,
+      pricingSnapshot: snapshot,
+      breakdown: quote.breakdown,
+      status: "PLACED",
+      deliveryId: "",
+      deliveryName: "",
+      deliveryPhone: "",
+      pickupLocation: asString(quotedCatalog.pickupLocation) || asString(quote.pickupLocation),
+      pickupLat: Number(quote.pickupLat),
+      pickupLng: Number(quote.pickupLng),
+      dropoffLocation: asString(quote.dropoffLocation),
+      dropoffLat: Number(quote.dropoffLat),
+      dropoffLng: Number(quote.dropoffLng),
+      createdAtTimestamp: timestamp,
+      paymentMethod: "",
+      paymentStatus: "UNPAID",
+      paymentId: "",
+    };
+    await orderRef.set(order);
+
+    logger.info("Server created order from locked pricing quote", { orderId, quoteId, uid, pricingVersion: pricingConfig.version });
+    return {
+      orderId,
+      totalCentavos,
+      amount: phpFromCents(totalCentavos),
+      pricingVersion: pricingConfig.version,
+      breakdown: quote.breakdown,
+      reused: false,
     };
   }
 );
@@ -939,7 +1306,9 @@ export const createOrderPayment = onCall(
     }
     const orderType = orderTypeValue as OrderType;
     const sourceId = asString(data.sourceId);
-    if (!sourceId) throw new HttpsError("invalid-argument", "A source ID is required.");
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(sourceId)) {
+      throw new HttpsError("invalid-argument", "A valid source ID is required.");
+    }
 
     const existing = await returnExistingCheckout("orders", id, uid);
     if (existing) return existing;
