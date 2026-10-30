@@ -2346,7 +2346,20 @@ export const createGcashPayment = onCall(
 
     if (asString(entity.paymentStatus).toUpperCase() === "PAID" ||
       asString(existingPayment.status).toUpperCase() === "PAID") {
-      return toGcashPaymentResponse(entityType, entityId, existingPayment);
+      return Object.keys(existingPayment).length > 0
+        ? toGcashPaymentResponse(entityType, entityId, existingPayment)
+        : {
+            entityId,
+            [entityType === "ORDER" ? "orderId" : "tripId"]: entityId,
+            paymentId: asString(entity.paymentId),
+            paymentStatus: "PAID",
+            amount,
+            amountCentavos,
+            checkoutUrl: null,
+            webCheckoutUrl: null,
+            checkoutActionDescriptor: null,
+            expiresAtTimestamp: 0,
+          };
     }
     if (
       asString(existingPayment.status).toUpperCase() === "PENDING" &&
@@ -2360,6 +2373,11 @@ export const createGcashPayment = onCall(
       asString(existingPayment.activeAttemptKey) !== attemptKey
     ) {
       throw new HttpsError("failed-precondition", "A GCash payment request is already being created. Retry with the same checkout request key.");
+    }
+
+    const secret = XENDIT_SECRET_KEY.value();
+    if (!secret) {
+      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
     }
 
     const referenceId = "labmda_" + entityType.toLowerCase() + "_" + entityId + "_" + attemptKey;
@@ -2425,11 +2443,6 @@ export const createGcashPayment = onCall(
         return toGcashPaymentResponse(entityType, entityId, latest);
       }
       throw new HttpsError("failed-precondition", "This payment already has an active GCash checkout. Reuse its original idempotency key.");
-    }
-
-    const secret = XENDIT_SECRET_KEY.value();
-    if (!secret) {
-      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
     }
 
     try {
@@ -2547,7 +2560,7 @@ export const refundPayment = onCall(
       .digest("hex")
       .slice(0, 32);
     const reasonValue = asString(data.reason).toUpperCase() || "REQUESTED_BY_CUSTOMER";
-    const validReasons = ["FRAUDULENT", "DUPLICATE", "REQUESTED_BY_CUSTOMER", "CANCELLATION", "OTHERS"];
+    const validReasons = ["FRAUDULENT", "DUPLICATE", "REQUESTED_BY_CUSTOMER", "OTHERS"];
     if (!validReasons.includes(reasonValue)) {
       throw new HttpsError("invalid-argument", "Unsupported refund reason.");
     }
@@ -2578,6 +2591,11 @@ export const refundPayment = onCall(
       !asString(existingPayment.providerPaymentId)
     ) {
       throw new HttpsError("failed-precondition", "Refunds require a provider-confirmed Xendit payment ID.");
+    }
+
+    const secret = XENDIT_SECRET_KEY.value();
+    if (!secret) {
+      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
     }
 
     let reservedAmountCentavos = 0;
@@ -2651,10 +2669,6 @@ export const refundPayment = onCall(
       };
     }
 
-    const secret = XENDIT_SECRET_KEY.value();
-    if (!secret) {
-      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
-    }
     const providerPaymentId = asString(savedAfterReservation.providerPaymentId);
     const providerIdempotencyKey = "labmda_refund_" + entityId + "_" + refundAttemptId;
     const refundAmount = phpFromCents(reservedAmountCentavos);
@@ -2674,7 +2688,20 @@ export const refundPayment = onCall(
       const providerBody = asRecord(await response.json().catch(() => ({})));
       if (!response.ok) {
         logger.error("Xendit refund request failed", { entityId, status: response.status, response: providerBody });
-        throw new HttpsError("unavailable", "Xendit could not start the refund. Retry using the same refund request key.");
+        // An explicit provider rejection is terminal. Release the reservation so the
+        // administrator's remaining refundable balance is not stranded.
+        await applyXenditRefundStatus({
+          entityId,
+          refundAttemptId,
+          referenceId,
+          providerRefundId: "",
+          providerPaymentId,
+          status: "FAILED",
+          amountCentavos: reservedAmountCentavos,
+          providerUpdatedAt: new Date().toISOString(),
+          failureCode: asString(providerBody.error_code) || "REFUND_REQUEST_REJECTED",
+        });
+        throw new HttpsError("unavailable", "Xendit rejected the refund. Review the reason and retry with a new refund request key.");
       }
 
       const providerRefundId = asString(providerBody.refund_id) || asString(providerBody.id);
