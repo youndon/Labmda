@@ -3965,7 +3965,8 @@ type WalletDeltaField =
   | "cashOwedCentavos"
   | "cashEarningsCentavos"
   | "pendingPayoutCentavos"
-  | "paidOutCentavos";
+  | "paidOutCentavos"
+  | "refundDebtCentavos";
 
 type WalletDeltas = Partial<Record<WalletDeltaField, number>>;
 
@@ -4054,7 +4055,14 @@ async function applyWalletDeltas(
         invalidBalance = "A wallet movement is not an integer number of centavos.";
         return;
       }
-      const amount = walletNumber(current, field) + delta;
+      let appliedDelta = delta;
+      if (field === "availableCentavos" && delta > 0) {
+        const refundDebt = walletNumber(current, "refundDebtCentavos");
+        const recovered = Math.min(refundDebt, delta);
+        if (recovered > 0) next.refundDebtCentavos = refundDebt - recovered;
+        appliedDelta -= recovered;
+      }
+      const amount = walletNumber(current, field) + appliedDelta;
       if (!Number.isSafeInteger(amount) || amount < 0) {
         invalidBalance = "A wallet movement would create an invalid or negative balance.";
         return;
@@ -4855,6 +4863,9 @@ async function reserveAndSubmitPayout(
   const walletRef = db.ref("wallets/" + uid);
   const wallet = asRecord((await walletRef.get()).val());
   const amount = walletNumber(wallet, "availableCentavos");
+  if (walletNumber(wallet, "refundDebtCentavos") > 0) {
+    throw new HttpsError("failed-precondition", "Outstanding refund recovery must be cleared from future earnings before another payout.");
+  }
   const minimum = automatic ? AUTO_PAYOUT_MINIMUM_CENTAVOS : MANUAL_PAYOUT_MINIMUM_CENTAVOS;
   if (amount < minimum) {
     throw new HttpsError(
@@ -5354,6 +5365,10 @@ export const processAutomaticPayouts = onSchedule(
         const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
         const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
         const available = walletNumber(wallet, "availableCentavos");
+        if (walletNumber(wallet, "refundDebtCentavos") > 0) {
+          await db.ref("walletPayoutQueue/" + uid).remove();
+          continue;
+        }
         if (asString(account.status).toUpperCase() !== "VERIFIED") continue;
         if (available < AUTO_PAYOUT_MINIMUM_CENTAVOS) {
           await db.ref("walletPayoutQueue/" + uid).remove();
