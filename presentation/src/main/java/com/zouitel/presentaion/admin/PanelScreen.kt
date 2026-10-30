@@ -2,6 +2,7 @@ package com.zouitel.presentaion.admin
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.DriveEta
 import androidx.compose.material.icons.filled.LocalShipping
@@ -85,6 +86,16 @@ class PanelScreen : Screen {
                     contentPadding = PaddingValues(16.dp)
                 ) {
                     Text("Manage Pricing & Commissions")
+                }
+
+                Button(
+                    onClick = { navigator?.push(CashLedgerScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Cash Ledger & Remittances")
                 }
             }
         }
