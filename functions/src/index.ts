@@ -2273,7 +2273,9 @@ async function applyXenditRefundStatus(args: {
       return;
     }
     const previousStatus = asString(refund.status).toUpperCase();
-    if (["SUCCEEDED", "FAILED"].includes(previousStatus)) return current;
+    if (["SUCCEEDED", "FAILED"].includes(previousStatus)) {
+      if (previousStatus !== args.status || refund.balanceApplied === true) return current;
+    }
 
     const totalCentavos = nonNegativeInteger(current.amountCentavos, "stored payment amount");
     const refundedCentavos = nonNegativeInteger(current.refundedCentavos ?? 0, "refunded amount");
@@ -2288,6 +2290,7 @@ async function applyXenditRefundStatus(args: {
       status: args.status,
       providerUpdatedAt: args.providerUpdatedAt || asString(refund.providerUpdatedAt),
       failureCode: args.status === "FAILED" ? args.failureCode || "" : "",
+      balanceApplied: args.status === "SUCCEEDED" || args.status === "FAILED",
       updatedAtTimestamp: Date.now(),
     };
     const nextPaymentStatus = args.status === "SUCCEEDED"
@@ -2716,13 +2719,17 @@ export const refundPayment = onCall(
       const refundStatus: "SUCCEEDED" | "FAILED" | "PENDING" =
         providerStatus === "SUCCEEDED" ? "SUCCEEDED" :
           providerStatus === "FAILED" ? "FAILED" : "PENDING";
+      // Store the provider ID first, but do not mark terminal status before the
+      // transactional balance update below. The webhook can race this response.
       await paymentRef.child("refunds").child(refundAttemptId).update({
         providerRefundId,
-        status: refundStatus,
         updatedAtTimestamp: Date.now(),
       });
 
       if (refundStatus === "PENDING") {
+        await paymentRef.child("refunds").child(refundAttemptId).update({
+          status: "PENDING",
+        });
         await db.ref("refundReconciliationQueue/" + entityId + "_" + refundAttemptId).set({
           entityId,
           refundAttemptId,
