@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+.firebase/
+functions/node_modules/
+functions/lib/
+functions/.env.local
+functions/.secret.local

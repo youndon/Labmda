@@ -3,7 +3,10 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "build:watch": "tsc --watch"
+    "build:watch": "tsc --watch",
+    "serve": "npm run build && cd .. && firebase --config firebase.emulator.json emulators:start --project demo-labmda --only functions,database,auth",
+    "deploy": "npm run build && cd .. && firebase deploy --only functions",
+    "logs": "cd .. && firebase functions:log"
   },
   "engines": {
     "node": "22"

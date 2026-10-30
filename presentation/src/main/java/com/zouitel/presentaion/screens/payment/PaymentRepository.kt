@@ -22,6 +22,20 @@ data class PaymentCreationResult(
     val breakdown: OrderBreakdown? = null
 )
 
+/** Server quote for a food or goods order. Monetary fields are PHP centavos. */
+data class PricingOrderQuoteResult(
+    val quoteId: String,
+    val orderType: String,
+    val amount: Double,
+    val totalCentavos: Long,
+    val subtotalCentavos: Long,
+    val deliveryFeeCentavos: Long,
+    val distanceMeters: Long,
+    val pricingVersion: Long,
+    val expiresAtTimestamp: Long,
+    val breakdown: OrderBreakdown?
+)
+
 /** A route and rate quote produced by Firebase Functions. */
 data class PricingQuoteResult(
     val quoteId: String,
@@ -71,6 +85,117 @@ class PaymentRepository {
             pricingVersion = (result["pricingVersion"] as? Number)?.toLong() ?: 0L,
             expiresAtTimestamp = (result["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L
         )
+    }
+
+    /**
+     * Requests a server-priced food or goods order quote. Only catalogue IDs and quantities
+     * are sent; all unit prices, delivery charges and totals are read/calculated by Functions.
+     */
+    suspend fun quoteOrder(
+        orderType: String,
+        sourceId: String,
+        items: List<Map<String, Any>>,
+        dropoffLocation: String,
+        dropoffLat: Double,
+        dropoffLng: Double
+    ): PricingOrderQuoteResult {
+        val response = functions.httpsCallable("quoteOrder")(
+            mapOf(
+                "orderType" to orderType.trim().uppercase(),
+                "sourceId" to sourceId,
+                "items" to items,
+                "dropoffLocation" to dropoffLocation,
+                "dropoffLat" to dropoffLat,
+                "dropoffLng" to dropoffLng
+            )
+        )
+        val result = response.data<Map<String, Any?>>()
+        return PricingOrderQuoteResult(
+            quoteId = result["quoteId"] as? String
+                ?: error("Pricing service did not return an order quote ID."),
+            orderType = result["orderType"] as? String ?: orderType.uppercase(),
+            amount = (result["amount"] as? Number)?.toDouble() ?: 0.0,
+            totalCentavos = (result["totalCentavos"] as? Number)?.toLong() ?: 0L,
+            subtotalCentavos = (result["subtotalCentavos"] as? Number)?.toLong() ?: 0L,
+            deliveryFeeCentavos = (result["deliveryFeeCentavos"] as? Number)?.toLong() ?: 0L,
+            distanceMeters = (result["distanceMeters"] as? Number)?.toLong() ?: 0L,
+            pricingVersion = (result["pricingVersion"] as? Number)?.toLong() ?: 0L,
+            expiresAtTimestamp = (result["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L,
+            breakdown = result["breakdown"].toOrderBreakdownOrNull()
+        )
+    }
+
+    /** Creates an order from a locked quote; no client amount or unit price is accepted. */
+    suspend fun createOrderFromQuote(
+        quoteId: String,
+        idempotencyKey: String
+    ): PaymentCreationResult {
+        val response = functions.httpsCallable("createOrder")(
+            mapOf(
+                "quoteId" to quoteId,
+                "idempotencyKey" to idempotencyKey
+            )
+        )
+        return response.data<Map<String, Any?>>().toPaymentCreationResult("orderId")
+    }
+
+    /**
+     * Requests a ride quote. Billable road distance and fare come exclusively from Functions.
+     */
+    suspend fun quoteTrip(
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffLat: Double,
+        dropoffLng: Double,
+        serviceType: String = "ride"
+    ): PricingQuoteResult {
+        val response = functions.httpsCallable("quoteTrip")(
+            mapOf(
+                "serviceType" to serviceType,
+                "pickupLat" to pickupLat,
+                "pickupLng" to pickupLng,
+                "dropoffLat" to dropoffLat,
+                "dropoffLng" to dropoffLng
+            )
+        )
+        val result = response.data<Map<String, Any?>>()
+        return PricingQuoteResult(
+            quoteId = result["quoteId"] as? String
+                ?: error("Pricing service did not return a ride quote ID."),
+            quoteType = result["quoteType"] as? String ?: "RIDE",
+            amount = (result["amount"] as? Number)?.toDouble() ?: 0.0,
+            amountCentavos = (result["amountCentavos"] as? Number)?.toLong() ?: 0L,
+            distanceMeters = (result["distanceMeters"] as? Number)?.toLong() ?: 0L,
+            distanceKm = (result["distanceKm"] as? Number)?.toDouble() ?: 0.0,
+            pricingVersion = (result["pricingVersion"] as? Number)?.toLong() ?: 0L,
+            expiresAtTimestamp = (result["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L
+        )
+    }
+
+    /** Creates a trip using only a server-issued ride quote and participant metadata. */
+    suspend fun createTripFromQuote(
+        quoteId: String,
+        idempotencyKey: String,
+        pickupLocation: String,
+        dropoffLocation: String,
+        passengerName: String,
+        passengerPhone: String,
+        targetDriverId: String? = null,
+        serviceType: String = "ride"
+    ): PaymentCreationResult {
+        val response = functions.httpsCallable("createTrip")(
+            mapOf(
+                "quoteId" to quoteId,
+                "idempotencyKey" to idempotencyKey,
+                "serviceType" to serviceType,
+                "pickupLocation" to pickupLocation,
+                "dropoffLocation" to dropoffLocation,
+                "passengerName" to passengerName,
+                "passengerPhone" to passengerPhone,
+                "targetDriverId" to targetDriverId
+            )
+        )
+        return response.data<Map<String, Any?>>().toPaymentCreationResult("tripId")
     }
 
     suspend fun createOrder(
@@ -154,7 +279,7 @@ class PaymentRepository {
         val id = this[idKey] as? String
             ?: error("Payment service did not return $idKey.")
         val paymentId = this["paymentId"] as? String ?: ""
-        val status = this["paymentStatus"] as? String ?: "PENDING"
+        val status = this["paymentStatus"] as? String ?: "UNPAID"
         val amount = (this["amount"] as? Number)?.toDouble()
             ?: (this["fare"] as? Number)?.toDouble()
             ?: 0.0
@@ -166,6 +291,7 @@ class PaymentRepository {
             amount = amount,
             checkoutUrl = checkoutUrl,
             amountCentavos = (this["amountCentavos"] as? Number)?.toLong()
+                ?: (this["totalCentavos"] as? Number)?.toLong()
                 ?: (this["fareCentavos"] as? Number)?.toLong()
                 ?: 0L,
             distanceMeters = (this["distanceMeters"] as? Number)?.toLong() ?: 0L,
