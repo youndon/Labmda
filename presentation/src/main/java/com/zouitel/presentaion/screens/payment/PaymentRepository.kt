@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.payment
 
+import com.zouitel.presentaion.model.Money
+import com.zouitel.presentaion.model.OrderBreakdown
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.functions.functions
 
@@ -16,7 +18,8 @@ data class PaymentCreationResult(
     val checkoutUrl: String?,
     val amountCentavos: Long = 0L,
     val distanceMeters: Long = 0L,
-    val pricingVersion: Long = 0L
+    val pricingVersion: Long = 0L,
+    val breakdown: OrderBreakdown? = null
 )
 
 /** A route and rate quote produced by Firebase Functions. */
@@ -166,7 +169,31 @@ class PaymentRepository {
                 ?: (this["fareCentavos"] as? Number)?.toLong()
                 ?: 0L,
             distanceMeters = (this["distanceMeters"] as? Number)?.toLong() ?: 0L,
-            pricingVersion = (this["pricingVersion"] as? Number)?.toLong() ?: 0L
+            pricingVersion = (this["pricingVersion"] as? Number)?.toLong() ?: 0L,
+            breakdown = this["breakdown"].toOrderBreakdownOrNull()
+        )
+    }
+
+    private fun Any?.toOrderBreakdownOrNull(): OrderBreakdown? {
+        val values = this as? Map<*, *> ?: return null
+        fun money(key: String): Money =
+            Money((values[key] as? Number)?.toLong() ?: 0L)
+
+        return OrderBreakdown(
+            subtotal = money("subtotal"),
+            deliveryFee = money("deliveryFee"),
+            serviceFee = money("serviceFee"),
+            discount = money("discount"),
+            tax = money("tax"),
+            total = money("total"),
+            merchantShare = money("merchantShare"),
+            courierShare = money("courierShare"),
+            driverShare = money("driverShare"),
+            platformShare = money("platformShare"),
+            gatewayFee = money("gatewayFee"),
+            merchantCommission = money("merchantCommission"),
+            deliveryCommission = money("deliveryCommission"),
+            rideCommission = money("rideCommission")
         )
     }
 }
