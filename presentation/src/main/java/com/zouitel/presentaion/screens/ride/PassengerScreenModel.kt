@@ -23,6 +23,9 @@ class PassengerScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUser = Firebase.auth.currentUser
     private val payments = PaymentRepository()
+    private var pendingTripFingerprint: String? = null
+    private var pendingTripIdempotencyKey: String? = null
+    private var isRequestingTrip = false
 
     private val _trips = MutableStateFlow<List<Trip>>(emptyList())
     val trips: StateFlow<List<Trip>> = _trips.asStateFlow()
@@ -166,13 +169,30 @@ class PassengerScreenModel : ScreenModel {
             onFailure("Please sign in to request a ride.")
             return
         }
+        if (isRequestingTrip) return
+
+        val fingerprint = listOf(
+            paymentMethod.trim().uppercase(),
+            pickupAddress, pickupLat.toString(), pickupLng.toString(),
+            dropoffAddress, dropoffLat.toString(), dropoffLng.toString(),
+            passengerName, passengerPhone, targetDriver?.uid.orEmpty()
+        ).joinToString("|")
+        if (pendingTripFingerprint != fingerprint) {
+            pendingTripFingerprint = fingerprint
+            pendingTripIdempotencyKey = UUID.randomUUID().toString()
+        }
+        val idempotencyKey = pendingTripIdempotencyKey ?: UUID.randomUUID().toString().also {
+            pendingTripIdempotencyKey = it
+            pendingTripFingerprint = fingerprint
+        }
+        isRequestingTrip = true
 
         screenModelScope.launch {
             try {
                 // The client-side fare is intentionally ignored. Cloud Functions calculate it
                 // from server-managed service pricing and the submitted route coordinates.
                 val result = payments.createTrip(
-                    idempotencyKey = UUID.randomUUID().toString(),
+                    idempotencyKey = idempotencyKey,
                     serviceType = "RIDE",
                     pickupLocation = pickupAddress,
                     pickupLat = pickupLat,
@@ -185,9 +205,13 @@ class PassengerScreenModel : ScreenModel {
                     targetDriverId = targetDriver?.uid,
                     paymentMethod = paymentMethod
                 )
+                pendingTripFingerprint = null
+                pendingTripIdempotencyKey = null
                 onSuccess(result)
             } catch (e: Exception) {
                 onFailure(e.message ?: "Could not request the trip. Please try again.")
+            } finally {
+                isRequestingTrip = false
             }
         }
     }
