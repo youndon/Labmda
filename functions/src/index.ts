@@ -975,7 +975,7 @@ export const createOrderPayment = onCall(
 
     const timestamp = Date.now();
     let providerReference = "cash_" + id;
-    let paymentStatus = "CASH_DUE";
+    let paymentStatus = "UNPAID";
     let checkoutUrl = "";
     let orderStatus = "PLACED";
 
@@ -991,8 +991,8 @@ export const createOrderPayment = onCall(
       });
       providerReference = xendit.paymentId;
       checkoutUrl = xendit.checkoutUrl;
-      paymentStatus = xendit.status;
-      orderStatus = paymentStatus === "SUCCEEDED" ? "PLACED" : paymentStatus === "FAILED" ? "CANCELLED" : "AWAITING_PAYMENT";
+      paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
+      orderStatus = paymentStatus === "PAID" ? "PLACED" : paymentStatus === "FAILED" ? "CANCELLED" : "AWAITING_PAYMENT";
     }
 
     const order = {
@@ -1172,7 +1172,7 @@ export const createTripPayment = onCall(
 
     const timestamp = Date.now();
     let providerReference = "cash_" + id;
-    let paymentStatus = "CASH_DUE";
+    let paymentStatus = "UNPAID";
     let checkoutUrl = "";
     let tripStatus = "REQUESTED";
 
@@ -1188,8 +1188,8 @@ export const createTripPayment = onCall(
       });
       providerReference = xendit.paymentId;
       checkoutUrl = xendit.checkoutUrl;
-      paymentStatus = xendit.status;
-      tripStatus = paymentStatus === "SUCCEEDED" ? "REQUESTED" : paymentStatus === "FAILED" ? "CANCELLED" : "AWAITING_PAYMENT";
+      paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
+      tripStatus = paymentStatus === "PAID" ? "REQUESTED" : paymentStatus === "FAILED" ? "CANCELLED" : "AWAITING_PAYMENT";
     }
 
     const targetDriverId = asString(data.targetDriverId);
@@ -1353,7 +1353,7 @@ export const xenditWebhook = onRequest(
       return;
     }
 
-    const paymentStatus = succeeded ? "SUCCEEDED" : "FAILED";
+    const paymentStatus = succeeded ? "PAID" : "FAILED";
     const updates: Record<string, unknown> = {};
     updates["payments/" + entityId + "/status"] = paymentStatus;
     updates["payments/" + entityId + "/updatedAtTimestamp"] = Date.now();
