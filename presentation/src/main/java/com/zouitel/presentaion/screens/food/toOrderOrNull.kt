@@ -52,6 +52,16 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
         paymentId = str("paymentId"),
         deliveryId = str("deliveryId"),
         deliveryName = str("deliveryName"),
-        deliveryPhone = str("deliveryPhone")
+        deliveryPhone = str("deliveryPhone"),
+        cashCollectionStatus = str("cashCollectionStatus"),
+        cashCollectedBy = str("cashCollectedBy"),
+        cashCollectedByRole = str("cashCollectedByRole"),
+        cashCollectedAmountCentavos = runCatching { child("cashCollectedAmountCentavos").value<Long>() }.getOrDefault(0L),
+        cashMerchantOwedCentavos = runCatching { child("cashMerchantOwedCentavos").value<Long>() }.getOrDefault(0L),
+        cashPlatformOwedCentavos = runCatching { child("cashPlatformOwedCentavos").value<Long>() }.getOrDefault(0L),
+        cashCollectorEarningsCentavos = runCatching { child("cashCollectorEarningsCentavos").value<Long>() }.getOrDefault(0L),
+        cashRemittedCentavos = runCatching { child("cashRemittedCentavos").value<Long>() }.getOrDefault(0L),
+        cashOutstandingRemittanceCentavos = runCatching { child("cashOutstandingRemittanceCentavos").value<Long>() }.getOrDefault(0L),
+        cashRemittanceStatus = str("cashRemittanceStatus")
     )
 }
