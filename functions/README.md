@@ -41,8 +41,10 @@ The configuration contains:
 - `cancellationFees` and `refundPolicy`: fixed cancellation amounts, optional percentage
   rates, cancellation timing and delivery-fee refund policy.
 
-A configuration must be published before quote or checkout functions will accept new orders.
-Every publish increments `version` and stores a historical copy under
+The zero amounts in `pricing.example.json` are placeholders, not recommended prices.
+Enter actual delivery, ride, commission, refund and cancellation rates in the Admin Panel before
+publishing. A configuration must be published before quote or checkout functions will accept
+new orders. Every publish increments `version` and stores a historical copy under
 `config/pricing/versions/{version}`. Each quote, order and trip stores its own route distance,
 pricing version, applicable rules and calculated centavo breakdown. Existing snapshots are not
 recalculated when an administrator later changes the current configuration.
