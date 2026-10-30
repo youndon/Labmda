@@ -2411,6 +2411,7 @@ export const createGcashPayment = onCall(
         clientId: uid,
         provider: "XENDIT",
         channelCode: "GCASH",
+        referenceId,
         status: "CREATING",
         activeAttemptKey: attemptKey,
         amount,
@@ -2855,11 +2856,20 @@ export const xenditPaymentWebhook = onRequest(
     const payment = asRecord(paymentSnapshot.val());
     if (
       asString(payment.provider) !== "XENDIT" ||
-      asString(payment.providerReference) !== paymentRequestId ||
       asString(payment.referenceId) !== referenceId ||
       asString(payment.channelCode).toUpperCase() !== "GCASH"
     ) {
       response.status(400).send("Payment reference mismatch");
+      return;
+    }
+    // Xendit may emit the event before the callable has saved the response ID.
+    // Return a retryable response while the reserved attempt is finalized.
+    if (!asString(payment.providerReference)) {
+      response.status(503).send("Payment request is still being finalized");
+      return;
+    }
+    if (asString(payment.providerReference) !== paymentRequestId) {
+      response.status(400).send("Payment request ID mismatch");
       return;
     }
 
