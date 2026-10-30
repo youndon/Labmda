@@ -592,6 +592,9 @@ function phpFromCents(centavos: number): number {
 }
 
 function roundCentavos(amount: number, increment: number, mode: RoundingMode): number {
+  if (!Number.isSafeInteger(amount) || amount < 0 || !Number.isSafeInteger(increment) || increment < 1) {
+    throw new HttpsError("failed-precondition", "Pricing amount or rounding increment is outside the supported centavo range.");
+  }
   const units = Math.floor(amount / increment);
   const remainder = amount % increment;
   const roundedUnits = mode === "CEIL"
@@ -647,9 +650,13 @@ function calculateRideFareCentavos(
     1000n,
     "Ride distance charge"
   );
-  const optionalChargesCentavos =
-    sharedRideChargeCentavos +
-    rule.additionalCharges.reduce((sum, charge) => sum + charge.amountCentavos, 0);
+  const optionalChargesValue =
+    BigInt(sharedRideChargeCentavos) +
+    rule.additionalCharges.reduce((sum, charge) => sum + BigInt(charge.amountCentavos), 0n);
+  const optionalChargesCentavos = Number(optionalChargesValue);
+  if (!Number.isSafeInteger(optionalChargesCentavos)) {
+    throw new HttpsError("failed-precondition", "Ride additional charges exceed the supported centavo range.");
+  }
   const rounded = roundCentavos(
     rule.baseFareCentavos + perKm + optionalChargesCentavos,
     rule.roundingIncrementCentavos,
@@ -756,6 +763,9 @@ async function loadOwnedPricingQuote(
   dropoffLng: number,
   serviceType?: string
 ): Promise<Record<string, unknown>> {
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(quoteId)) {
+    throw new HttpsError("invalid-argument", "Invalid pricing quote ID.");
+  }
   const snapshot = await db.ref("pricingQuotes/" + quoteId).get();
   if (!snapshot.exists()) {
     throw new HttpsError("not-found", "The pricing quote was not found. Please request a new quote.");
