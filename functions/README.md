@@ -306,6 +306,12 @@ queues. Add dueAtTimestamp to each queue's indexOn:
 ```json
 {
   "rules": {
+    "payments": {
+      "$paymentId": {
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || root.child('orders').child($paymentId).child('deliveryId').val() === auth.uid || root.child('trips').child($paymentId).child('driverId').val() === auth.uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
     "paymentReconciliationQueue": {
       ".read": false,
       ".write": false,
