@@ -357,7 +357,12 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                             dropoff = null
                                             deliveryAddress = ""
                                             result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                                                runCatching { uriHandler.openUri(url) }
+                                                val opened = runCatching { uriHandler.openUri(url) }.isSuccess
+                                                if (!opened) {
+                                                    result.webCheckoutUrl?.takeIf { it.isNotBlank() && it != url }?.let { fallback ->
+                                                        runCatching { uriHandler.openUri(fallback) }
+                                                    }
+                                                }
                                             }
                                             navigator?.push(LiveOrderTrackingScreen(result.entityId))
                                         },

@@ -208,3 +208,126 @@ authorized callable transitions before applying deny-write rules globally.
 The account payment activity page reads records by `clientId` and `merchantId`. This release
 does not create merchant/courier wallet balances or execute payouts; those belong to the later
 settlement phase.
+
+## One-time GCash payment lifecycle
+
+The app must create the order or trip from its server-issued quote first. Then call
+createGcashPayment with the entity ID; do not send an amount, currency, merchant split or
+client-calculated total:
+
+```kotlin
+paymentRepository.createGcashPayment(
+    entityType = "ORDER", // or "TRIP"
+    entityId = createdOrderId,
+    idempotencyKey = checkoutAttemptKey
+)
+```
+
+The existing Android PaymentRepository routes GCash selections through this quote-first sequence
+for both food/goods orders and rides. The food, shop and passenger screens then open the returned
+checkoutUrl (DEEPLINK_URL first, WEB_URL fallback) and continue showing the order/trip status
+updated by Firebase Functions. For an already-created unpaid order or trip, the standalone
+createGcashPayment callable can also be retried with the same idempotency key.
+
+The callable verifies that the signed-in user owns the order/trip and obtains its total from
+orders/{id}/totalPriceCentavos or trips/{id}/fareCentavos. It creates a one-time Xendit
+Payment Request for PH, PHP, GCASH using automatic collection. GCash does not support a
+card-style authorization/capture hold; the customer pays during checkout. Current documented
+GCash amount limits are PHP 1.00–PHP 100,000.00, and the payment request expires after 15 minutes.
+
+The response contains:
+
+- checkoutUrl: the Xendit DEEPLINK_URL action when present, otherwise WEB_URL.
+- webCheckoutUrl: the explicit browser fallback.
+- checkoutActionDescriptor: DEEPLINK_URL or WEB_URL.
+- paymentId, paymentStatus, the server amount and expiry timestamp.
+
+On Android, open checkoutUrl with an ACTION_VIEW / URI handler. Keep webCheckoutUrl as the
+fallback if no installed app handles the deeplink. Never mark an order or trip paid because
+the app resumed, a return URL opened, or the user tapped a success-looking button.
+
+### Authoritative status and webhook
+
+Configure the Xendit Payment Request webhook to point to the deployed
+xenditPaymentWebhook HTTPS function in asia-southeast1. Subscribe it to:
+
+- payment.capture — confirmed successful collection; this is the event that moves the payment
+  record to PAID.
+- payment.failure — updates the attempt/payment to FAILED.
+- payment_request.expiry — updates it to EXPIRED.
+- refund.succeeded and refund.failed — updates the refund attempt and refunded balance.
+
+The endpoint verifies the x-callback-token header against the XENDIT_WEBHOOK_TOKEN Functions
+secret, validates the stored payment request/reference, amount, currency and GCash channel, and
+applies status changes transactionally. Duplicate notifications are idempotent. Older provider
+events cannot reverse a confirmed payment.
+The old xenditWebhook endpoint remains only for the previous integration; configure new GCash
+events on xenditPaymentWebhook.
+
+Set the callback-token secret:
+
+```bash
+firebase functions:secrets:set XENDIT_SECRET_KEY
+firebase functions:secrets:set XENDIT_WEBHOOK_TOKEN
+```
+
+Configure PAYMENT_SUCCESS_RETURN_URL and PAYMENT_FAILURE_RETURN_URL as Firebase Functions
+string parameters in the selected Firebase project. Both must be public HTTPS URLs routed back
+to the app/site. The return URLs are only for navigation; they are not payment confirmations.
+
+Observe payments/{entityId} from the signed-in app with PaymentRepository.observePaymentStatus.
+The status is server-owned; clients must not write payment or refund records. Recognized payment
+states include CREATING, PENDING, PAID, FAILED, CANCELLED, and EXPIRED. Initiation errors are
+recorded separately as INITIATION_FAILED. Refund state is tracked separately, with PENDING,
+SUCCEEDED, FAILED, and aggregate payment state PARTIALLY_REFUNDED / REFUNDED.
+
+### Administrator refunds
+
+refundPayment is a callable protected by Firebase Auth custom claim admin: true. It accepts
+entityType, entityId, idempotencyKey, a supported reason, and optional amountCentavos.
+Omitting the amount requests the remaining refundable balance. The function uses the Xendit
+refunds API with the provider payment_id (not the Payment Request ID), reserves the refundable
+balance transactionally, and records a unique refund attempt. The 180-day GCash refund window is
+checked against the provider-confirmed payment timestamp. Only Xendit confirmation or the
+server-to-server refund status lookup changes refunded totals.
+
+### Missed-notification reconciliation
+
+reconcilePendingPayments runs every five minutes in Asia/Manila. It queries the private
+paymentReconciliationQueue and refundReconciliationQueue, retrieves the provider status
+directly from Xendit, validates the response against the saved reference and amount, and applies
+terminal state changes. Temporary API errors are retried with backoff. The queues must remain
+server-only.
+
+Merge these paths into the deployed Realtime Database rules (do not replace the existing rules
+tree). Keep payments readable only by the customer and relevant order/trip participants or
+an administrator, and deny all client writes. Deny client reads and writes to both reconciliation
+queues. Add dueAtTimestamp to each queue's indexOn:
+
+```json
+{
+  "rules": {
+    "payments": {
+      "$paymentId": {
+        ".read": "auth != null && (data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || root.child('orders').child($paymentId).child('deliveryId').val() === auth.uid || root.child('trips').child($paymentId).child('driverId').val() === auth.uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
+    "paymentReconciliationQueue": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["dueAtTimestamp"]
+    },
+    "refundReconciliationQueue": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["dueAtTimestamp"]
+    }
+  }
+}
+```
+
+This payment step records collections and refunds; it does not distribute wallet balances or
+run merchant/courier payouts. Use the existing order/trip completion workflow as the gate for
+future controlled settlement and payout. Do not model GCash collection as money held for a
+later manual capture.

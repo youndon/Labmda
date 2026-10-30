@@ -22,6 +22,9 @@ class StoreDetailsScreenModel(
 ) : ScreenModel {
     private val db = Firebase.database.reference()
     private val auth = Firebase.auth
+    private var pendingOrderFingerprint: String? = null
+    private var pendingOrderIdempotencyKey: String? = null
+    private var isSubmittingOrder = false
 
     private val _products = MutableStateFlow<List<Product>>(emptyList())
     val products: StateFlow<List<Product>> = _products.asStateFlow()
@@ -107,11 +110,31 @@ class StoreDetailsScreenModel(
             onFailure("Your cart is empty.")
             return
         }
+        if (isSubmittingOrder) return
+
+        val fingerprint = buildString {
+            append(paymentMethod.trim().uppercase()).append('|')
+            append(dropoffAddress).append('|').append(dropoffLat).append('|').append(dropoffLng)
+            append('|').append(pickupLat).append('|').append(pickupLng)
+            cartItems.sortedBy { it.productId }.forEach { item ->
+                append('|').append(item.productId).append(':').append(item.quantity)
+                    .append(':').append(item.specialInstructions)
+            }
+        }
+        if (pendingOrderFingerprint != fingerprint) {
+            pendingOrderFingerprint = fingerprint
+            pendingOrderIdempotencyKey = UUID.randomUUID().toString()
+        }
+        val idempotencyKey = pendingOrderIdempotencyKey ?: UUID.randomUUID().toString().also {
+            pendingOrderIdempotencyKey = it
+            pendingOrderFingerprint = fingerprint
+        }
+        isSubmittingOrder = true
 
         screenModelScope.launch {
             try {
                 val result = payments.createOrder(
-                    idempotencyKey = UUID.randomUUID().toString(),
+                    idempotencyKey = idempotencyKey,
                     orderType = "RETAIL",
                     sourceId = shop.id,
                     items = cartItems.map { item ->
@@ -129,9 +152,13 @@ class StoreDetailsScreenModel(
                     dropoffLat = dropoffLat,
                     dropoffLng = dropoffLng
                 )
+                pendingOrderFingerprint = null
+                pendingOrderIdempotencyKey = null
                 onSuccess(result)
             } catch (e: Exception) {
                 onFailure(e.message ?: "Could not place the order. Please try again.")
+            } finally {
+                isSubmittingOrder = false
             }
         }
     }

@@ -4,6 +4,7 @@ import { getDatabase } from "firebase-admin/database";
 import { logger } from "firebase-functions";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 
 initializeApp();
 
@@ -34,8 +35,15 @@ type XenditAction = {
 
 type XenditPaymentRequest = {
   payment_request_id?: string;
+  latest_payment_id?: string;
   reference_id?: string;
   status?: string;
+  updated?: string;
+  request_amount?: number;
+  currency?: string;
+  channel_code?: string;
+  country?: string;
+  failure_code?: string;
   actions?: XenditAction[];
 };
 
@@ -123,7 +131,7 @@ async function createXenditGcashRequest(args: {
   entityId: string;
   clientId: string;
   idempotencyKey: string;
-}): Promise<{ paymentId: string; checkoutUrl: string; status: string }> {
+}): Promise<{ paymentId: string; checkoutUrl: string; status: string; webCheckoutUrl: string; checkoutActionDescriptor: string }> {
   const secret = XENDIT_SECRET_KEY.value();
   const successUrl = PAYMENT_SUCCESS_RETURN_URL.value();
   const failureUrl = PAYMENT_FAILURE_RETURN_URL.value();
@@ -176,35 +184,40 @@ async function createXenditGcashRequest(args: {
 
   const request = body as XenditPaymentRequest;
   const paymentId = asString(request.payment_request_id);
-  const action = (request.actions ?? []).find((candidate) =>
-    candidate.type === "REDIRECT_CUSTOMER"
+  const actions = request.actions ?? [];
+  const mobileAction = actions.find((candidate) =>
+    candidate.type === "REDIRECT_CUSTOMER" && candidate.descriptor === "DEEPLINK_URL"
   );
-  const rawCheckoutUrl = asString(action?.value);
-  const checkoutCandidate = rawCheckoutUrl
-    ? (/^https:\/\//i.test(rawCheckoutUrl)
-      ? rawCheckoutUrl
-      : /^https?:\/\//i.test(rawCheckoutUrl)
-        ? rawCheckoutUrl
-        : "https://" + rawCheckoutUrl.replace(/^\/+/, ""))
-    : "";
-  let checkoutUrl = "";
-  try {
-    const parsedCheckoutUrl = new URL(checkoutCandidate);
-    if (parsedCheckoutUrl.protocol === "https:") {
-      checkoutUrl = parsedCheckoutUrl.toString();
+  const webAction = actions.find((candidate) =>
+    candidate.type === "REDIRECT_CUSTOMER" && candidate.descriptor === "WEB_URL"
+  );
+
+  function normalizeActionUrl(action: XenditAction | undefined): string {
+    const raw = asString(action?.value);
+    if (!raw) return "";
+    const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw)
+      ? raw
+      : "https://" + raw.replace(/^\/+/, "");
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === "https:") return parsed.toString();
+      if (
+        action?.descriptor === "DEEPLINK_URL" &&
+        !["http:", "javascript:", "data:", "file:"].includes(parsed.protocol)
+      ) {
+        return parsed.toString();
+      }
+    } catch {
+      return "";
     }
-  } catch {
-    checkoutUrl = "";
+    return "";
   }
 
-  if (!paymentId || !checkoutUrl) {
-    logger.error("Xendit response did not contain a payment ID and valid HTTPS customer redirect", {
-      referenceId: args.referenceId,
-      paymentId,
-      actionType: action?.type,
-    });
-    throw new HttpsError("unavailable", "Xendit did not return a valid GCash checkout link.");
-  }
+  // Mobile GCash deeplinks are preferred; desktop/web checkout remains the fallback.
+  const deeplinkUrl = normalizeActionUrl(mobileAction);
+  const webCheckoutUrl = normalizeActionUrl(webAction);
+  const checkoutUrl = deeplinkUrl || webCheckoutUrl;
+  const checkoutActionDescriptor = deeplinkUrl ? "DEEPLINK_URL" : webCheckoutUrl ? "WEB_URL" : "";
 
   const initialStatus = asString(request.status).toUpperCase();
   const status = initialStatus === "SUCCEEDED"
@@ -216,7 +229,7 @@ async function createXenditGcashRequest(args: {
         : initialStatus === "FAILED"
           ? "FAILED"
           : "PENDING";
-  return { paymentId, checkoutUrl, status };
+  return { paymentId, checkoutUrl, status, webCheckoutUrl, checkoutActionDescriptor };
 }
 
 function buildPaymentResponse(
@@ -1214,6 +1227,7 @@ export const createOrder = onCall(
         totalCentavos: Number(existing.totalPriceCentavos ?? 0),
         amount: Number(existing.totalPrice ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
+        distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
         reused: true,
       };
@@ -1354,6 +1368,7 @@ export const createOrder = onCall(
       orderId,
       totalCentavos,
       amount: phpFromCents(totalCentavos),
+      distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
       pricingVersion: pricingConfig.version,
       breakdown: quote.breakdown,
       reused: false,
@@ -1790,6 +1805,7 @@ export const createTrip = onCall(
         fareCentavos: Number(existing.fareCentavos ?? 0),
         fare: Number(existing.fare ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
+        distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
         reused: true,
       };
@@ -1873,6 +1889,7 @@ export const createTrip = onCall(
           fareCentavos: Number(saved.fareCentavos ?? 0),
           fare: Number(saved.fare ?? 0),
           pricingVersion: Number(saved.pricingVersion ?? 0),
+          distanceMeters: Number(saved.distanceMeters ?? 0),
           breakdown: saved.breakdown ?? null,
           reused: true,
         };
@@ -2044,5 +2061,1099 @@ export const xenditWebhook = onRequest(
 
     await db.ref().update(updates);
     response.status(200).send("OK");
+  }
+);
+
+
+// -----------------------------------------------------------------------------
+// Xendit GCash lifecycle. A successful payment is recognized only from a
+// provider-authenticated payment.capture event or a server-to-server status read.
+// GCash uses automatic checkout collection; there is no card-style authorization
+// hold or later capture step.
+// -----------------------------------------------------------------------------
+
+type GcashEntityType = "ORDER" | "TRIP";
+type GcashTerminalStatus = "PAID" | "FAILED" | "CANCELLED" | "EXPIRED";
+
+function parseGcashEntityType(value: unknown): GcashEntityType {
+  const type = asString(value).toUpperCase();
+  if (type === "ORDER" || type === "TRIP") return type;
+  throw new HttpsError("invalid-argument", "entityType must be ORDER or TRIP.");
+}
+
+function paymentEntityPath(entityType: GcashEntityType): "orders" | "trips" {
+  return entityType === "ORDER" ? "orders" : "trips";
+}
+
+function paymentOwnerId(entityType: GcashEntityType, entity: Record<string, unknown>): string {
+  return asString(entityType === "ORDER" ? entity.clientId : entity.passengerId);
+}
+
+function paymentAmountCentavos(entityType: GcashEntityType, entity: Record<string, unknown>): number {
+  const rawCentavos = entityType === "ORDER" ? entity.totalPriceCentavos : entity.fareCentavos;
+  const amount = rawCentavos !== undefined && rawCentavos !== null
+    ? nonNegativeInteger(rawCentavos, "server-calculated payment amount")
+    : centsFromPhp(
+      asNumber(entityType === "ORDER" ? entity.totalPrice : entity.fare, "server-calculated payment amount"),
+      "server-calculated payment amount"
+    );
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw new HttpsError("failed-precondition", "The server-calculated payment amount is invalid.");
+  }
+  // Xendit's published GCash limits are PHP 1.00 through PHP 100,000.00.
+  if (amount < 100 || amount > 10_000_000) {
+    throw new HttpsError("failed-precondition", "GCash payments must be between PHP 1.00 and PHP 100,000.00.");
+  }
+  return amount;
+}
+
+function toGcashPaymentResponse(
+  entityType: GcashEntityType,
+  entityId: string,
+  payment: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    entityId,
+    [entityType === "ORDER" ? "orderId" : "tripId"]: entityId,
+    paymentId: asString(payment.providerReference),
+    providerPaymentId: asString(payment.providerPaymentId) || null,
+    paymentStatus: asString(payment.status) || "PENDING",
+    amount: Number(payment.amount ?? 0),
+    amountCentavos: Number(payment.amountCentavos ?? 0),
+    checkoutUrl: asString(payment.checkoutUrl) || null,
+    webCheckoutUrl: asString(payment.webCheckoutUrl) || null,
+    checkoutActionDescriptor: asString(payment.checkoutActionDescriptor) || null,
+    expiresAtTimestamp: Number(payment.expiresAtTimestamp ?? 0),
+  };
+}
+
+function mapProviderPaymentStatus(statusValue: unknown): GcashTerminalStatus | null {
+  const status = asString(statusValue).toUpperCase();
+  if (["SUCCEEDED", "COMPLETED", "PAID"].includes(status)) return "PAID";
+  if (status === "FAILED") return "FAILED";
+  if (status === "EXPIRED") return "EXPIRED";
+  if (["CANCELED", "CANCELLED"].includes(status)) return "CANCELLED";
+  return null;
+}
+
+function centsFromProviderAmount(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  const centavos = Math.round(amount * 100);
+  return Number.isSafeInteger(centavos) ? centavos : null;
+}
+
+function xenditHeaders(secret: string, idempotencyKey?: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
+    "Content-Type": "application/json",
+    "api-version": "2024-11-11",
+  };
+  if (idempotencyKey) headers["Idempotency-key"] = idempotencyKey;
+  return headers;
+}
+
+async function applyXenditPaymentStatus(args: {
+  entityType: GcashEntityType;
+  entityId: string;
+  paymentRequestId: string;
+  referenceId: string;
+  status: GcashTerminalStatus;
+  providerPaymentId?: string;
+  providerUpdatedAt?: string;
+  failureCode?: string;
+}): Promise<boolean> {
+  const paymentRef = db.ref("payments/" + args.entityId);
+  const transaction = await paymentRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    if (
+      asString(current.provider) !== "XENDIT" ||
+      asString(current.providerReference) !== args.paymentRequestId ||
+      asString(current.referenceId) !== args.referenceId
+    ) {
+      return;
+    }
+
+    const incomingTime = Date.parse(args.providerUpdatedAt ?? "");
+    const previousTime = Date.parse(asString(current.providerUpdatedAt));
+    if (
+      Number.isFinite(incomingTime) &&
+      Number.isFinite(previousTime) &&
+      incomingTime < previousTime
+    ) {
+      return;
+    }
+
+    const previousStatus = asString(current.status).toUpperCase();
+    // A delayed failure/expiry callback must never reverse a confirmed capture.
+    if (
+      ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].includes(previousStatus) &&
+      args.status !== "PAID"
+    ) {
+      return current;
+    }
+
+    const activeAttemptKey = asString(current.activeAttemptKey);
+    const attempts = asRecord(current.attempts);
+    const activeAttempt = asRecord(attempts[activeAttemptKey]);
+    const nextAttempt = activeAttemptKey
+      ? {
+          ...attempts,
+          [activeAttemptKey]: {
+            ...activeAttempt,
+            status: args.status,
+            providerPaymentId: args.providerPaymentId || asString(activeAttempt.providerPaymentId),
+            providerUpdatedAt: args.providerUpdatedAt || asString(activeAttempt.providerUpdatedAt),
+            updatedAtTimestamp: Date.now(),
+          },
+        }
+      : attempts;
+
+    return {
+      ...current,
+      status: args.status,
+      providerPaymentId: args.providerPaymentId || asString(current.providerPaymentId),
+      providerUpdatedAt: args.providerUpdatedAt || asString(current.providerUpdatedAt),
+      paidAtTimestamp: args.status === "PAID"
+        ? Number(current.paidAtTimestamp ?? 0) || (Date.parse(args.providerUpdatedAt ?? "") || Date.now())
+        : Number(current.paidAtTimestamp ?? 0),
+      failureCode: args.status === "FAILED" ? args.failureCode || asString(current.failureCode) : "",
+      attempts: nextAttempt,
+      updatedAtTimestamp: Date.now(),
+    };
+  });
+
+  if (!transaction.committed || !transaction.snapshot.exists()) return false;
+
+  const saved = asRecord(transaction.snapshot.val());
+  const entityPath = paymentEntityPath(args.entityType);
+  const updates: Record<string, unknown> = {};
+  updates[entityPath + "/" + args.entityId + "/paymentStatus"] = asString(saved.status);
+  updates[entityPath + "/" + args.entityId + "/paymentId"] = asString(saved.providerReference);
+  updates["payments/" + args.entityId + "/status"] = asString(saved.status);
+  if (["PAID", "FAILED", "CANCELLED", "EXPIRED"].includes(asString(saved.status))) {
+    updates["paymentReconciliationQueue/" + args.entityId] = null;
+  }
+  await db.ref().update(updates);
+  return true;
+}
+
+async function applyXenditRefundStatus(args: {
+  entityId: string;
+  refundAttemptId: string;
+  referenceId: string;
+  providerRefundId: string;
+  providerPaymentId: string;
+  status: "SUCCEEDED" | "FAILED" | "PENDING";
+  amountCentavos: number;
+  providerUpdatedAt?: string;
+  failureCode?: string;
+}): Promise<boolean> {
+  const paymentRef = db.ref("payments/" + args.entityId);
+  const transaction = await paymentRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const refunds = asRecord(current.refunds);
+    const refund = asRecord(refunds[args.refundAttemptId]);
+    if (
+      asString(current.provider) !== "XENDIT" ||
+      asString(current.providerPaymentId) !== args.providerPaymentId ||
+      asString(refund.referenceId) !== args.referenceId ||
+      Number(refund.amountCentavos) !== args.amountCentavos ||
+      (asString(refund.providerRefundId) &&
+        asString(refund.providerRefundId) !== args.providerRefundId)
+    ) {
+      return;
+    }
+
+    const incomingTime = Date.parse(args.providerUpdatedAt ?? "");
+    const previousTime = Date.parse(asString(refund.providerUpdatedAt));
+    if (
+      Number.isFinite(incomingTime) &&
+      Number.isFinite(previousTime) &&
+      incomingTime < previousTime
+    ) {
+      return;
+    }
+    const previousStatus = asString(refund.status).toUpperCase();
+    if (["SUCCEEDED", "FAILED"].includes(previousStatus)) {
+      if (previousStatus !== args.status || refund.balanceApplied === true) return current;
+    }
+
+    const totalCentavos = nonNegativeInteger(current.amountCentavos, "stored payment amount");
+    const refundedCentavos = nonNegativeInteger(current.refundedCentavos ?? 0, "refunded amount");
+    const pendingCentavos = nonNegativeInteger(current.pendingRefundCentavos ?? 0, "pending refund amount");
+    const nextPending = Math.max(0, pendingCentavos - args.amountCentavos);
+    const nextRefunded = args.status === "SUCCEEDED"
+      ? refundedCentavos + args.amountCentavos
+      : refundedCentavos;
+    const refundRecord = {
+      ...refund,
+      providerRefundId: args.providerRefundId,
+      status: args.status,
+      providerUpdatedAt: args.providerUpdatedAt || asString(refund.providerUpdatedAt),
+      failureCode: args.status === "FAILED" ? args.failureCode || "" : "",
+      balanceApplied: args.status === "SUCCEEDED" || args.status === "FAILED",
+      updatedAtTimestamp: Date.now(),
+    };
+    const nextPaymentStatus = args.status === "SUCCEEDED"
+      ? nextRefunded >= totalCentavos ? "REFUNDED" : "PARTIALLY_REFUNDED"
+      : asString(current.status);
+
+    return {
+      ...current,
+      refunds: { ...refunds, [args.refundAttemptId]: refundRecord },
+      pendingRefundCentavos: nextPending,
+      refundedCentavos: nextRefunded,
+      refundStatus: nextPending > 0 ? "PENDING" : args.status,
+      status: nextPaymentStatus,
+      updatedAtTimestamp: Date.now(),
+    };
+  });
+
+  if (!transaction.committed || !transaction.snapshot.exists()) return false;
+  const saved = asRecord(transaction.snapshot.val());
+  const refundQueueKey = args.entityId + "_" + args.refundAttemptId;
+  await db.ref("refundReconciliationQueue/" + refundQueueKey).remove();
+  if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(asString(saved.status))) {
+    const entityType = asString(saved.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
+    await db.ref(paymentEntityPath(entityType as GcashEntityType) + "/" + args.entityId + "/paymentStatus")
+      .set(asString(saved.status));
+  }
+  return true;
+}
+
+export const createGcashPayment = onCall(
+  { region: REGION, secrets: [XENDIT_SECRET_KEY] },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const entityType = parseGcashEntityType(data.entityType);
+    const entityId = asString(data.entityId);
+    if (!/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
+      throw new HttpsError("invalid-argument", "A valid order or trip ID is required.");
+    }
+    const clientIdempotencyKey = parseIdempotencyKey(data.idempotencyKey);
+    const attemptKey = createHash("sha256")
+      .update(uid + "|" + entityType + "|" + entityId + "|" + clientIdempotencyKey)
+      .digest("hex")
+      .slice(0, 32);
+
+    const entityPath = paymentEntityPath(entityType);
+    const entitySnapshot = await db.ref(entityPath + "/" + entityId).get();
+    if (!entitySnapshot.exists()) {
+      throw new HttpsError("not-found", "The order or trip was not found.");
+    }
+    const entity = asRecord(entitySnapshot.val());
+    if (paymentOwnerId(entityType, entity) !== uid) {
+      throw new HttpsError("permission-denied", "This payment does not belong to the signed-in customer.");
+    }
+    const amountCentavos = paymentAmountCentavos(entityType, entity);
+    const amount = phpFromCents(amountCentavos);
+    const paymentRef = db.ref("payments/" + entityId);
+    const existingSnapshot = await paymentRef.get();
+    const existingPayment = asRecord(existingSnapshot.val());
+
+    if (asString(entity.paymentStatus).toUpperCase() === "PAID" ||
+      asString(existingPayment.status).toUpperCase() === "PAID") {
+      return Object.keys(existingPayment).length > 0
+        ? toGcashPaymentResponse(entityType, entityId, existingPayment)
+        : {
+            entityId,
+            [entityType === "ORDER" ? "orderId" : "tripId"]: entityId,
+            paymentId: asString(entity.paymentId),
+            paymentStatus: "PAID",
+            amount,
+            amountCentavos,
+            checkoutUrl: null,
+            webCheckoutUrl: null,
+            checkoutActionDescriptor: null,
+            expiresAtTimestamp: 0,
+          };
+    }
+    if (
+      asString(existingPayment.status).toUpperCase() === "PENDING" &&
+      asString(existingPayment.checkoutUrl) &&
+      Number(existingPayment.expiresAtTimestamp) > Date.now()
+    ) {
+      return toGcashPaymentResponse(entityType, entityId, existingPayment);
+    }
+    if (
+      ["CREATING", "INITIATION_FAILED"].includes(asString(existingPayment.status).toUpperCase()) &&
+      asString(existingPayment.activeAttemptKey) !== attemptKey
+    ) {
+      throw new HttpsError("failed-precondition", "A GCash payment request is already being created. Retry with the same checkout request key.");
+    }
+
+    const secret = XENDIT_SECRET_KEY.value();
+    if (!secret) {
+      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
+    }
+
+    const referenceId = "labmda_" + entityType.toLowerCase() + "_" + entityId + "_" + attemptKey;
+    const providerIdempotencyKey = "labmda_gcash_" + entityType.toLowerCase() + "_" + entityId + "_" + attemptKey;
+    const now = Date.now();
+    const reservation = await paymentRef.transaction((rawValue) => {
+      const current = asRecord(rawValue);
+      const status = asString(current.status).toUpperCase();
+      if (status === "PAID" || status === "PENDING" && Number(current.expiresAtTimestamp) > now) {
+        return;
+      }
+      if (
+        ["CREATING", "INITIATION_FAILED"].includes(status) &&
+        asString(current.activeAttemptKey) !== attemptKey
+      ) {
+        return;
+      }
+      const attempts = asRecord(current.attempts);
+      const currentAttempt = asRecord(attempts[attemptKey]);
+      return {
+        ...current,
+        entityType,
+        entityId,
+        clientId: uid,
+        provider: "XENDIT",
+        channelCode: "GCASH",
+        referenceId,
+        status: "CREATING",
+        activeAttemptKey: attemptKey,
+        amount,
+        amountCentavos,
+        currency: "PHP",
+        breakdown: entity.breakdown ?? current.breakdown ?? null,
+        pricingVersion: Number(entity.pricingVersion ?? current.pricingVersion ?? 0),
+        createdAtTimestamp: Number(current.createdAtTimestamp ?? now),
+        updatedAtTimestamp: now,
+        attempts: {
+          ...attempts,
+          [attemptKey]: {
+            ...currentAttempt,
+            attemptKey,
+            status: "CREATING",
+            referenceId,
+            idempotencyKey: providerIdempotencyKey,
+            amount,
+            amountCentavos,
+            createdAtTimestamp: Number(currentAttempt.createdAtTimestamp ?? now),
+            updatedAtTimestamp: now,
+          },
+        },
+      };
+    });
+
+    if (!reservation.committed) {
+      const latestSnapshot = await paymentRef.get();
+      const latest = asRecord(latestSnapshot.val());
+      if (asString(latest.status).toUpperCase() === "PAID") {
+        return toGcashPaymentResponse(entityType, entityId, latest);
+      }
+      if (
+        asString(latest.status).toUpperCase() === "PENDING" &&
+        asString(latest.checkoutUrl)
+      ) {
+        return toGcashPaymentResponse(entityType, entityId, latest);
+      }
+      throw new HttpsError("failed-precondition", "This payment already has an active GCash checkout. Reuse its original idempotency key.");
+    }
+
+    try {
+      const provider = await createXenditGcashRequest({
+        referenceId,
+        amount,
+        description: (entityType === "ORDER" ? "Labmda order " : "Labmda ride ") + entityId,
+        entityType,
+        entityId,
+        clientId: uid,
+        idempotencyKey: providerIdempotencyKey,
+      });
+      const timestamp = Date.now();
+      const status = mapProviderPaymentStatus(provider.status) ?? "PENDING";
+      const expiresAtTimestamp = timestamp + 15 * 60 * 1000;
+      const merchantId = entityType === "ORDER" ? asString(entity.merchantId) : "";
+      const payment = {
+        entityType,
+        entityId,
+        clientId: uid,
+        merchantId,
+        provider: "XENDIT",
+        channelCode: "GCASH",
+        providerReference: provider.paymentId,
+        providerPaymentId: "",
+        referenceId,
+        status,
+        amount,
+        amountCentavos,
+        currency: "PHP",
+        breakdown: entity.breakdown ?? null,
+        pricingVersion: Number(entity.pricingVersion ?? 0),
+        checkoutUrl: provider.checkoutUrl,
+        webCheckoutUrl: provider.webCheckoutUrl,
+        checkoutActionDescriptor: provider.checkoutActionDescriptor,
+        expiresAtTimestamp,
+        activeAttemptKey: attemptKey,
+        createdAtTimestamp: Number(asRecord(reservation.snapshot.val()).createdAtTimestamp ?? timestamp),
+        updatedAtTimestamp: timestamp,
+        attempts: {
+          ...asRecord(asRecord(reservation.snapshot.val()).attempts),
+          [attemptKey]: {
+            attemptKey,
+            referenceId,
+            providerReference: provider.paymentId,
+            providerPaymentId: "",
+            status,
+            amount,
+            amountCentavos,
+            checkoutUrl: provider.checkoutUrl,
+            webCheckoutUrl: provider.webCheckoutUrl,
+            checkoutActionDescriptor: provider.checkoutActionDescriptor,
+            expiresAtTimestamp,
+            createdAtTimestamp: timestamp,
+            updatedAtTimestamp: timestamp,
+          },
+        },
+      };
+
+      const updates: Record<string, unknown> = {};
+      updates["payments/" + entityId] = payment;
+      updates[entityPath + "/" + entityId + "/paymentMethod"] = "GCASH";
+      updates[entityPath + "/" + entityId + "/paymentStatus"] = status;
+      updates[entityPath + "/" + entityId + "/paymentId"] = provider.paymentId;
+      if (["PENDING", "CREATING"].includes(status)) {
+        updates["paymentReconciliationQueue/" + entityId] = {
+          dueAtTimestamp: timestamp + 2 * 60 * 1000,
+          createdAtTimestamp: timestamp,
+          attempts: 0,
+        };
+      }
+      await db.ref().update(updates);
+      logger.info("Created Xendit GCash payment request", {
+        entityType,
+        entityId,
+        paymentRequestId: provider.paymentId,
+        amountCentavos,
+      });
+      return toGcashPaymentResponse(entityType, entityId, payment);
+    } catch (error) {
+      const failureTimestamp = Date.now();
+      const failure = {
+        status: "INITIATION_FAILED",
+        failureStage: "PAYMENT_REQUEST_CREATION",
+        updatedAtTimestamp: failureTimestamp,
+      };
+      const updates: Record<string, unknown> = {};
+      updates["payments/" + entityId + "/status"] = failure.status;
+      updates["payments/" + entityId + "/failureStage"] = failure.failureStage;
+      updates["payments/" + entityId + "/updatedAtTimestamp"] = failureTimestamp;
+      updates["payments/" + entityId + "/attempts/" + attemptKey + "/status"] = failure.status;
+      updates["payments/" + entityId + "/attempts/" + attemptKey + "/updatedAtTimestamp"] = failureTimestamp;
+      updates[entityPath + "/" + entityId + "/paymentStatus"] = failure.status;
+      await db.ref().update(updates);
+      logger.error("Could not create Xendit GCash payment request", { entityType, entityId, error });
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("unavailable", "GCash checkout could not be started. Retry the same checkout request.");
+    }
+  }
+);
+
+export const refundPayment = onCall(
+  { region: REGION, secrets: [XENDIT_SECRET_KEY] },
+  async (request) => {
+    const adminUid = requireAdmin(request);
+    const data = asRecord(request.data);
+    const entityType = parseGcashEntityType(data.entityType);
+    const entityId = asString(data.entityId);
+    if (!/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
+      throw new HttpsError("invalid-argument", "A valid order or trip ID is required.");
+    }
+    const idempotencyKey = parseIdempotencyKey(data.idempotencyKey);
+    const refundAttemptId = createHash("sha256")
+      .update(adminUid + "|" + entityType + "|" + entityId + "|" + idempotencyKey)
+      .digest("hex")
+      .slice(0, 32);
+    const reasonValue = asString(data.reason).toUpperCase() || "REQUESTED_BY_CUSTOMER";
+    const validReasons = ["FRAUDULENT", "DUPLICATE", "REQUESTED_BY_CUSTOMER", "CANCELLATION", "OTHERS"];
+    if (!validReasons.includes(reasonValue)) {
+      throw new HttpsError("invalid-argument", "Unsupported refund reason.");
+    }
+    const requestedAmount = data.amountCentavos === undefined || data.amountCentavos === null
+      ? null
+      : nonNegativeInteger(data.amountCentavos, "refund amount in centavos");
+
+    const paymentRef = db.ref("payments/" + entityId);
+    const existingSnapshot = await paymentRef.get();
+    if (!existingSnapshot.exists()) {
+      throw new HttpsError("not-found", "The payment record was not found.");
+    }
+    const existingPayment = asRecord(existingSnapshot.val());
+    const existingRefund = asRecord(asRecord(existingPayment.refunds)[refundAttemptId]);
+    if (
+      existingRefund.providerRefundId &&
+      ["PENDING", "SUCCEEDED", "FAILED"].includes(asString(existingRefund.status))
+    ) {
+      return {
+        entityId,
+        refundId: asString(existingRefund.providerRefundId),
+        refundStatus: asString(existingRefund.status),
+        amountCentavos: Number(existingRefund.amountCentavos ?? 0),
+      };
+    }
+    if (
+      asString(existingPayment.provider) !== "XENDIT" ||
+      !asString(existingPayment.providerPaymentId)
+    ) {
+      throw new HttpsError("failed-precondition", "Refunds require a provider-confirmed Xendit payment ID.");
+    }
+    const paidAtTimestamp = Number(existingPayment.paidAtTimestamp ?? 0);
+    const gcashRefundWindowMs = 180 * 24 * 60 * 60 * 1000;
+    if (paidAtTimestamp > 0 && Date.now() - paidAtTimestamp > gcashRefundWindowMs) {
+      throw new HttpsError("failed-precondition", "The Xendit GCash refund window of 180 days has elapsed.");
+    }
+
+    const secret = XENDIT_SECRET_KEY.value();
+    if (!secret) {
+      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
+    }
+
+    let reservedAmountCentavos = 0;
+    let reservationError = "";
+    const referenceId = "refund_" + entityId + "_" + refundAttemptId;
+    const reservation = await paymentRef.transaction((rawValue) => {
+      const current = asRecord(rawValue);
+      if (asString(current.provider) !== "XENDIT" || !asString(current.providerPaymentId)) {
+        reservationError = "Refunds require a provider-confirmed Xendit payment ID.";
+        return;
+      }
+      if (!["PAID", "PARTIALLY_REFUNDED"].includes(asString(current.status).toUpperCase())) {
+        reservationError = "Only a paid, not-fully-refunded payment can be refunded.";
+        return;
+      }
+
+      const refunds = asRecord(current.refunds);
+      const saved = asRecord(refunds[refundAttemptId]);
+      if (Object.keys(saved).length > 0) {
+        reservedAmountCentavos = Number(saved.amountCentavos ?? 0);
+        return current;
+      }
+
+      const total = nonNegativeInteger(current.amountCentavos, "payment amount");
+      const refunded = nonNegativeInteger(current.refundedCentavos ?? 0, "already-refunded amount");
+      const pending = nonNegativeInteger(current.pendingRefundCentavos ?? 0, "pending refund amount");
+      const available = total - refunded - pending;
+      reservedAmountCentavos = requestedAmount ?? available;
+      if (reservedAmountCentavos <= 0 || reservedAmountCentavos > available) {
+        reservationError = "The requested refund is greater than the remaining refundable balance.";
+        return;
+      }
+
+      const timestamp = Date.now();
+      return {
+        ...current,
+        pendingRefundCentavos: pending + reservedAmountCentavos,
+        refundStatus: "PENDING",
+        refunds: {
+          ...refunds,
+          [refundAttemptId]: {
+            refundAttemptId,
+            referenceId,
+            providerPaymentId: asString(current.providerPaymentId),
+            status: "CREATING",
+            amountCentavos: reservedAmountCentavos,
+            amount: phpFromCents(reservedAmountCentavos),
+            currency: "PHP",
+            reason: reasonValue,
+            createdBy: adminUid,
+            createdAtTimestamp: timestamp,
+            updatedAtTimestamp: timestamp,
+          },
+        },
+        updatedAtTimestamp: timestamp,
+      };
+    });
+
+    if (!reservation.committed || reservationError) {
+      throw new HttpsError("failed-precondition", reservationError || "The refund could not be reserved.");
+    }
+
+    const savedAfterReservation = asRecord(reservation.snapshot.val());
+    const savedRefund = asRecord(asRecord(savedAfterReservation.refunds)[refundAttemptId]);
+    if (asString(savedRefund.providerRefundId)) {
+      return {
+        entityId,
+        refundId: asString(savedRefund.providerRefundId),
+        refundStatus: asString(savedRefund.status),
+        amountCentavos: Number(savedRefund.amountCentavos ?? 0),
+      };
+    }
+
+    const providerPaymentId = asString(savedAfterReservation.providerPaymentId);
+    const providerIdempotencyKey = "labmda_refund_" + entityId + "_" + refundAttemptId;
+    const refundAmount = phpFromCents(reservedAmountCentavos);
+
+    try {
+      const response = await fetch("https://api.xendit.co/v3/refunds", {
+        method: "POST",
+        headers: xenditHeaders(secret, providerIdempotencyKey),
+        body: JSON.stringify({
+          reference_id: referenceId,
+          payment_id: providerPaymentId,
+          amount: refundAmount,
+          reason: reasonValue,
+          metadata: { entity_type: entityType, entity_id: entityId },
+        }),
+      });
+      const providerBody = asRecord(await response.json().catch(() => ({})));
+      if (!response.ok) {
+        logger.error("Xendit refund request failed", { entityId, status: response.status, response: providerBody });
+        // An explicit provider rejection is terminal. Release the reservation so the
+        // administrator's remaining refundable balance is not stranded.
+        await applyXenditRefundStatus({
+          entityId,
+          refundAttemptId,
+          referenceId,
+          providerRefundId: "",
+          providerPaymentId,
+          status: "FAILED",
+          amountCentavos: reservedAmountCentavos,
+          providerUpdatedAt: new Date().toISOString(),
+          failureCode: asString(providerBody.error_code) || "REFUND_REQUEST_REJECTED",
+        });
+        throw new HttpsError("unavailable", "Xendit rejected the refund. Review the reason and retry with a new refund request key.");
+      }
+
+      const providerRefundId = asString(providerBody.refund_id) || asString(providerBody.id);
+      const providerStatus = asString(providerBody.status).toUpperCase();
+      if (!providerRefundId) {
+        throw new HttpsError("unavailable", "Xendit did not return a refund ID.");
+      }
+      const refundStatus: "SUCCEEDED" | "FAILED" | "PENDING" =
+        providerStatus === "SUCCEEDED" ? "SUCCEEDED" :
+          providerStatus === "FAILED" ? "FAILED" : "PENDING";
+      // Store the provider ID first, but do not mark terminal status before the
+      // transactional balance update below. The webhook can race this response.
+      await paymentRef.child("refunds").child(refundAttemptId).update({
+        providerRefundId,
+        updatedAtTimestamp: Date.now(),
+      });
+
+      if (refundStatus === "PENDING") {
+        await paymentRef.child("refunds").child(refundAttemptId).transaction((rawValue) => {
+          const current = asRecord(rawValue);
+          if (["SUCCEEDED", "FAILED"].includes(asString(current.status).toUpperCase())) {
+            return current;
+          }
+          return {
+            ...current,
+            status: "PENDING",
+            updatedAtTimestamp: Date.now(),
+          };
+        });
+        const latestRefund = asRecord((await paymentRef.child("refunds").child(refundAttemptId).get()).val());
+        if (!["SUCCEEDED", "FAILED"].includes(asString(latestRefund.status).toUpperCase())) {
+          await db.ref("refundReconciliationQueue/" + entityId + "_" + refundAttemptId).set({
+            entityId,
+            refundAttemptId,
+            providerRefundId,
+            referenceId,
+            dueAtTimestamp: Date.now() + 2 * 60 * 1000,
+            attempts: 0,
+          });
+        }
+      } else {
+        await applyXenditRefundStatus({
+          entityId,
+          refundAttemptId,
+          referenceId,
+          providerRefundId,
+          providerPaymentId,
+          status: refundStatus,
+          amountCentavos: reservedAmountCentavos,
+          providerUpdatedAt: asString(providerBody.updated),
+          failureCode: asString(providerBody.failure_code),
+        });
+      }
+
+      return {
+        entityId,
+        refundId: providerRefundId,
+        refundStatus,
+        amountCentavos: reservedAmountCentavos,
+      };
+    } catch (error) {
+      logger.error("Could not create Xendit refund", { entityId, refundAttemptId, error });
+      if (error instanceof HttpsError) throw error;
+      throw new HttpsError("unavailable", "The refund request could not be completed. Retry using the same refund request key.");
+    }
+  }
+);
+
+export const xenditPaymentWebhook = onRequest(
+  { region: REGION, secrets: [XENDIT_WEBHOOK_TOKEN] },
+  async (request, response) => {
+    if (request.method !== "POST") {
+      response.status(405).send("Method not allowed");
+      return;
+    }
+    if (!validCallbackToken(asString(request.get("x-callback-token")), XENDIT_WEBHOOK_TOKEN.value())) {
+      response.status(401).send("Invalid callback token");
+      return;
+    }
+
+    const body = asRecord(request.body);
+    const data = asRecord(body.data);
+    const event = asString(body.event).toLowerCase();
+    const referenceId = asString(data.reference_id);
+
+    if (event === "refund.succeeded" || event === "refund.failed") {
+      const match = /^refund_(.+)_([a-f0-9]{32})$/i.exec(referenceId);
+      if (!match) {
+        response.status(200).send("Ignored unrelated refund event");
+        return;
+      }
+      const entityId = match[1];
+      const refundAttemptId = match[2];
+      const paymentSnapshot = await db.ref("payments/" + entityId).get();
+      if (!paymentSnapshot.exists()) {
+        response.status(503).send("Refund payment record not ready");
+        return;
+      }
+      const payment = asRecord(paymentSnapshot.val());
+      const refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
+      const providerAmount = centsFromProviderAmount(data.amount);
+      if (
+        asString(data.currency).toUpperCase() !== "PHP" ||
+        providerAmount === null ||
+        providerAmount !== Number(refund.amountCentavos) ||
+        asString(data.payment_id) !== asString(payment.providerPaymentId) ||
+        (asString(refund.providerRefundId) &&
+          asString(data.refund_id) !== asString(refund.providerRefundId))
+      ) {
+        logger.error("Xendit refund webhook did not match the stored refund", { referenceId });
+        response.status(400).send("Refund details mismatch");
+        return;
+      }
+      const applied = await applyXenditRefundStatus({
+        entityId,
+        refundAttemptId,
+        referenceId,
+        providerRefundId: asString(data.refund_id),
+        providerPaymentId: asString(data.payment_id),
+        status: event === "refund.succeeded" ? "SUCCEEDED" : "FAILED",
+        amountCentavos: providerAmount,
+        providerUpdatedAt: asString(data.updated) || asString(body.created),
+        failureCode: asString(data.failure_code),
+      });
+      if (!applied) {
+        response.status(503).send("Refund update could not be applied");
+        return;
+      }
+      response.status(200).send("OK");
+      return;
+    }
+
+    const metadata = asRecord(data.metadata);
+    let entityTypeValue = asString(metadata.entity_type).toUpperCase();
+    let entityId = asString(metadata.entity_id);
+    if (!["ORDER", "TRIP"].includes(entityTypeValue)) {
+      const match = /^labmda_(order|trip)_(.+)_([a-f0-9]{32})$/i.exec(referenceId);
+      if (match) {
+        entityTypeValue = match[1].toUpperCase();
+        entityId = match[2];
+      }
+    }
+    if (!["ORDER", "TRIP"].includes(entityTypeValue) || !/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
+      response.status(200).send("Ignored unrelated payment event");
+      return;
+    }
+    const entityType = entityTypeValue as GcashEntityType;
+    const paymentRequestId = asString(data.payment_request_id);
+    const paymentSnapshot = await db.ref("payments/" + entityId).get();
+    if (!paymentSnapshot.exists()) {
+      logger.warn("Xendit payment webhook arrived before the payment record existed", { referenceId, event });
+      response.status(503).send("Payment record not ready");
+      return;
+    }
+    const payment = asRecord(paymentSnapshot.val());
+    if (
+      asString(payment.provider) !== "XENDIT" ||
+      asString(payment.referenceId) !== referenceId ||
+      asString(payment.channelCode).toUpperCase() !== "GCASH"
+    ) {
+      response.status(400).send("Payment reference mismatch");
+      return;
+    }
+    // Xendit may emit the event before the callable has saved the response ID.
+    // Return a retryable response while the reserved attempt is finalized.
+    if (!asString(payment.providerReference)) {
+      response.status(503).send("Payment request is still being finalized");
+      return;
+    }
+    if (asString(payment.providerReference) !== paymentRequestId) {
+      response.status(400).send("Payment request ID mismatch");
+      return;
+    }
+
+    const amount = centsFromProviderAmount(data.request_amount);
+    const currency = asString(data.currency).toUpperCase();
+    const country = asString(data.country).toUpperCase();
+    const channelCode = asString(data.channel_code).toUpperCase();
+    if (
+      (event === "payment.capture" &&
+        (amount === null || currency !== "PHP" || country !== "PH" || channelCode !== "GCASH")) ||
+      (amount !== null && amount !== Number(payment.amountCentavos)) ||
+      (currency && currency !== "PHP") ||
+      (country && country !== "PH") ||
+      (channelCode && channelCode !== "GCASH")
+    ) {
+      logger.error("Xendit payment webhook amount or channel did not match the stored payment", { referenceId });
+      response.status(400).send("Payment details mismatch");
+      return;
+    }
+
+    let nextStatus: GcashTerminalStatus | null = null;
+    if (event === "payment.capture") nextStatus = "PAID";
+    else if (event === "payment.failure") nextStatus = mapProviderPaymentStatus(data.status) ?? "FAILED";
+    else if (event === "payment_request.expiry") nextStatus = "EXPIRED";
+    else nextStatus = mapProviderPaymentStatus(data.status);
+    if (!nextStatus) {
+      response.status(200).send("Non-terminal payment event acknowledged");
+      return;
+    }
+
+    const applied = await applyXenditPaymentStatus({
+      entityType,
+      entityId,
+      paymentRequestId,
+      referenceId,
+      status: nextStatus,
+      providerPaymentId: asString(data.payment_id),
+      providerUpdatedAt: asString(data.updated) || asString(body.created),
+      failureCode: asString(data.failure_code),
+    });
+    if (!applied) {
+      response.status(503).send("Payment update could not be applied");
+      return;
+    }
+    response.status(200).send("OK");
+  }
+);
+
+export const reconcilePendingPayments = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "Asia/Manila",
+    region: REGION,
+    secrets: [XENDIT_SECRET_KEY],
+  },
+  async () => {
+    const secret = XENDIT_SECRET_KEY.value();
+    if (!secret) {
+      logger.error("Payment reconciliation skipped because Xendit secret is not configured");
+      return;
+    }
+    const now = Date.now();
+
+    const pendingPayments = await db.ref("paymentReconciliationQueue")
+      .orderByChild("dueAtTimestamp")
+      .endAt(now)
+      .limitToFirst(100)
+      .get();
+    const paymentEntries: Array<{ key: string; value: Record<string, unknown> }> = [];
+    pendingPayments.forEach((snapshot) => {
+      if (snapshot.key) paymentEntries.push({ key: snapshot.key, value: asRecord(snapshot.val()) });
+      return false;
+    });
+
+    for (const child of paymentEntries) {
+      const entityId = child.key;
+      const queueRef = db.ref("paymentReconciliationQueue/" + entityId);
+      const paymentSnapshot = await db.ref("payments/" + entityId).get();
+      if (!paymentSnapshot.exists()) {
+        await queueRef.remove();
+        continue;
+      }
+      const payment = asRecord(paymentSnapshot.val());
+      if (
+        asString(payment.provider) !== "XENDIT" ||
+        asString(payment.channelCode).toUpperCase() !== "GCASH"
+      ) {
+        await queueRef.remove();
+        continue;
+      }
+      const storedPaymentStatus = mapProviderPaymentStatus(payment.status);
+      if (storedPaymentStatus) {
+        const entityType = asString(payment.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
+        await applyXenditPaymentStatus({
+          entityType,
+          entityId,
+          paymentRequestId: asString(payment.providerReference),
+          referenceId: asString(payment.referenceId),
+          status: storedPaymentStatus,
+          providerPaymentId: asString(payment.providerPaymentId),
+          providerUpdatedAt: asString(payment.providerUpdatedAt),
+          failureCode: asString(payment.failureCode),
+        });
+        continue;
+      }
+      if (asString(payment.status).toUpperCase() !== "PENDING") {
+        await queueRef.remove();
+        continue;
+      }
+
+      try {
+        const paymentRequestId = asString(payment.providerReference);
+        const response = await fetch(
+          "https://api.xendit.co/v3/payment_requests/" + encodeURIComponent(paymentRequestId),
+          { method: "GET", headers: xenditHeaders(secret) }
+        );
+        const provider = asRecord(await response.json().catch(() => ({})));
+        if (!response.ok) {
+          throw new Error("Xendit status lookup returned HTTP " + response.status);
+        }
+        const amount = centsFromProviderAmount(provider.request_amount);
+        if (
+          asString(provider.payment_request_id) !== paymentRequestId ||
+          asString(provider.reference_id) !== asString(payment.referenceId) ||
+          amount !== Number(payment.amountCentavos) ||
+          asString(provider.currency).toUpperCase() !== "PHP" ||
+          asString(provider.channel_code).toUpperCase() !== "GCASH"
+        ) {
+          throw new Error("Xendit status lookup did not match the stored payment.");
+        }
+
+        const status = mapProviderPaymentStatus(provider.status);
+        if (status) {
+          const entityType = asString(payment.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
+          await applyXenditPaymentStatus({
+            entityType,
+            entityId,
+            paymentRequestId,
+            referenceId: asString(payment.referenceId),
+            status,
+            providerPaymentId: asString(provider.latest_payment_id),
+            providerUpdatedAt: asString(provider.updated),
+            failureCode: asString(provider.failure_code),
+          });
+        } else {
+          const attempts = Number(child.value.attempts ?? 0) + 1;
+          await queueRef.update({
+            attempts,
+            lastCheckedAtTimestamp: now,
+            dueAtTimestamp: now + 5 * 60 * 1000,
+          });
+        }
+      } catch (error) {
+        logger.warn("Payment reconciliation lookup failed", { entityId, error });
+        const queue = child.value;
+        const attempts = Number(queue.attempts ?? 0) + 1;
+        const backoffMinutes = Math.min(30, 5 * Math.pow(2, Math.min(attempts, 2)));
+        await queueRef.update({
+          attempts,
+          lastCheckedAtTimestamp: now,
+          dueAtTimestamp: now + backoffMinutes * 60 * 1000,
+        });
+      }
+    }
+
+    const pendingRefunds = await db.ref("refundReconciliationQueue")
+      .orderByChild("dueAtTimestamp")
+      .endAt(now)
+      .limitToFirst(100)
+      .get();
+    const refundEntries: Array<{ key: string; value: Record<string, unknown> }> = [];
+    pendingRefunds.forEach((snapshot) => {
+      if (snapshot.key) refundEntries.push({ key: snapshot.key, value: asRecord(snapshot.val()) });
+      return false;
+    });
+
+    for (const child of refundEntries) {
+      const childQueueRef = db.ref("refundReconciliationQueue/" + child.key);
+      const queue = child.value;
+      const entityId = asString(queue.entityId);
+      const refundAttemptId = asString(queue.refundAttemptId);
+      const providerRefundId = asString(queue.providerRefundId);
+      const referenceId = asString(queue.referenceId);
+      if (!entityId || !refundAttemptId || !providerRefundId) {
+        await childQueueRef.remove();
+        continue;
+      }
+      const paymentSnapshot = await db.ref("payments/" + entityId).get();
+      if (!paymentSnapshot.exists()) {
+        await childQueueRef.remove();
+        continue;
+      }
+      const payment = asRecord(paymentSnapshot.val());
+      const refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
+      const storedRefundStatus = asString(refund.status).toUpperCase();
+      if (storedRefundStatus === "SUCCEEDED" || storedRefundStatus === "FAILED") {
+        await applyXenditRefundStatus({
+          entityId,
+          refundAttemptId,
+          referenceId,
+          providerRefundId: asString(refund.providerRefundId) || providerRefundId,
+          providerPaymentId: asString(payment.providerPaymentId),
+          status: storedRefundStatus,
+          amountCentavos: nonNegativeInteger(refund.amountCentavos, "stored refund amount"),
+          providerUpdatedAt: asString(refund.providerUpdatedAt),
+          failureCode: asString(refund.failureCode),
+        });
+        continue;
+      }
+
+      try {
+        const response = await fetch(
+          "https://api.xendit.co/v3/refunds/" + encodeURIComponent(providerRefundId),
+          { method: "GET", headers: xenditHeaders(secret) }
+        );
+        const provider = asRecord(await response.json().catch(() => ({})));
+        if (!response.ok) {
+          throw new Error("Xendit refund lookup returned HTTP " + response.status);
+        }
+        const amount = centsFromProviderAmount(provider.amount);
+        if (
+          asString(provider.refund_id) !== providerRefundId ||
+          asString(provider.reference_id) !== referenceId ||
+          asString(provider.payment_id) !== asString(payment.providerPaymentId) ||
+          amount !== Number(refund.amountCentavos) ||
+          asString(provider.currency).toUpperCase() !== "PHP"
+        ) {
+          throw new Error("Xendit refund lookup did not match the stored refund.");
+        }
+        const statusValue = asString(provider.status).toUpperCase();
+        if (statusValue === "SUCCEEDED" || statusValue === "FAILED") {
+          await applyXenditRefundStatus({
+            entityId,
+            refundAttemptId,
+            referenceId,
+            providerRefundId,
+            providerPaymentId: asString(provider.payment_id),
+            status: statusValue,
+            amountCentavos: amount,
+            providerUpdatedAt: asString(provider.updated),
+            failureCode: asString(provider.failure_code),
+          });
+        } else {
+          const attempts = Number(queue.attempts ?? 0) + 1;
+          await childQueueRef.update({
+            attempts,
+            lastCheckedAtTimestamp: now,
+            dueAtTimestamp: now + 5 * 60 * 1000,
+          });
+        }
+      } catch (error) {
+        logger.warn("Refund reconciliation lookup failed", { entityId, providerRefundId, error });
+        const attempts = Number(queue.attempts ?? 0) + 1;
+        const backoffMinutes = Math.min(30, 5 * Math.pow(2, Math.min(attempts, 2)));
+        await childQueueRef.update({
+          attempts,
+          lastCheckedAtTimestamp: now,
+          dueAtTimestamp: now + backoffMinutes * 60 * 1000,
+        });
+      }
+    }
+
+    logger.info("Xendit payment reconciliation finished", {
+      paymentCandidates: pendingPayments.numChildren(),
+      refundCandidates: pendingRefunds.numChildren(),
+    });
   }
 );

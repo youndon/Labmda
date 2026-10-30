@@ -11,6 +11,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class PaymentStatus {
     UNPAID,
+    CREATING,
+    INITIATION_FAILED,
     PENDING,
     PAID,
     FAILED,
