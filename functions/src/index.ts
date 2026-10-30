@@ -3261,9 +3261,11 @@ async function ensureImmutableCashLedgerEntry(
   entry: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
   const entryRef = db.ref("cashLedgerEntries/" + entryId);
+  const payloadHash = createHash("sha256").update(JSON.stringify(entry)).digest("hex");
+  const immutableEntry = { ...entry, payloadHash };
   const transaction = await entryRef.transaction((currentValue) => {
     if (currentValue !== null && currentValue !== undefined) return;
-    return entry;
+    return immutableEntry;
   });
   if (transaction.committed && transaction.snapshot.exists()) {
     return asRecord(transaction.snapshot.val());
@@ -3273,9 +3275,10 @@ async function ensureImmutableCashLedgerEntry(
   if (
     !existingSnapshot.exists() ||
     asString(existing.operationId) !== asString(entry.operationId) ||
-    Number(existing.totalCentavos) !== Number(entry.totalCentavos)
+    Number(existing.totalCentavos) !== Number(entry.totalCentavos) ||
+    asString(existing.payloadHash) !== payloadHash
   ) {
-    throw new HttpsError("data-loss", "An immutable cash ledger entry ID already exists with different data.");
+    throw new HttpsError("data-loss", "An immutable cash ledger entry ID already exists with different accounting data.");
   }
   return existing;
 }
@@ -3492,7 +3495,8 @@ async function finalizeCashRemittance(
       const current = asRecord(currentValue);
       if (
         asString(current.operationId) !== asString(remittance.operationId) ||
-        Number(current.amountCentavos) !== Number(remittance.amountCentavos)
+        Number(current.amountCentavos) !== Number(remittance.amountCentavos) ||
+        asString(current.collectionId) !== asString(remittance.collectionId)
       ) return;
       return {
         ...current,
@@ -3504,8 +3508,16 @@ async function finalizeCashRemittance(
       operationId: asString(remittance.operationId),
     };
   });
-  if (!transaction.committed && !transaction.snapshot.exists()) {
-    throw new HttpsError("data-loss", "The cash remittance record conflicts with an earlier operation.");
+  if (!transaction.committed) {
+    const existing = asRecord(transaction.snapshot.val());
+    if (
+      !transaction.snapshot.exists() ||
+      asString(existing.operationId) !== asString(remittance.operationId) ||
+      Number(existing.amountCentavos) !== Number(remittance.amountCentavos) ||
+      asString(existing.collectionId) !== asString(remittance.collectionId)
+    ) {
+      throw new HttpsError("data-loss", "The cash remittance record conflicts with an earlier operation.");
+    }
   }
 
   const entityPath = cashEntityPath(asString(collection.entityType).toUpperCase() as CashEntityType);
