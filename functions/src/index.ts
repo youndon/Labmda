@@ -592,21 +592,43 @@ function phpFromCents(centavos: number): number {
 }
 
 function roundCentavos(amount: number, increment: number, mode: RoundingMode): number {
-  const units = amount / increment;
+  const units = Math.floor(amount / increment);
+  const remainder = amount % increment;
   const roundedUnits = mode === "CEIL"
-    ? Math.ceil(units)
+    ? units + (remainder > 0 ? 1 : 0)
     : mode === "FLOOR"
-      ? Math.floor(units)
-      : Math.round(units);
-  return roundedUnits * increment;
+      ? units
+      : units + (remainder * 2 >= increment ? 1 : 0);
+  const result = roundedUnits * increment;
+  if (!Number.isSafeInteger(result)) {
+    throw new HttpsError("failed-precondition", "Rounded price exceeds the supported centavo range.");
+  }
+  return result;
+}
+
+function roundPositiveRatio(numerator: bigint, denominator: bigint, field: string): number {
+  const rounded = (numerator + denominator / 2n) / denominator;
+  const result = Number(rounded);
+  if (!Number.isSafeInteger(result)) {
+    throw new HttpsError("failed-precondition", field + " exceeds the supported centavo range.");
+  }
+  return result;
 }
 
 function commissionCentavos(amountCentavos: number, basisPoints: number): number {
-  return Math.round(amountCentavos * basisPoints / 10000);
+  return roundPositiveRatio(
+    BigInt(amountCentavos) * BigInt(basisPoints),
+    10000n,
+    "Commission"
+  );
 }
 
 function calculateDeliveryFeeCentavos(distanceMeters: number, rule: DeliveryPricingRule): number {
-  const distanceCharge = Math.round(rule.pricePerKmCentavos * distanceMeters / 1000);
+  const distanceCharge = roundPositiveRatio(
+    BigInt(rule.pricePerKmCentavos) * BigInt(distanceMeters),
+    1000n,
+    "Delivery distance charge"
+  );
   const rounded = roundCentavos(
     rule.baseFeeCentavos + distanceCharge,
     rule.roundingIncrementCentavos,
@@ -620,7 +642,11 @@ function calculateRideFareCentavos(
   rule: RidePricingRule,
   sharedRideChargeCentavos: number
 ): { fareCentavos: number; optionalChargesCentavos: number } {
-  const perKm = Math.round(rule.pricePerKmCentavos * distanceMeters / 1000);
+  const perKm = roundPositiveRatio(
+    BigInt(rule.pricePerKmCentavos) * BigInt(distanceMeters),
+    1000n,
+    "Ride distance charge"
+  );
   const optionalChargesCentavos =
     sharedRideChargeCentavos +
     rule.additionalCharges.reduce((sum, charge) => sum + charge.amountCentavos, 0);
