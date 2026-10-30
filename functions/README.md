@@ -57,9 +57,12 @@ npm --prefix functions run serve
 ```
 
 The script builds TypeScript and starts the Functions, Realtime Database and Auth emulators
-with the demo project ID `demo-labmda`, so local requests do not target your production
-Firebase project. Emulator ports are configured in the root `firebase.json`: Functions
-5001, Realtime Database 9000, Auth 9099, and Emulator UI 4000.
+using the separate `firebase.emulator.json` and demo project ID `demo-labmda`, so local
+requests do not target your production Firebase project. Emulator ports are configured there:
+Functions 5001, Realtime Database 9000, Auth 9099, and Emulator UI 4000. The emulator uses
+`database.emulator.rules.json`, which denies direct client reads/writes; server Functions use
+the Admin SDK and can still access the emulator database. Production deployment uses only
+`firebase.json` and does not deploy the emulator-only rules.
 
 For local secret-backed functions, copy `functions/.secret.local.example` to
 `functions/.secret.local` and fill in test credentials. The real `.secret.local` file is
