@@ -4097,61 +4097,77 @@ async function applyPayoutWalletTerminal(
   payoutId: string,
   amountCentavos: number,
   terminal: "SUCCEEDED" | "FAILED" | "REVERSED"
-): Promise<void> {
+): Promise<{ refundRecoveredCentavos: number }> {
   const walletRef = db.ref("wallets/" + uid);
   const eventId = "payout_" + terminal.toLowerCase() + "_" + payoutId;
   let errorMessage = "";
+  let refundRecoveredCentavos = 0;
   const transaction = await walletRef.transaction((rawValue) => {
     const current = asRecord(rawValue);
     const applied = asRecord(current.appliedLedgerEntries);
+    const terminalEvents = asRecord(current.payoutTerminalEvents);
+    const priorEvent = asRecord(terminalEvents[eventId]);
     const next: Record<string, unknown> = { ...current, currency: "PHP", updatedAtTimestamp: Date.now() };
-    if (applied[eventId] !== true) {
-      let available = walletNumber(current, "availableCentavos");
-      let pending = walletNumber(current, "pendingPayoutCentavos");
-      let paidOut = walletNumber(current, "paidOutCentavos");
-      if (terminal === "SUCCEEDED") {
-        if (pending < amountCentavos) {
-          errorMessage = "Payout pending balance is smaller than the confirmed provider payout.";
-          return;
-        }
-        pending -= amountCentavos;
-        paidOut += amountCentavos;
-      } else if (terminal === "FAILED") {
-        if (pending < amountCentavos) {
-          errorMessage = "Payout pending balance is smaller than the failed provider payout.";
-          return;
-        }
-        pending -= amountCentavos;
-        available += amountCentavos;
-      } else {
-        // A reversal can only follow a payout that was already marked successful.
-        if (paidOut < amountCentavos) {
-          errorMessage = "Paid-out balance is smaller than the reversed provider payout.";
-          return;
-        }
-        paidOut -= amountCentavos;
-        available += amountCentavos;
-      }
-      if (![available, pending, paidOut].every(Number.isSafeInteger)) {
-        errorMessage = "Payout reconciliation exceeded the supported wallet balance.";
+    if (applied[eventId] === true || Object.keys(priorEvent).length > 0) {
+      refundRecoveredCentavos = Number(priorEvent.refundRecoveredCentavos ?? 0);
+      return current;
+    }
+    let available = walletNumber(current, "availableCentavos");
+    let pending = walletNumber(current, "pendingPayoutCentavos");
+    let paidOut = walletNumber(current, "paidOutCentavos");
+    if (terminal === "SUCCEEDED") {
+      if (pending < amountCentavos) {
+        errorMessage = "Payout pending balance is smaller than the confirmed provider payout.";
         return;
       }
-      next.availableCentavos = available;
-      next.pendingPayoutCentavos = pending;
-      next.paidOutCentavos = paidOut;
-      next.appliedLedgerEntries = { ...applied, [eventId]: true };
+      pending -= amountCentavos;
+      paidOut += amountCentavos;
+    } else if (terminal === "FAILED") {
+      if (pending < amountCentavos) {
+        errorMessage = "Payout pending balance is smaller than the failed provider payout.";
+        return;
+      }
+      pending -= amountCentavos;
+      const refundDebt = walletNumber(current, "refundDebtCentavos");
+      refundRecoveredCentavos = Math.min(refundDebt, amountCentavos);
+      available += amountCentavos - refundRecoveredCentavos;
+      next.refundDebtCentavos = refundDebt - refundRecoveredCentavos;
+    } else {
+      if (paidOut < amountCentavos) {
+        errorMessage = "Paid-out balance is smaller than the reversed provider payout.";
+        return;
+      }
+      paidOut -= amountCentavos;
+      const refundDebt = walletNumber(current, "refundDebtCentavos");
+      refundRecoveredCentavos = Math.min(refundDebt, amountCentavos);
+      available += amountCentavos - refundRecoveredCentavos;
+      next.refundDebtCentavos = refundDebt - refundRecoveredCentavos;
     }
-    if (asString(current.activePayoutId) === payoutId) {
-      next.activePayoutId = null;
+    if (![available, pending, paidOut].every(Number.isSafeInteger)) {
+      errorMessage = "Payout reconciliation exceeded the supported wallet balance.";
+      return;
     }
+    next.availableCentavos = available;
+    next.pendingPayoutCentavos = pending;
+    next.paidOutCentavos = paidOut;
+    next.appliedLedgerEntries = { ...applied, [eventId]: true };
+    next.payoutTerminalEvents = {
+      ...terminalEvents,
+      [eventId]: { refundRecoveredCentavos, amountCentavos, terminal },
+    };
+    if (asString(current.activePayoutId) === payoutId) next.activePayoutId = null;
     return next;
   });
   if (errorMessage) throw new HttpsError("data-loss", errorMessage);
   if (!transaction.committed) {
     const current = asRecord((await walletRef.get()).val());
-    if (asRecord(current.appliedLedgerEntries)[eventId] === true) return;
-    throw new HttpsError("aborted", "Payout wallet reconciliation could not be committed.");
+    const terminalEvent = asRecord(asRecord(current.payoutTerminalEvents)[eventId]);
+    if (Object.keys(terminalEvent).length === 0) {
+      throw new HttpsError("aborted", "Payout wallet reconciliation could not be committed.");
+    }
+    refundRecoveredCentavos = Number(terminalEvent.refundRecoveredCentavos ?? 0);
   }
+  return { refundRecoveredCentavos };
 }
 
 type LedgerLine = {
@@ -4368,7 +4384,7 @@ async function applyCashRemittanceWalletEffects(
       lines: [
         ledgerLine("MERCHANT_PENDING_PAYABLE", merchantId, "DEBIT", merchantOwed),
         ...(availableCredit > 0 ? [ledgerLine("MERCHANT_AVAILABLE_PAYABLE", merchantId, "CREDIT", availableCredit)] : []),
-        ...(walletRelease.recoveredCentavos > 0 ? [ledgerLine("MERCHANT_REFUND_RECEIVABLE", merchantId, "CREDIT", walletRelease.recoveredCentavos)] : []),
+        ...(walletRelease.recoveredCentavos > 0 ? [ledgerLine("WALLET_REFUND_RECEIVABLE", merchantId, "CREDIT", walletRelease.recoveredCentavos)] : []),
       ],
       memo: "Release merchant cash earnings after collector remittance is complete",
       createdAtTimestamp: Number(collection.createdAtTimestamp ?? 1),
@@ -4502,7 +4518,7 @@ async function reconcileCompletedPaymentEarnings(
         const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
         const available = share.amount - recovered;
         if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
-        if (recovered > 0) lines.push(ledgerLine(share.accountType + "_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
+        if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
       }
     } else {
       lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
@@ -4510,7 +4526,7 @@ async function reconcileCompletedPaymentEarnings(
         const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
         const available = share.amount - recovered;
         if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
-        if (recovered > 0) lines.push(ledgerLine(share.accountType + "_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
+        if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
       }
       if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
     }
@@ -4717,7 +4733,7 @@ async function reconcileRefundedPaymentEarnings(entityId: string, refundAttemptI
       lines.push(ledgerLine(recipient.type + (isPending ? "_PENDING_PAYABLE" : "_AVAILABLE_PAYABLE"), recipient.uid, "DEBIT", walletResult.debitedCentavos));
     }
     if (walletResult.debtCentavos > 0) {
-      lines.push(ledgerLine(recipient.type + "_REFUND_RECEIVABLE", recipient.uid, "DEBIT", walletResult.debtCentavos));
+      lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", recipient.uid, "DEBIT", walletResult.debtCentavos));
     }
   }
   if (platformRefund > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "DEBIT", platformRefund));
@@ -5052,6 +5068,7 @@ async function applyPayoutProviderStatus(args: {
   const entryPrefix = "payout_" + args.payoutId;
 
   if (status === "SUCCEEDED") {
+    const walletResult = await applyPayoutWalletTerminal(uid, args.payoutId, amount, "SUCCEEDED");
     const entryId = entryPrefix + "_success";
     const entry = {
       operationId: "PAYOUT_SUCCESS:" + args.payoutId,
@@ -5067,10 +5084,11 @@ async function applyPayoutProviderStatus(args: {
       createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
     };
     await ensureMarketplaceLedgerEntry(entryId, entry);
-    await applyPayoutWalletTerminal(uid, args.payoutId, amount, "SUCCEEDED");
-    await payoutRef.update({ ledgerEntryId: entryId, completedAtTimestamp: Date.now() });
+    await payoutRef.update({ ledgerEntryId: entryId, successLedgerEntryId: entryId, refundRecoveredCentavos: walletResult.refundRecoveredCentavos, completedAtTimestamp: Date.now() });
     await db.ref("payoutReconciliationQueue/" + args.payoutId).remove();
   } else if (status === "FAILED" || status === "REJECTED" || status === "CANCELLED" || status === "EXPIRED") {
+    const walletResult = await applyPayoutWalletTerminal(uid, args.payoutId, amount, "FAILED");
+    const availableAfterRecovery = amount - walletResult.refundRecoveredCentavos;
     const entryId = entryPrefix + "_failed";
     const entry = {
       operationId: "PAYOUT_FAILED:" + args.payoutId,
@@ -5080,16 +5098,18 @@ async function applyPayoutProviderStatus(args: {
       totalCentavos: amount,
       lines: [
         ledgerLine("WALLET_PAYOUT_PENDING", uid, "DEBIT", amount),
-        ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", amount),
+        ...(availableAfterRecovery > 0 ? [ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", availableAfterRecovery)] : []),
+        ...(walletResult.refundRecoveredCentavos > 0 ? [ledgerLine("WALLET_REFUND_RECEIVABLE", uid, "CREDIT", walletResult.refundRecoveredCentavos)] : []),
       ],
       memo: "Return reserved wallet funds after a failed payout",
       createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
     };
     await ensureMarketplaceLedgerEntry(entryId, entry);
-    await applyPayoutWalletTerminal(uid, args.payoutId, amount, "FAILED");
-    await payoutRef.update({ ledgerEntryId: entryId, completedAtTimestamp: Date.now() });
+    await payoutRef.update({ ledgerEntryId: entryId, failureLedgerEntryId: entryId, refundRecoveredCentavos: walletResult.refundRecoveredCentavos, completedAtTimestamp: Date.now() });
     await db.ref("payoutReconciliationQueue/" + args.payoutId).remove();
   } else if (status === "REVERSED") {
+    const walletResult = await applyPayoutWalletTerminal(uid, args.payoutId, amount, "REVERSED");
+    const availableAfterRecovery = amount - walletResult.refundRecoveredCentavos;
     const entryId = entryPrefix + "_reversed";
     const entry = {
       operationId: "PAYOUT_REVERSED:" + args.payoutId,
@@ -5099,14 +5119,14 @@ async function applyPayoutProviderStatus(args: {
       totalCentavos: amount,
       lines: [
         ledgerLine("XENDIT_PAYOUT_CLEARING", "PLATFORM", "DEBIT", amount),
-        ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", amount),
+        ...(availableAfterRecovery > 0 ? [ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", availableAfterRecovery)] : []),
+        ...(walletResult.refundRecoveredCentavos > 0 ? [ledgerLine("WALLET_REFUND_RECEIVABLE", uid, "CREDIT", walletResult.refundRecoveredCentavos)] : []),
       ],
       memo: "Restore a payout returned by the recipient bank or wallet",
       createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
     };
     await ensureMarketplaceLedgerEntry(entryId, entry);
-    await applyPayoutWalletTerminal(uid, args.payoutId, amount, "REVERSED");
-    await payoutRef.update({ ledgerEntryId: entryId, reversedAtTimestamp: Date.now() });
+    await payoutRef.update({ ledgerEntryId: entryId, reversalLedgerEntryId: entryId, refundRecoveredCentavos: walletResult.refundRecoveredCentavos, reversedAtTimestamp: Date.now() });
     await db.ref("payoutReconciliationQueue/" + args.payoutId).remove();
     enqueueWalletPayout(uid);
   } else {
