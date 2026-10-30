@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -60,15 +61,16 @@ private const val BASE_FARE = 2.0
 private const val PER_KM_FARE = 1.2
 private const val MIN_FARE = 4.0
 
-private val ACTIVE_STATUSES = setOf("REQUESTED", "ACCEPTED", "IN_PROGRESS")
+private val ACTIVE_STATUSES = setOf("AWAITING_PAYMENT", "REQUESTED", "ACCEPTED", "IN_PROGRESS")
 
-class PassengerScreen : Screen {
+class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen {
 
     @SuppressLint("MissingPermission")
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
+        val uriHandler = LocalUriHandler.current
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         val screenModel = rememberScreenModel { PassengerScreenModel() }
@@ -89,8 +91,9 @@ class PassengerScreen : Screen {
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
-        var showHistory by remember { mutableStateOf(false) }
+        var showHistory by remember(openHistoryOnStart) { mutableStateOf(openHistoryOnStart) }
         var hasCenteredOnPickup by remember { mutableStateOf(false) }
+        var paymentMethod by remember { mutableStateOf("CASH") }
 
         var hasLocationPermission by remember {
             mutableStateOf(
@@ -191,13 +194,26 @@ class PassengerScreen : Screen {
                 fare = fare,
                 passengerName = name,
                 passengerPhone = phone,
-                targetDriver = driver
+                targetDriver = driver,
+                paymentMethod = paymentMethod,
+                onSuccess = { result ->
+                    destination = null
+                    destinationAddress = ""
+                    selectedDriver = null
+                    tappedDriverId = null
+                    result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                        runCatching { uriHandler.openUri(url) }
+                    }
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            "Ride requested. Server fare: ₱${"%.2f".format(result.amount)}"
+                        )
+                    }
+                },
+                onFailure = { message ->
+                    scope.launch { snackbarHostState.showSnackbar(message) }
+                }
             )
-            destination = null
-            destinationAddress = ""
-            selectedDriver = null
-            tappedDriverId = null
-            scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
         }
 
         Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { paddingValues ->
@@ -346,6 +362,18 @@ class PassengerScreen : Screen {
                                     },
                                     onSubmit = { name, phone -> submitTrip(name, phone, selectedDriver) }
                                 )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilterChip(
+                                        selected = paymentMethod == "GCASH",
+                                        onClick = { paymentMethod = "GCASH" },
+                                        label = { Text("GCash") }
+                                    )
+                                    FilterChip(
+                                        selected = paymentMethod == "CASH",
+                                        onClick = { paymentMethod = "CASH" },
+                                        label = { Text("Cash") }
+                                    )
+                                }
                             }
                         }
                     }
@@ -381,13 +409,26 @@ class PassengerScreen : Screen {
                                     fare = fare,
                                     passengerName = name,
                                     passengerPhone = phone,
-                                    targetDriver = driver
+                                    targetDriver = driver,
+                                    paymentMethod = paymentMethod,
+                                    onSuccess = { result ->
+                                        destination = null
+                                        destinationAddress = ""
+                                        selectedDriver = null
+                                        requestSheetDriver = null
+                                        result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                                            runCatching { uriHandler.openUri(url) }
+                                        }
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar(
+                                                "Trip requested with ${driver.fullName}. Server fare: ₱${"%.2f".format(result.amount)}"
+                                            )
+                                        }
+                                    },
+                                    onFailure = { message ->
+                                        scope.launch { snackbarHostState.showSnackbar(message) }
+                                    }
                                 )
-                                destination = null
-                                destinationAddress = ""
-                                selectedDriver = null
-                                requestSheetDriver = null
-                                scope.launch { snackbarHostState.showSnackbar("Trip requested with ${driver.fullName}") }
                             }
                         }
                     )
@@ -545,7 +586,7 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(fare)}",
+                        "₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -633,7 +674,7 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Distance: ${"%.1f".format(tripDistanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(fare)}",
+                        "₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -724,7 +765,7 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(fare)}",
+                        "₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -809,11 +850,17 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Fare amount", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(trip.fare)}",
+                        "₱${"%.2f".format(trip.fare)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
+
+                Text(
+                    "Payment: ${trip.paymentMethod.ifBlank { "CASH" }} · ${trip.paymentStatus.replace('_', ' ')}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 if (trip.driverId.isNotBlank()) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))

@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -39,6 +40,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
+        val uriHandler = LocalUriHandler.current
         val screenModel = rememberScreenModel { RestaurantScreenModel(restaurant) }
 
         val meals by screenModel.meals.collectAsState()
@@ -59,9 +61,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var showMapPicker by remember { mutableStateOf(false) }
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var deliveryAddress by remember { mutableStateOf("") }
-        val paymentOptions = remember(restaurant) {
-            restaurant.paymentMethods.ifEmpty { listOf("Cash on Delivery") }
-        }
+        val paymentOptions = remember { listOf("GCash", "Cash on Delivery") }
         var paymentMethod by remember { mutableStateOf(paymentOptions.first()) }
 
         val restaurantPoint = remember(restaurant) {
@@ -100,7 +100,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     }
                                 ) {
                                     Text(
-                                        "Fee: $${"%.2f".format(restaurant.deliveryFee)}",
+                                        "Fee: ₱${"%.2f".format(restaurant.deliveryFee)}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -165,7 +165,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    "$${"%.2f".format(grandTotal)}",
+                                    "₱${"%.2f".format(grandTotal)}",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -250,7 +250,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(meal.name, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
                                 Text(
-                                    "$${"%.2f".format(meal.basePrice)} × $qty = $${"%.2f".format(meal.basePrice * qty)}",
+                                    "₱${"%.2f".format(meal.basePrice)} × $qty = ₱${"%.2f".format(meal.basePrice * qty)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -329,16 +329,16 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("$${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("$${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Total Amount", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                             Text(
-                                "$${"%.2f".format(grandTotal)}",
+                                "₱${"%.2f".format(grandTotal)}",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -356,11 +356,14 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                 dropoffAddress = deliveryAddress,
                                 dropoffLat = drop.latitude,
                                 dropoffLng = drop.longitude,
-                                onSuccess = { orderId ->
+                                onSuccess = { result ->
                                     showOrderSheet = false
                                     dropoff = null
                                     deliveryAddress = ""
-                                    navigator?.push(LiveOrderTrackingScreen(orderId))
+                                    result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                                        runCatching { uriHandler.openUri(url) }
+                                    }
+                                    navigator?.push(LiveOrderTrackingScreen(result.entityId))
                                 }
                             )
                         },
@@ -443,7 +446,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         maxLines = 1
                     )
                     Text(
-                        text = "$${"%.2f".format(meal.basePrice)}",
+                        text = "₱${"%.2f".format(meal.basePrice)}",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.primary
                     )

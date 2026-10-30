@@ -2,23 +2,22 @@ package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
-import com.zouitel.presentaion.model.Order
-import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.screens.payment.PaymentCreationResult
+import com.zouitel.presentaion.screens.payment.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
-import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class RestaurantScreenModel(
     val restaurant: Restaurant,
-    private val repository: FoodRepository = FoodRepository()
+    private val repository: FoodRepository = FoodRepository(),
+    private val payments: PaymentRepository = PaymentRepository()
 ) : ScreenModel {
 
-    private val db = Firebase.database.reference()
     private val auth = Firebase.auth
 
     private val _meals = MutableStateFlow<List<Meal>>(emptyList())
@@ -66,8 +65,8 @@ class RestaurantScreenModel(
     }
 
     /**
-     * Pickup is always the restaurant's saved location; drop-off is the point the client
-     * picked on the map. Totals are computed here so the stored order is the source of truth.
+     * Only catalog IDs and quantities are sent to the backend. It reads the current catalog
+     * prices and delivery fee from Realtime Database and creates the order/payment atomically.
      */
     fun placeOrder(
         lines: List<Meal>,
@@ -75,7 +74,7 @@ class RestaurantScreenModel(
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        onSuccess: (String) -> Unit
+        onSuccess: (PaymentCreationResult) -> Unit
     ) {
         if (_isSubmitting.value) return
         val uid = auth.currentUser?.uid
@@ -88,43 +87,28 @@ class RestaurantScreenModel(
         _isSubmitting.value = true
         screenModelScope.launch {
             try {
-                val orderRef = db.child("orders").push()
-                val orderId = orderRef.key ?: System.currentTimeMillis().toString()
-
                 val items = lines.map { meal ->
-                    CartItem(
-                        id = meal.id,
-                        name = meal.name,
-                        basePrice = meal.basePrice,
-                        quantity = _quantities.value[meal.id] ?: 1
+                    mapOf(
+                        "id" to meal.id,
+                        "quantity" to (_quantities.value[meal.id] ?: 1),
+                        "specialInstructions" to ""
                     )
                 }
-                val subtotal = items.sumOf { it.totalPrice }
-                val fee = restaurant.deliveryFee
-
-                val order = Order(
-                    id = orderId,
-                    clientId = uid,
-                    orderType = OrderType.FOOD,
+                val result = payments.createOrder(
+                    idempotencyKey = UUID.randomUUID().toString(),
+                    orderType = "FOOD",
                     sourceId = restaurant.id,
-                    sourceName = restaurant.name,
                     items = items,
-                    subtotal = subtotal,
-                    deliveryFee = fee,
-                    totalPrice = subtotal + fee,
+                    paymentMethod = paymentMethod,
                     pickupLocation = restaurant.address,
                     pickupLat = restaurant.latitude,
                     pickupLng = restaurant.longitude,
                     dropoffLocation = dropoffAddress,
                     dropoffLat = dropoffLat,
-                    dropoffLng = dropoffLng,
-                    createdAtTimestamp = System.currentTimeMillis(),
-                    paymentMethod = paymentMethod
+                    dropoffLng = dropoffLng
                 )
-
-                orderRef.setValue(order)
                 clearCart()
-                onSuccess(orderId)
+                onSuccess(result)
             } catch (e: Exception) {
                 _error.value = e.message ?: "Could not place the order. Please try again."
             } finally {

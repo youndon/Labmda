@@ -10,6 +10,7 @@ enum class OrderType {
 
 @Serializable
 enum class OrderStatus {
+    AWAITING_PAYMENT,
     PLACED,
     ACCEPTED,
     PREPARING,
@@ -47,6 +48,7 @@ data class Order(
     val sourceId: String = "",
     val sourceName: String = "",
     val items: List<CartItem> = emptyList(),
+    // Monetary values are populated by the trusted backend, never by checkout UI input.
     val subtotal: Double = 0.0,
     val deliveryFee: Double = 0.0,
     val totalPrice: Double = 0.0,
@@ -59,8 +61,9 @@ data class Order(
     val dropoffLng: Double = 0.0,
     val createdAtTimestamp: Long = 0L,
     val paymentMethod: String = "",
+    val paymentStatus: String = "UNPAID",
+    val paymentId: String = "",
     val deliveryId: String = "",
     val deliveryName: String = "",
     val deliveryPhone: String = ""
-) {
-}
+)

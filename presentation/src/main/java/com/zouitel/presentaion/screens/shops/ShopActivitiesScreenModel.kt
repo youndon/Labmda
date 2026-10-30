@@ -29,8 +29,14 @@ class ShopActivitiesScreenModel : ScreenModel {
     }
 
     private fun listenToUserShopActivities() {
+        val uid = currentUserId
+        if (uid.isNullOrBlank()) {
+            _activities.value = emptyList()
+            _isLoading.value = false
+            return
+        }
         screenModelScope.launch {
-            db.child("orders").valueEvents.collect { snapshot ->
+            db.child("orders").orderByChild("clientId").equalTo(uid).valueEvents.collect { snapshot ->
                 val fetchedOrders = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
@@ -86,7 +92,9 @@ class ShopActivitiesScreenModel : ScreenModel {
                             totalPrice = totalPrice,
                             status = status,
                             createdAtTimestamp = createdAtTimestamp,
-                            paymentMethod = paymentMethod
+                            paymentMethod = paymentMethod,
+                        paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault("UNPAID"),
+                        paymentId = runCatching { child.child("paymentId").value<String>() }.getOrDefault("")
                         )
                     } catch (e: Exception) {
                         null

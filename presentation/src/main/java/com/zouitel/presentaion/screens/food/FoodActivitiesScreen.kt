@@ -163,6 +163,7 @@ class FoodActivitiesScreen : Screen {
                     Text(text = "Pickup: ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodySmall)
+                    Text(text = "Payment status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall)
 
                     if (order.deliveryName.isNotBlank()) {
                         Text(text = "Courier: ${order.deliveryName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
@@ -192,7 +193,7 @@ class FoodActivitiesScreen : Screen {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -207,7 +208,7 @@ class FoodActivitiesScreen : Screen {
                 ) {
                     Text("Total Amount", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(order.totalPrice)}",
+                        "₱${"%.2f".format(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -249,6 +250,7 @@ class FoodActivitiesScreen : Screen {
     @Composable
     private fun StatusChip(status: OrderStatus) {
         val (color, containerColor, text) = when (status) {
+            OrderStatus.AWAITING_PAYMENT -> Triple(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer, "PAYMENT PENDING")
             OrderStatus.PLACED -> Triple(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer, "ORDER PLACED")
             OrderStatus.ACCEPTED -> Triple(MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.secondaryContainer, "CONFIRMED")
             OrderStatus.PREPARING -> Triple(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, "IN KITCHEN")

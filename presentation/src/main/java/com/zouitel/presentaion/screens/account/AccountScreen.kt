@@ -43,6 +43,7 @@ import com.zouitel.presentaion.screens.delivery.DeliveryWorkplaceScreen
 import com.zouitel.presentaion.screens.food.RestaurantWorkplaceScreen
 import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
 import com.zouitel.presentaion.screens.shops.ShopWorkplaceScreen
+import com.zouitel.presentaion.screens.payment.PaymentCenterScreen
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import kotlinx.coroutines.launch
@@ -220,9 +221,9 @@ class AccountScreen : Screen {
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
                             Column {
-                                GroupedAccountRow(Icons.Filled.History, "Orders & Ride History") { /* TODO */ }
+                                GroupedAccountRow(Icons.Filled.History, "Orders & Ride History") { navigator.push(ActivityHistoryScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                GroupedAccountRow(Icons.Filled.CreditCard, "Payment Methods & Wallet") { /* TODO */ }
+                                GroupedAccountRow(Icons.Filled.CreditCard, "Payment Activity") { navigator.push(PaymentCenterScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { /* TODO */ }
                             }

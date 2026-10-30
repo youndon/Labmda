@@ -7,6 +7,7 @@ import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.launch
 
 class ShopOrdersScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
+    private val currentUid = Firebase.auth.currentUser?.uid
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders.asStateFlow()
@@ -27,8 +29,14 @@ class ShopOrdersScreenModel : ScreenModel {
     }
 
     private fun listenToShopOrders() {
+        val uid = currentUid
+        if (uid.isNullOrBlank()) {
+            _orders.value = emptyList()
+            _isLoading.value = false
+            return
+        }
         screenModelScope.launch {
-            db.child("orders").valueEvents.collect { snapshot ->
+            db.child("orders").orderByChild("merchantId").equalTo(uid).valueEvents.collect { snapshot ->
                 val fetchedOrders = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
@@ -77,6 +85,8 @@ class ShopOrdersScreenModel : ScreenModel {
                             totalPrice = totalPrice,
                             status = status,
                             paymentMethod = paymentMethod,
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault("UNPAID"),
+                            paymentId = runCatching { child.child("paymentId").value<String>() }.getOrDefault(""),
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
                             deliveryPhone = deliveryPhone,

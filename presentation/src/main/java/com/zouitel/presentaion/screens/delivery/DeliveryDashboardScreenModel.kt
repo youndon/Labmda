@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -40,9 +41,24 @@ class DeliveryDashboardScreenModel : ScreenModel {
     }
 
     private fun listenToOrdersTable() {
+        val uid = currentUid
+        if (uid.isNullOrBlank()) {
+            _activeDeliveries.value = emptyList()
+            _completedDeliveries.value = emptyList()
+            _isLoading.value = false
+            return
+        }
+
+        val orders = db.child("orders")
+        val openTasks = orders.orderByChild("deliveryId").equalTo("").valueEvents
+        val assignedTasks = orders.orderByChild("deliveryId").equalTo(uid).valueEvents
+
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
-                val allTasks = snapshot.children.mapNotNull { child ->
+            combine(openTasks, assignedTasks) { openSnapshot, assignedSnapshot ->
+                openSnapshot.children + assignedSnapshot.children
+            }.collect { snapshots ->
+                val orderSnapshots = snapshots.distinctBy { it.key }
+                val allTasks = orderSnapshots.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
 
@@ -107,6 +123,8 @@ class DeliveryDashboardScreenModel : ScreenModel {
                             status = status,
                             createdAtTimestamp = createdAt,
                             paymentMethod = paymentMethod,
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault("UNPAID"),
+                            paymentId = runCatching { child.child("paymentId").value<String>() }.getOrDefault(""),
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
                             deliveryPhone = deliveryPhone,
@@ -119,7 +137,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
                 }
 
                 val points = mutableMapOf<String, OrderPoint>()
-                snapshot.children.forEach { child ->
+                orderSnapshots.forEach { child ->
                     val id = child.key ?: return@forEach
                     val lat = runCatching { child.child("clientLat").value<Double>() }.getOrNull()
                     val lng = runCatching { child.child("clientLng").value<Double>() }.getOrNull()

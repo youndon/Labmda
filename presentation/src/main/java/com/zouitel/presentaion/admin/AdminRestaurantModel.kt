@@ -84,7 +84,10 @@ class AdminRestaurantModel : ScreenModel {
                         "estimatedTimeMinutes" to estimatedTimeMinutes,
                         "isOpen" to true,
                         "managers" to listOf(managerPhone),
-                        "paymentMethods" to listOf("Cash on Delivery", "Card on Delivery")
+                        "paymentMethods" to listOf("GCASH", "CASH"),
+                        "address" to runCatching { snap.child("restaurantAddress").value<String>() }.getOrDefault(""),
+                        "latitude" to runCatching { snap.child("restaurantLatitude").value<Double>() }.getOrDefault(0.0),
+                        "longitude" to runCatching { snap.child("restaurantLongitude").value<Double>() }.getOrDefault(0.0)
                     )
                     db.child("restaurants").child(uid).setValue(restaurantMap)
                 }

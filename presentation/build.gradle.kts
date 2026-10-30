@@ -12,7 +12,6 @@ android {
 
     defaultConfig {
         minSdk = 28
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
@@ -31,7 +30,6 @@ android {
             )
         }
     }
-
 }
 
 dependencies {
@@ -52,49 +50,36 @@ dependencies {
     implementation(libs.androidx.material.icons.core)
     implementation(libs.androidx.material.icons.extended)
 
-    //Modules.
     implementation(projects.domain)
-
-    //Kotlin-Coroutines.
     implementation(libs.coroutines.core)
 
-    //Koin.
     implementation(libs.koin.core)
     implementation(libs.koin.android)
     implementation(libs.koin.compose)
     implementation(libs.koin.coroutines)
 
-    //Voyager.
     implementation(libs.voyager.navigator)
     implementation(libs.voyager.screenModel)
     implementation(libs.voyager.koin)
     implementation(libs.voyager.transitions)
 
-    // Google Maps wrapper for Compose Multiplatform
     implementation(libs.kmp.maps.compose)
-    // Optional clustering / marker tools
     implementation(libs.kmp.maps.compose.utils)
-
-    // Google Sign-In for Compose Multiplatform
-    //noinspection UseTomlInstead
     api("io.github.mirzemehdi:kmpauth-google:3.0.6")
 
-    // KMP Firebase Auth
     api(libs.firebase.auth)
     api(libs.firebase.firestore)
     api(libs.firebase.database)
     api(libs.firebase.storage)
     api(libs.firebase.messaging)
+    api(libs.firebase.functions)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.ktor3)
     implementation(libs.ktor.client.core)
-
     implementation(libs.kotlinx.serialization.json)
-
     implementation("io.github.vinceglb:filekit-compose:0.8.8")
 
-    //(Native Only).
     implementation(libs.play.services.auth)
     implementation("com.google.android.gms:play-services-location:21.4.0")
     implementation(libs.ktor.client.okhttp)

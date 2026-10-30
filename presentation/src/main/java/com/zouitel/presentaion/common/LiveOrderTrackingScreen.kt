@@ -112,6 +112,10 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                     text = "Payment: ${currentOrder.paymentMethod.ifBlank { "Cash on Delivery" }}",
                                     style = MaterialTheme.typography.bodySmall
                                 )
+                                Text(
+                                    text = "Payment status: ${currentOrder.paymentStatus.replace('_', ' ')}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
                         }
                     }
@@ -211,7 +215,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodyMedium)
-                            Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
 
@@ -222,7 +226,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium)
-                            Text("$${"%.2f".format(currentOrder.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(currentOrder.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
@@ -231,7 +235,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                         ) {
                             Text("Total", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "$${"%.2f".format(currentOrder.totalPrice)}",
+                                "₱${"%.2f".format(currentOrder.totalPrice)}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -259,6 +263,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
     @Composable
     private fun OrderStatusStepper(currentStatus: OrderStatus) {
         val steps = listOf(
+            OrderStatus.AWAITING_PAYMENT to "Awaiting Payment",
             OrderStatus.PLACED to "Placed",
             OrderStatus.ACCEPTED to "Confirmed",
             OrderStatus.PREPARING to "Kitchen",

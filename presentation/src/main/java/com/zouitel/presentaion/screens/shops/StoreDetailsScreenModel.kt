@@ -2,9 +2,8 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
-import com.zouitel.presentaion.model.Order
-import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.screens.payment.PaymentCreationResult
+import com.zouitel.presentaion.screens.payment.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -13,10 +12,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 data class MapPoint(val lat: Double, val lng: Double)
 
-class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
+class StoreDetailsScreenModel(
+    val shop: Shop,
+    private val payments: PaymentRepository = PaymentRepository()
+) : ScreenModel {
     private val db = Firebase.database.reference()
     private val auth = Firebase.auth
 
@@ -43,13 +46,13 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
             }
         }
     }
+
     private fun listenToStoreProducts() {
         screenModelScope.launch {
             db.child("shops").child(shop.id).child("products").valueEvents.collect { snapshot ->
                 val list = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
-                        // Fixed: read "name" instead of "fullName"
                         val name: String = child.child("name").value()
                         val description: String = child.child("description").value()
                         val price: Double = child.child("price").value()
@@ -80,56 +83,56 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         }
     }
 
+    /**
+     * The UI may show an estimate, but it does not send totals or item prices to the backend.
+     * The backend reloads current product prices and delivery pricing before creating the order.
+     */
     fun placeShopOrder(
         cartItems: List<ShopCartItem>,
-        subtotal: Double,
-        courierFee: Double,
-        totalPrice: Double,
         pickupLat: Double,
         pickupLng: Double,
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
         paymentMethod: String,
-        onSuccess: (String) -> Unit
+        onSuccess: (PaymentCreationResult) -> Unit,
+        onFailure: (String) -> Unit = {}
     ) {
-        val uid = auth.currentUser?.uid ?: "guest_client"
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            onFailure("Please sign in to place an order.")
+            return
+        }
+        if (cartItems.isEmpty()) {
+            onFailure("Your cart is empty.")
+            return
+        }
+
         screenModelScope.launch {
-            val orderRef = db.child("orders").push()
-            val orderId = orderRef.key ?: System.currentTimeMillis().toString()
-
-            val mappedItems = cartItems.map { shopItem ->
-                CartItem(
-                    id = shopItem.productId,
-                    name = shopItem.productName,
-                    basePrice = shopItem.price,
-                    quantity = shopItem.quantity,
-                    specialInstructions = shopItem.specialInstructions
+            try {
+                val result = payments.createOrder(
+                    idempotencyKey = UUID.randomUUID().toString(),
+                    orderType = "RETAIL",
+                    sourceId = shop.id,
+                    items = cartItems.map { item ->
+                        mapOf(
+                            "id" to item.productId,
+                            "quantity" to item.quantity,
+                            "specialInstructions" to item.specialInstructions
+                        )
+                    },
+                    paymentMethod = paymentMethod,
+                    pickupLocation = shop.address,
+                    pickupLat = pickupLat,
+                    pickupLng = pickupLng,
+                    dropoffLocation = dropoffAddress,
+                    dropoffLat = dropoffLat,
+                    dropoffLng = dropoffLng
                 )
+                onSuccess(result)
+            } catch (e: Exception) {
+                onFailure(e.message ?: "Could not place the order. Please try again.")
             }
-
-            val universalOrder = Order(
-                id = orderId,
-                clientId = uid,
-                orderType = OrderType.RETAIL,
-                sourceId = shop.id,
-                sourceName = shop.name,
-                items = mappedItems,
-                subtotal = subtotal,
-                deliveryFee = courierFee,
-                totalPrice = totalPrice,
-                pickupLocation = shop.address,
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLocation = dropoffAddress,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                createdAtTimestamp = System.currentTimeMillis(),
-                paymentMethod = paymentMethod
-            )
-
-            orderRef.setValue(universalOrder)
-            onSuccess(orderId)
         }
     }
 }

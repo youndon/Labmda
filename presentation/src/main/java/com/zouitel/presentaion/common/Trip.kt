@@ -14,11 +14,15 @@ data class Trip(
     val pickupLng: Double = 0.0,
     val dropoffLat: Double = 0.0,
     val dropoffLng: Double = 0.0,
+    // Calculated in Cloud Functions from server-controlled pricing configuration.
     val fare: Double = 0.0,
     val driverId: String = "",
     val driverName: String = "",
     val driverPhone: String = "",
     val vehicleDetails: String = "",
-    val status: String = "REQUESTED", // REQUESTED, ACCEPTED, IN_PROGRESS, COMPLETED, CANCELLED
+    val status: String = "REQUESTED",
+    val paymentMethod: String = "",
+    val paymentStatus: String = "UNPAID",
+    val paymentId: String = "",
     val createdAtTimestamp: Long = 0L
 )

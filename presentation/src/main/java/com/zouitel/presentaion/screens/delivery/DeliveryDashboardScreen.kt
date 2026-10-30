@@ -371,7 +371,7 @@ class DeliveryDashboardScreen : Screen {
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            "+$${"%.2f".format(order.deliveryFee)}",
+                            "+₱${"%.2f".format(order.deliveryFee)}",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
@@ -441,7 +441,7 @@ class DeliveryDashboardScreen : Screen {
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(text = "${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                    Text(text = "$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(text = "₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -450,14 +450,25 @@ class DeliveryDashboardScreen : Screen {
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                val prepaidOnline = order.paymentMethod.equals("GCASH", ignoreCase = true) &&
+                    order.paymentStatus.equals("SUCCEEDED", ignoreCase = true)
+                Text(
+                    "Payment: ${order.paymentMethod.ifBlank { "CASH" }} · ${order.paymentStatus.replace('_', ' ')}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Total to collect:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(order.totalPrice)}",
+                        if (prepaidOnline) "Order total (prepaid):" else "Cash to collect:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "₱${"%.2f".format(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
