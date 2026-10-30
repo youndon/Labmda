@@ -24,9 +24,17 @@ import android.widget.Toast
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
+import com.zouitel.presentaion.payments.PayButton
+import com.zouitel.presentaion.payments.PaymentEventEffect
+import com.zouitel.presentaion.payments.PaymentMethodSelector
+import com.zouitel.presentaion.payments.PaymentRepository
+import com.zouitel.presentaion.payments.PaymentResultSheet
+import com.zouitel.presentaion.payments.PaymentScreenModel
+import org.koin.core.context.GlobalContext
 import kotlinx.coroutines.launch
 import android.content.Context
 import android.location.Geocoder
@@ -56,7 +64,12 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
     override fun Content() {
         val navigator = LocalNavigator.current
         val uriHandler = LocalUriHandler.current
-        val screenModel = rememberScreenModel { StoreDetailsScreenModel(shop) }
+        val paymentRepository = remember { GlobalContext.get().get<PaymentRepository>() }
+        val screenModel = rememberScreenModel {
+            StoreDetailsScreenModel(shop, payments = paymentRepository)
+        }
+        val paymentScreenModel = koinScreenModel<PaymentScreenModel>()
+        val paymentUiState by paymentScreenModel.uiState.collectAsState()
         val products by screenModel.products.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
@@ -64,11 +77,10 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         var showOrderSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember { mutableStateOf("CASH") }
         var isSubmitting by remember { mutableStateOf(false) }
-        val scope = rememberCoroutineScope()
 
         val context = LocalContext.current
+        PaymentEventEffect(paymentScreenModel, uriHandler)
         val modelShopPoint by screenModel.shopLocation.collectAsState()
 
         var shopPoint by remember { mutableStateOf<LatLng?>(null) }
@@ -317,73 +329,54 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             )
                         }
 
-                        Text("Payment Method", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
-                                selected = paymentMethod == "GCASH",
-                                onClick = { paymentMethod = "GCASH" },
-                                label = { Text("GCash") }
-                            )
-                            FilterChip(
-                                selected = paymentMethod == "CASH",
-                                onClick = { paymentMethod = "CASH" },
-                                label = { Text("Cash on Delivery") }
-                            )
-                        }
+                        PaymentMethodSelector(
+                            selectedMethod = paymentUiState.selectedMethod,
+                            onMethodSelected = paymentScreenModel::selectMethod,
+                            enabled = !paymentUiState.isSubmitting
+                        )
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Item Subtotal", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("Estimated item subtotal", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                             Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
+                        Text(
+                            "Final catalogue prices, route-based delivery charges and order total are calculated by Labmda before checkout.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
 
-                        Button(
-                            enabled = dropoff != null && deliveryAddress.isNotBlank() && cartItems.isNotEmpty() && !isSubmitting,
+                        PayButton(
+                            label = "Place Goods Order",
+                            enabled = dropoff != null && deliveryAddress.isNotBlank() && cartItems.isNotEmpty(),
+                            isLoading = isSubmitting || paymentUiState.isSubmitting,
                             onClick = {
-                                val drop = dropoff ?: return@Button
+                                val drop = dropoff ?: return@PayButton
                                 isSubmitting = true
-                                scope.launch {
-                                    screenModel.placeShopOrder(
-                                        cartItems = cartItems.values.toList(),
-                                        pickupLat = shopPoint?.latitude ?: 0.0,
-                                        pickupLng = shopPoint?.longitude ?: 0.0,
-                                        dropoffAddress = deliveryAddress,
-                                        dropoffLat = drop.latitude,
-                                        dropoffLng = drop.longitude,
-                                        paymentMethod = paymentMethod,
-                                        onSuccess = { result ->
-                                            isSubmitting = false
-                                            showOrderSheet = false
-                                            cartItems.clear()
-                                            dropoff = null
-                                            deliveryAddress = ""
-                                            result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                                                val opened = runCatching { uriHandler.openUri(url) }.isSuccess
-                                                if (!opened) {
-                                                    result.webCheckoutUrl?.takeIf { it.isNotBlank() && it != url }?.let { fallback ->
-                                                        runCatching { uriHandler.openUri(fallback) }
-                                                    }
-                                                }
-                                            }
-                                            navigator?.push(LiveOrderTrackingScreen(result.entityId))
-                                        },
-                                        onFailure = { message ->
-                                            isSubmitting = false
-                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                                        }
-                                    )
-                                }
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth().height(52.dp)
-                        ) {
-                            if (isSubmitting) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
-                            } else {
-                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Send Demand Card", fontWeight = FontWeight.Bold)
+                                paymentScreenModel.checkoutStarted()
+                                screenModel.placeShopOrder(
+                                    cartItems = cartItems.values.toList(),
+                                    pickupLat = shopPoint?.latitude ?: 0.0,
+                                    pickupLng = shopPoint?.longitude ?: 0.0,
+                                    dropoffAddress = deliveryAddress,
+                                    dropoffLat = drop.latitude,
+                                    dropoffLng = drop.longitude,
+                                    paymentMethod = paymentUiState.selectedMethod.name,
+                                    onSuccess = { result ->
+                                        isSubmitting = false
+                                        showOrderSheet = false
+                                        cartItems.clear()
+                                        dropoff = null
+                                        deliveryAddress = ""
+                                        paymentScreenModel.checkoutCreated(result)
+                                    },
+                                    onFailure = { message ->
+                                        isSubmitting = false
+                                        paymentScreenModel.checkoutFailed(message)
+                                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                                    }
+                                )
                             }
-                        }
+                        )
                     }
                 }
             }
@@ -406,6 +399,20 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                 )
             }
         }
+
+        PaymentResultSheet(
+            state = paymentUiState,
+            onDismiss = {
+                val orderId = paymentUiState.creation?.entityId
+                paymentScreenModel.dismissResult()
+                orderId?.let { navigator?.push(LiveOrderTrackingScreen(it)) }
+            },
+            onOpenCheckout = { payment ->
+                (payment.checkoutUrl ?: payment.webCheckoutUrl)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { url -> runCatching { uriHandler.openUri(url) } }
+            }
+        )
     }
 
     @OptIn(ExperimentalMaterial3Api::class)

@@ -27,12 +27,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import coil3.compose.AsyncImage
 import com.google.android.gms.maps.model.LatLng
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.LocationPickerDialog
+import com.zouitel.presentaion.payments.PayButton
+import com.zouitel.presentaion.payments.PaymentEventEffect
+import com.zouitel.presentaion.payments.PaymentMethodSelector
+import com.zouitel.presentaion.payments.PaymentRepository
+import com.zouitel.presentaion.payments.PaymentResultSheet
+import com.zouitel.presentaion.payments.PaymentScreenModel
+import org.koin.core.context.GlobalContext
 
 data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
@@ -41,7 +49,12 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
     override fun Content() {
         val navigator = LocalNavigator.current
         val uriHandler = LocalUriHandler.current
-        val screenModel = rememberScreenModel { RestaurantScreenModel(restaurant) }
+        val paymentRepository = remember { GlobalContext.get().get<PaymentRepository>() }
+        val screenModel = rememberScreenModel {
+            RestaurantScreenModel(restaurant, payments = paymentRepository)
+        }
+        val paymentScreenModel = koinScreenModel<PaymentScreenModel>()
+        val paymentUiState by paymentScreenModel.uiState.collectAsState()
 
         val meals by screenModel.meals.collectAsState()
         val quantities by screenModel.quantities.collectAsState()
@@ -50,6 +63,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         val error by screenModel.error.collectAsState()
 
         val snackbarHostState = remember { SnackbarHostState() }
+        PaymentEventEffect(paymentScreenModel, uriHandler)
         LaunchedEffect(error) {
             error?.let {
                 snackbarHostState.showSnackbar(it)
@@ -61,9 +75,6 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var showMapPicker by remember { mutableStateOf(false) }
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var deliveryAddress by remember { mutableStateOf("") }
-        val paymentOptions = remember { listOf("GCash", "Cash on Delivery") }
-        var paymentMethod by remember { mutableStateOf(paymentOptions.first()) }
-
         val restaurantPoint = remember(restaurant) {
             if (restaurant.latitude != 0.0 || restaurant.longitude != 0.0)
                 LatLng(restaurant.latitude, restaurant.longitude) else null
@@ -73,8 +84,6 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         val cartLines = availableMeals.filter { (quantities[it.id] ?: 0) > 0 }
         val itemCount = cartLines.sumOf { quantities[it.id] ?: 0 }
         val subtotal = cartLines.sumOf { it.basePrice * (quantities[it.id] ?: 0) }
-        val grandTotal = if (itemCount > 0) subtotal + restaurant.deliveryFee else 0.0
-
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
         val groupedMeals = remember(availableMeals) { availableMeals.groupBy { it.category }.toList() }
 
@@ -312,47 +321,37 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         )
                     }
 
-                    Text("Payment Method", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        paymentOptions.forEach { option ->
-                            FilterChip(
-                                selected = paymentMethod == option,
-                                onClick = { paymentMethod = option },
-                                label = { Text(option) },
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                        }
-                    }
+                    PaymentMethodSelector(
+                        selectedMethod = paymentUiState.selectedMethod,
+                        onMethodSelected = paymentScreenModel::selectMethod,
+                        enabled = !paymentUiState.isSubmitting
+                    )
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Estimated item subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
                         }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₱${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Total Amount", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text(
-                                "₱${"%.2f".format(grandTotal)}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        Text(
+                            "Final catalogue prices, route-based delivery charges and order total are calculated by Labmda before checkout.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
 
-                    Button(
+                    PayButton(
+                        label = "Place Order Now",
                         enabled = restaurant.isOpen && restaurantPoint != null && dropoff != null &&
-                                deliveryAddress.isNotBlank() && cartLines.isNotEmpty() && !isSubmitting,
+                            deliveryAddress.isNotBlank() && cartLines.isNotEmpty(),
+                        isLoading = isSubmitting || paymentUiState.isSubmitting,
                         onClick = {
-                            val drop = dropoff ?: return@Button
+                            val drop = dropoff ?: return@PayButton
+                            paymentScreenModel.checkoutStarted()
                             screenModel.placeOrder(
                                 lines = cartLines,
-                                paymentMethod = paymentMethod,
+                                paymentMethod = paymentUiState.selectedMethod.name,
                                 dropoffAddress = deliveryAddress,
                                 dropoffLat = drop.latitude,
                                 dropoffLng = drop.longitude,
@@ -360,30 +359,12 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     showOrderSheet = false
                                     dropoff = null
                                     deliveryAddress = ""
-                                    result.checkoutUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                                        val opened = runCatching { uriHandler.openUri(url) }.isSuccess
-                                        if (!opened) {
-                                            result.webCheckoutUrl?.takeIf { it.isNotBlank() && it != url }?.let { fallback ->
-                                                runCatching { uriHandler.openUri(fallback) }
-                                            }
-                                        }
-                                    }
-                                    navigator?.push(LiveOrderTrackingScreen(result.entityId))
-                                }
+                                    paymentScreenModel.checkoutCreated(result)
+                                },
+                                onFailure = paymentScreenModel::checkoutFailed
                             )
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth().height(52.dp)
-                    ) {
-                        if (isSubmitting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        } else {
-                            Text("Place Order Now", fontWeight = FontWeight.Bold)
                         }
-                    }
+                    )
                 }
             }
         }
@@ -408,6 +389,20 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                 }
             )
         }
+
+        PaymentResultSheet(
+            state = paymentUiState,
+            onDismiss = {
+                val orderId = paymentUiState.creation?.entityId
+                paymentScreenModel.dismissResult()
+                orderId?.let { navigator?.push(LiveOrderTrackingScreen(it)) }
+            },
+            onOpenCheckout = { payment ->
+                (payment.checkoutUrl ?: payment.webCheckoutUrl)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { url -> runCatching { uriHandler.openUri(url) } }
+            }
+        )
     }
 
     @Composable

@@ -122,7 +122,7 @@ class FoodOrdersScreen : Screen {
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Text(text = "Client ID: ${order.clientId.ifBlank { "Guest Client" }}", style = MaterialTheme.typography.bodySmall)
+                    Text(text = "Client ID: ${order.clientId.ifBlank { "Unavailable" }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Pickup: ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall)
