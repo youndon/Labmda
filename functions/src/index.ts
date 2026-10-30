@@ -1368,6 +1368,7 @@ export const createOrder = onCall(
       orderId,
       totalCentavos,
       amount: phpFromCents(totalCentavos),
+      distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
       pricingVersion: pricingConfig.version,
       breakdown: quote.breakdown,
       reused: false,
