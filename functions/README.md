@@ -223,6 +223,12 @@ paymentRepository.createGcashPayment(
 )
 ```
 
+The existing Android PaymentRepository routes GCash selections through this quote-first sequence
+for both food/goods orders and rides. The food, shop and passenger screens then open the returned
+checkoutUrl (DEEPLINK_URL first, WEB_URL fallback) and continue showing the order/trip status
+updated by Firebase Functions. For an already-created unpaid order or trip, the standalone
+createGcashPayment callable can also be retried with the same idempotency key.
+
 The callable verifies that the signed-in user owns the order/trip and obtains its total from
 orders/{id}/totalPriceCentavos or trips/{id}/fareCentavos. It creates a one-time Xendit
 Payment Request for PH, PHP, GCASH using automatic collection. GCash does not support a
