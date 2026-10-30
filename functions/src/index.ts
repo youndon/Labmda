@@ -4413,7 +4413,7 @@ async function reconcileCompletedPaymentEarnings(
     totalCentavos: journalTotal,
     lines,
     memo: complete ? "Move pending GCash earnings to available after service completion" : "Reserve paid GCash earnings pending service completion",
-    createdAtTimestamp: Date.now(),
+    createdAtTimestamp: Number(payment.earningsPendingAtTimestamp ?? payment.paidAtTimestamp ?? payment.updatedAtTimestamp ?? entity.createdAtTimestamp ?? 1),
   };
   await ensureMarketplaceLedgerEntry(entryId, entry);
 
@@ -4774,7 +4774,7 @@ async function applyPayoutProviderStatus(args: {
         ledgerLine("XENDIT_PAYOUT_CLEARING", "PLATFORM", "CREDIT", amount),
       ],
       memo: "Confirmed Xendit payout",
-      createdAtTimestamp: Date.now(),
+      createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
     };
     await ensureMarketplaceLedgerEntry(entryId, entry);
     await applyPayoutWalletTerminal(uid, args.payoutId, amount, "SUCCEEDED");
@@ -4793,7 +4793,7 @@ async function applyPayoutProviderStatus(args: {
         ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", amount),
       ],
       memo: "Return reserved wallet funds after a failed payout",
-      createdAtTimestamp: Date.now(),
+      createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
     };
     await ensureMarketplaceLedgerEntry(entryId, entry);
     await applyPayoutWalletTerminal(uid, args.payoutId, amount, "FAILED");
@@ -4812,7 +4812,7 @@ async function applyPayoutProviderStatus(args: {
         ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", amount),
       ],
       memo: "Restore a payout returned by the recipient bank or wallet",
-      createdAtTimestamp: Date.now(),
+      createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
     };
     await ensureMarketplaceLedgerEntry(entryId, entry);
     await applyPayoutWalletTerminal(uid, args.payoutId, amount, "REVERSED");
@@ -5336,12 +5336,19 @@ export const processAutomaticPayouts = onSchedule(
     const secret = XENDIT_PAYOUT_SECRET_KEY.value();
     if (!secret) return;
     const queue = await db.ref("walletPayoutQueue").limitToFirst(100).get();
-    const entries: string[] = [];
+    const entries: Array<{ uid: string; updatedAtTimestamp: number }> = [];
     queue.forEach((child) => {
-      if (child.key) entries.push(child.key);
+      if (child.key) {
+        const item = asRecord(child.val());
+        entries.push({
+          uid: child.key,
+          updatedAtTimestamp: Number(item.updatedAtTimestamp ?? item.dueAtTimestamp ?? 0),
+        });
+      }
       return false;
     });
-    for (const uid of entries) {
+    for (const queued of entries) {
+      const uid = queued.uid;
       try {
         await requireApprovedEarningsRole(uid);
         const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
@@ -5352,7 +5359,7 @@ export const processAutomaticPayouts = onSchedule(
           await db.ref("walletPayoutQueue/" + uid).remove();
           continue;
         }
-        const requestKey = "auto_" + randomUUID();
+        const requestKey = "auto_" + createHash("sha256").update(uid + "|" + queued.updatedAtTimestamp).digest("hex").slice(0, 32);
         await reserveAndSubmitPayout(uid, requestKey, true);
         await db.ref("walletPayoutQueue/" + uid).remove();
       } catch (error) {
