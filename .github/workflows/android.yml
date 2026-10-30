@@ -31,7 +31,16 @@ jobs:
           packages: platform-tools
 
       - name: Install Android platform
-        run: sdkmanager "platforms;android-37"
+        run: |
+          # Android 17 publishes the SDK package as android-37.0, not android-37.
+          sdkmanager "platforms;android-37.0"
+
+      - name: Add Android 37 SDK compatibility alias
+        run: |
+          # Some Android Gradle Plugin tooling still resolves compileSdk 37 as android-37.
+          if [ -d "$ANDROID_HOME/platforms/android-37.0" ] && [ ! -e "$ANDROID_HOME/platforms/android-37" ]; then
+            ln -s android-37.0 "$ANDROID_HOME/platforms/android-37"
+          fi
 
       - name: Make Gradle wrapper executable
         run: chmod +x ./gradlew
