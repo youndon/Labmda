@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Edit
@@ -44,6 +45,10 @@ import com.zouitel.presentaion.screens.food.RestaurantWorkplaceScreen
 import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
 import com.zouitel.presentaion.screens.shops.ShopWorkplaceScreen
 import com.zouitel.presentaion.screens.payment.PaymentCenterScreen
+import com.zouitel.presentaion.screens.wallet.MerchantEarningsScreen
+import com.zouitel.presentaion.screens.wallet.CourierEarningsScreen
+import com.zouitel.presentaion.screens.wallet.DriverEarningsScreen
+import com.zouitel.presentaion.screens.wallet.PayoutAccountScreen
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import kotlinx.coroutines.launch
@@ -224,6 +229,20 @@ class AccountScreen : Screen {
                                 GroupedAccountRow(Icons.Filled.History, "Orders & Ride History") { navigator.push(ActivityHistoryScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.CreditCard, "Payments & Activity") { navigator.push(PaymentCenterScreen()) }
+                                if (restaurantStatus == Status.APPROVED || shopStatus == Status.APPROVED) {
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    GroupedAccountRow(Icons.Filled.Storefront, "Merchant Earnings") { navigator.push(MerchantEarningsScreen()) }
+                                }
+                                if (courierStatus == Status.APPROVED) {
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    GroupedAccountRow(Icons.Filled.LocalShipping, "Courier Earnings") { navigator.push(CourierEarningsScreen()) }
+                                }
+                                if (driverStatus == Status.APPROVED) {
+                                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    GroupedAccountRow(Icons.Filled.DirectionsCar, "Driver Earnings") { navigator.push(DriverEarningsScreen()) }
+                                }
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                GroupedAccountRow(Icons.Filled.AccountBalanceWallet, "Payout Account") { navigator.push(PayoutAccountScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { /* TODO */ }
                             }
