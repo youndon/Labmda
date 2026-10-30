@@ -269,9 +269,12 @@ class PaymentRepository {
                 fun string(key: String, default: String = ""): String =
                     runCatching { snapshot.child(key).value<String?>() ?: default }.getOrDefault(default)
 
-                fun long(key: String): Long =
-                    runCatching { snapshot.child(key).value<Number?>()?.toLong() ?: 0L }
-                        .getOrDefault(0L)
+                fun long(key: String): Long {
+                    val value = snapshot.child(key)
+                    return runCatching { value.value<Long?>() }.getOrNull()
+                        ?: runCatching { value.value<Double?>()?.toLong() }.getOrNull()
+                        ?: 0L
+                }
 
                 ObservedPaymentStatus(
                     status = string("status", "UNPAID"),
