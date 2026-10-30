@@ -443,3 +443,153 @@ server-write-only. The scheduler uses `cashCollections.reconciliationStatus`, so
 This step records cash custody, collector earnings, merchant/platform payables and remittances.
 It does not pay the merchant or transfer wallet funds. Merchant disbursement remains a separate
 authorized payout process.
+
+
+## Merchant, courier and driver wallets
+
+Wallets, marketplace journals and payouts are written only by Firebase Functions. The Android
+client reads its own wallet through callable functions and never writes a balance.
+
+- `wallets/{uid}`: PHP centavo balances for pending earnings, available earnings, cash owed,
+  cash earnings already collected by the courier/driver, payout reservations and paid-out totals.
+- `ledger/{entryId}`: immutable, balanced journal entries. Each account line is also written once
+  under `ledgerAccounts/{accountId}/{entryId}`.
+- `payouts/{payoutId}`: reserved payout, provider idempotency reference, provider payout ID,
+  provider status, failures and reconciliation state.
+- `payoutAccounts/{uid}`: server-only recipient data. The GCash account number is encrypted
+  with AES-256-GCM. The app only receives a masked number and review status.
+- `payoutAccountReviews/{uid}`, `payoutReconciliationQueue/{id}` and
+  `walletPayoutQueue/{uid}`: server-owned administration and retry records.
+
+### Xendit GCash payout setup
+
+The current recipient channel implemented by Labmda is Philippine GCash. Submit the recipient's
+name, GCash number, Philippine mobile number and address using `savePayoutAccount`. The app sees
+only the masked account number. An administrator must approve the account through
+`adminReviewPayoutAccount`; `VERIFIED` means the recipient passed Labmda's manual review, not
+that Xendit has guaranteed a future transfer.
+
+Create a dedicated Xendit secret API key with the `MONEY-OUT` permission and set it as
+`XENDIT_PAYOUT_SECRET_KEY`. Keep `XENDIT_SECRET_KEY` limited to payment collection and refunds. Set `XENDIT_PAYOUT_WEBHOOK_TOKEN` to the payout callback verification token.
+Generate a random 32-byte encryption key (64 hexadecimal characters) and configure it as
+`PAYOUT_ACCOUNT_ENCRYPTION_KEY`. Keep these values in Firebase Secret Manager; do not commit
+real credentials or place them in Android resources.
+
+Configure the Xendit Payout webhook to call `xenditPayoutWebhook` and subscribe to
+`v3_payout.succeeded`, `v3_payout.failed`, `v3_payout.reversed`, `v3_payout.rejected` and
+`v3_payout.pending_compliance`. The handler validates the callback token, Labmda reference,
+provider payout ID, PHP amount and source currency.
+
+A payout first reserves the wallet's available balance into pending payout. The same persisted
+Xendit idempotency key is reused if the provider request times out or returns an uncertain error.
+A confirmed success increases paid-out totals; a definitive failure returns the reserved funds to
+available; a reversal restores funds after a previously successful payout. The reconciliation
+scheduler looks up an existing provider payout ID or safely retries the original request with the
+same key. It must never create a second payout with a new idempotency key.
+
+Initial thresholds are PHP 100 for manual payout and PHP 500 for automatic payout. Change these
+constants to match the final commercial payout policy before production.
+
+### Earnings release and reconciliation
+
+A successful GCash payment creates pending earnings for the merchant and assigned service
+provider. After an order is delivered or a ride is completed, the reconciler moves each share from
+pending to available and posts a balanced ledger entry. Platform commission is credited to the
+platform commission account.
+
+For cash orders, the courier retains the courier cash share and the wallet records the cash owed
+to Labmda. The merchant share remains pending until the administrator records the collector's
+full remittance; the merchant share then becomes available for payout. For cash rides, the driver
+retains the driver share and owes the platform commission. The driver's cash earnings are not paid
+out a second time by Labmda.
+
+Refunds continue through the administrator-only `refundPayment` callable. Do not edit wallet
+balances or ledger entries manually to implement refunds. Keep the existing pricing screen for
+admin commission controls and use the new payment dashboard for payout-account reviews, payments,
+payout status and marketplace journal visibility.
+
+All wallet, payout, private payout account and marketplace ledger paths must be denied to direct
+client writes in production RTDB rules. Add participant-safe callable reads instead of granting
+clients broad access to these nodes. Keep `cashCollections.reconciliationStatus` and
+`payouts.userId` indexed where those indexed queries are used.
+
+
+### Server-owned wallet, payout and marketplace ledger rules
+
+The new wallet and payout APIs use callable Functions. Merge the following branches into your
+existing RTDB rules document; they are not a replacement for your participant/order/trip rules.
+Do not add a broad parent-level read or write grant that would override these child restrictions.
+
+```json
+{
+  "rules": {
+    "wallets": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
+    "payouts": {
+      "$payoutId": {
+        ".read": "auth != null && (data.child('userId').val() === auth.uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
+    "payoutAccounts": {
+      "$uid": {
+        ".read": false,
+        ".write": false
+      }
+    },
+    "payoutAccountReviews": {
+      "$uid": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "ledger": {
+      "$entryId": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "ledgerAccounts": {
+      "$accountId": {
+        ".read": "auth != null && auth.token.admin === true",
+        ".write": false
+      }
+    },
+    "ledgerPostingStatus": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "payoutReconciliationQueue": {
+      ".read": false,
+      ".write": false
+    },
+    "walletPayoutQueue": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}
+```
+
+Add the `userId` index to `payouts` if any server or admin query uses
+`orderByChild('userId')`. Client screens do not read private payout account details directly;
+they use `getMyPayoutAccount`, which returns only masked information.
+
+
+### Refunds and wallet recovery
+
+A successful Xendit refund is reconciled against the original order/trip breakdown. The server
+debits the participant's pending earnings first when the earnings have not been released; after
+release it debits available earnings. If some of the participant share has already been paid out,
+the unpaid part is tracked in `wallets/{uid}/refundDebtCentavos` and journaled to a participant
+refund-receivable account. Future earnings are first applied to this recovery balance before
+becoming available. A wallet with outstanding refund recovery cannot request or receive an
+automatic payout. The `reconcileRefundEarnings` scheduled task retries any confirmed refund that
+has not yet reached `walletSettlementStatus: POSTED`.
+
+This means an administrator must not edit a wallet or ledger to compensate for a refund. A refund
+is considered fully reconciled for wallet accounting only when its refund ledger entry is posted.

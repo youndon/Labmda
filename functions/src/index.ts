@@ -1,6 +1,6 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
-import { getDatabase } from "firebase-admin/database";
+import { DataSnapshot, getDatabase } from "firebase-admin/database";
 import { logger } from "firebase-functions";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
@@ -12,6 +12,9 @@ const REGION = "asia-southeast1";
 const db = getDatabase();
 const XENDIT_SECRET_KEY = defineSecret("XENDIT_SECRET_KEY");
 const XENDIT_WEBHOOK_TOKEN = defineSecret("XENDIT_WEBHOOK_TOKEN");
+const XENDIT_PAYOUT_WEBHOOK_TOKEN = defineSecret("XENDIT_PAYOUT_WEBHOOK_TOKEN");
+const XENDIT_PAYOUT_SECRET_KEY = defineSecret("XENDIT_PAYOUT_SECRET_KEY");
+const PAYOUT_ACCOUNT_ENCRYPTION_KEY = defineSecret("PAYOUT_ACCOUNT_ENCRYPTION_KEY");
 const GOOGLE_ROUTES_API_KEY = defineSecret("GOOGLE_ROUTES_API_KEY");
 const PAYMENT_SUCCESS_RETURN_URL = defineString("PAYMENT_SUCCESS_RETURN_URL");
 const PAYMENT_FAILURE_RETURN_URL = defineString("PAYMENT_FAILURE_RETURN_URL");
@@ -2311,7 +2314,13 @@ async function applyXenditRefundStatus(args: {
     };
   });
 
-  if (!transaction.committed || !transaction.snapshot.exists()) return false;
+  if (!transaction.committed || !transaction.snapshot.exists()) {
+    const latest = asRecord((await paymentRef.get()).val());
+    const latestRefund = asRecord(asRecord(latest.refunds)[args.refundAttemptId]);
+    if (args.status !== "SUCCEEDED" || asString(latestRefund.status).toUpperCase() !== "SUCCEEDED") return false;
+    await reconcileRefundedPaymentEarnings(args.entityId, args.refundAttemptId);
+    return true;
+  }
   const saved = asRecord(transaction.snapshot.val());
   const refundQueueKey = args.entityId + "_" + args.refundAttemptId;
   await db.ref("refundReconciliationQueue/" + refundQueueKey).remove();
@@ -2319,6 +2328,9 @@ async function applyXenditRefundStatus(args: {
     const entityType = asString(saved.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
     await db.ref(paymentEntityPath(entityType as GcashEntityType) + "/" + args.entityId + "/paymentStatus")
       .set(asString(saved.status));
+  }
+  if (args.status === "SUCCEEDED") {
+    await reconcileRefundedPaymentEarnings(args.entityId, args.refundAttemptId);
   }
   return true;
 }
@@ -3547,6 +3559,7 @@ async function finalizeCashRemittance(
       ? "REMITTED"
       : "PARTIALLY_REMITTED";
   await db.ref().update(updates);
+  await applyCashRemittanceWalletEffects(collection, remittance);
 }
 
 async function applyCashCollectionMirror(collection: Record<string, unknown>): Promise<void> {
@@ -3600,6 +3613,7 @@ async function finalizeCashCollection(
   const collectionLedger = buildCashCollectionLedgerEntry(collection);
   await ensureImmutableCashLedgerEntry(asString(collectionLedger.entryId), collectionLedger);
   await postImmutableCashLedgerEntry(asString(collectionLedger.entryId));
+  await applyCashCollectionWalletEffects(collection);
 
   const collectionRef = db.ref("cashCollections/" + collectionId);
   const events = asRecord(collection.remittanceEvents);
@@ -3944,5 +3958,1771 @@ export const reconcileCash = onSchedule(
       reconciled,
       failed,
     });
+  }
+);
+
+
+// -----------------------------------------------------------------------------
+// Marketplace wallets, immutable accounting ledger and Xendit Payouts v3.
+// All balances and destination credentials are server-owned. Android uses only
+// the callable APIs below and never writes wallet, ledger or payout state.
+// -----------------------------------------------------------------------------
+
+type WalletDeltaField =
+  | "availableCentavos"
+  | "pendingCentavos"
+  | "cashOwedCentavos"
+  | "cashEarningsCentavos"
+  | "pendingPayoutCentavos"
+  | "paidOutCentavos"
+  | "refundDebtCentavos";
+
+type WalletDeltas = Partial<Record<WalletDeltaField, number>>;
+
+const AUTO_PAYOUT_MINIMUM_CENTAVOS = 50000; // PHP 500.00
+const MANUAL_PAYOUT_MINIMUM_CENTAVOS = 10000; // PHP 100.00
+const PAYOUT_RECONCILIATION_MS = 5 * 60 * 1000;
+
+function payoutEncryptionKey(): Buffer {
+  const encoded = PAYOUT_ACCOUNT_ENCRYPTION_KEY.value().trim();
+  const key = Buffer.from(encoded, "hex");
+  if (key.length !== 32) {
+    throw new HttpsError(
+      "failed-precondition",
+      "PAYOUT_ACCOUNT_ENCRYPTION_KEY must be configured as 64 hexadecimal characters."
+    );
+  }
+  return key;
+}
+
+function encryptPayoutAccountNumber(value: string): {
+  ciphertext: string;
+  iv: string;
+  tag: string;
+} {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", payoutEncryptionKey(), iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(value, "utf8"),
+    cipher.final(),
+  ]);
+  return {
+    ciphertext: ciphertext.toString("base64"),
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+  };
+}
+
+function decryptPayoutAccountNumber(account: Record<string, unknown>): string {
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    payoutEncryptionKey(),
+    Buffer.from(asString(account.accountNumberIv), "base64")
+  );
+  decipher.setAuthTag(Buffer.from(asString(account.accountNumberTag), "base64"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(asString(account.accountNumberCiphertext), "base64")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+function maskAccountNumber(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  return digits.length <= 4 ? "••••" : "•••• •••• " + digits.slice(-4);
+}
+
+function walletNumber(record: Record<string, unknown>, key: WalletDeltaField): number {
+  return nonNegativeInteger(record[key] ?? 0, "wallet " + key);
+}
+
+async function applyWalletDeltas(
+  uid: string,
+  eventId: string,
+  deltas: WalletDeltas
+): Promise<void> {
+  if (!uid || !/^[A-Za-z0-9_-]{1,128}$/.test(uid)) {
+    throw new HttpsError("failed-precondition", "A wallet owner ID is invalid.");
+  }
+  if (!/^[A-Za-z0-9_-]{1,180}$/.test(eventId)) {
+    throw new HttpsError("failed-precondition", "A wallet event ID is invalid.");
+  }
+  const walletRef = db.ref("wallets/" + uid);
+  let invalidBalance = "";
+  const transaction = await walletRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const applied = asRecord(current.appliedLedgerEntries);
+    if (applied[eventId] === true) return;
+    const next: Record<string, unknown> = {
+      ...current,
+      currency: "PHP",
+      updatedAtTimestamp: Date.now(),
+    };
+    for (const [rawField, rawDelta] of Object.entries(deltas)) {
+      const field = rawField as WalletDeltaField;
+      const delta = Number(rawDelta ?? 0);
+      if (!Number.isSafeInteger(delta)) {
+        invalidBalance = "A wallet movement is not an integer number of centavos.";
+        return;
+      }
+      let appliedDelta = delta;
+      if (field === "availableCentavos" && delta > 0) {
+        const refundDebt = walletNumber(current, "refundDebtCentavos");
+        const recovered = Math.min(refundDebt, delta);
+        if (recovered > 0) next.refundDebtCentavos = refundDebt - recovered;
+        appliedDelta -= recovered;
+      }
+      const amount = walletNumber(current, field) + appliedDelta;
+      if (!Number.isSafeInteger(amount) || amount < 0) {
+        invalidBalance = "A wallet movement would create an invalid or negative balance.";
+        return;
+      }
+      next[field] = amount;
+    }
+    next.appliedLedgerEntries = {
+      ...applied,
+      [eventId]: true,
+    };
+    return next;
+  });
+  if (invalidBalance) throw new HttpsError("data-loss", invalidBalance);
+  if (!transaction.committed) {
+    const saved = asRecord((await walletRef.get()).val());
+    if (asRecord(saved.appliedLedgerEntries)[eventId] === true) return;
+    throw new HttpsError("aborted", "Wallet balance update could not be committed.");
+  }
+}
+
+async function applyPayoutWalletTerminal(
+  uid: string,
+  payoutId: string,
+  amountCentavos: number,
+  terminal: "SUCCEEDED" | "FAILED" | "REVERSED"
+): Promise<{ refundRecoveredCentavos: number }> {
+  const walletRef = db.ref("wallets/" + uid);
+  const eventId = "payout_" + terminal.toLowerCase() + "_" + payoutId;
+  let errorMessage = "";
+  let refundRecoveredCentavos = 0;
+  const transaction = await walletRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const applied = asRecord(current.appliedLedgerEntries);
+    const terminalEvents = asRecord(current.payoutTerminalEvents);
+    const priorEvent = asRecord(terminalEvents[eventId]);
+    const next: Record<string, unknown> = { ...current, currency: "PHP", updatedAtTimestamp: Date.now() };
+    if (applied[eventId] === true || Object.keys(priorEvent).length > 0) {
+      refundRecoveredCentavos = Number(priorEvent.refundRecoveredCentavos ?? 0);
+      return current;
+    }
+    let available = walletNumber(current, "availableCentavos");
+    let pending = walletNumber(current, "pendingPayoutCentavos");
+    let paidOut = walletNumber(current, "paidOutCentavos");
+    if (terminal === "SUCCEEDED") {
+      if (pending < amountCentavos) {
+        errorMessage = "Payout pending balance is smaller than the confirmed provider payout.";
+        return;
+      }
+      pending -= amountCentavos;
+      paidOut += amountCentavos;
+    } else if (terminal === "FAILED") {
+      if (pending < amountCentavos) {
+        errorMessage = "Payout pending balance is smaller than the failed provider payout.";
+        return;
+      }
+      pending -= amountCentavos;
+      const refundDebt = walletNumber(current, "refundDebtCentavos");
+      refundRecoveredCentavos = Math.min(refundDebt, amountCentavos);
+      available += amountCentavos - refundRecoveredCentavos;
+      next.refundDebtCentavos = refundDebt - refundRecoveredCentavos;
+    } else {
+      if (paidOut < amountCentavos) {
+        errorMessage = "Paid-out balance is smaller than the reversed provider payout.";
+        return;
+      }
+      paidOut -= amountCentavos;
+      const refundDebt = walletNumber(current, "refundDebtCentavos");
+      refundRecoveredCentavos = Math.min(refundDebt, amountCentavos);
+      available += amountCentavos - refundRecoveredCentavos;
+      next.refundDebtCentavos = refundDebt - refundRecoveredCentavos;
+    }
+    if (![available, pending, paidOut].every(Number.isSafeInteger)) {
+      errorMessage = "Payout reconciliation exceeded the supported wallet balance.";
+      return;
+    }
+    next.availableCentavos = available;
+    next.pendingPayoutCentavos = pending;
+    next.paidOutCentavos = paidOut;
+    next.appliedLedgerEntries = { ...applied, [eventId]: true };
+    next.payoutTerminalEvents = {
+      ...terminalEvents,
+      [eventId]: { refundRecoveredCentavos, amountCentavos, terminal },
+    };
+    if (asString(current.activePayoutId) === payoutId) next.activePayoutId = null;
+    return next;
+  });
+  if (errorMessage) throw new HttpsError("data-loss", errorMessage);
+  if (!transaction.committed) {
+    const current = asRecord((await walletRef.get()).val());
+    const terminalEvent = asRecord(asRecord(current.payoutTerminalEvents)[eventId]);
+    if (Object.keys(terminalEvent).length === 0) {
+      throw new HttpsError("aborted", "Payout wallet reconciliation could not be committed.");
+    }
+    refundRecoveredCentavos = Number(terminalEvent.refundRecoveredCentavos ?? 0);
+  }
+  return { refundRecoveredCentavos };
+}
+
+type LedgerLine = {
+  accountId: string;
+  accountType: string;
+  ownerId: string;
+  normalSide: "DEBIT" | "CREDIT";
+  debitCentavos: number;
+  creditCentavos: number;
+};
+
+function ledgerLine(
+  accountType: string,
+  ownerId: string,
+  side: "DEBIT" | "CREDIT",
+  amountCentavos: number
+): LedgerLine {
+  const safeOwner = ownerId || "PLATFORM";
+  const accountId = accountType + "_" + safeOwner;
+  return {
+    accountId,
+    accountType,
+    ownerId: safeOwner,
+    normalSide: side,
+    debitCentavos: side === "DEBIT" ? amountCentavos : 0,
+    creditCentavos: side === "CREDIT" ? amountCentavos : 0,
+  };
+}
+
+async function ensureMarketplaceLedgerEntry(
+  entryId: string,
+  entry: Record<string, unknown>
+): Promise<void> {
+  const lines = Array.isArray(entry.lines) ? entry.lines.map(asRecord) : [];
+  let debit = 0;
+  let credit = 0;
+  for (const line of lines) {
+    const accountId = asString(line.accountId);
+    const debitAmount = nonNegativeInteger(line.debitCentavos ?? 0, "ledger debit");
+    const creditAmount = nonNegativeInteger(line.creditCentavos ?? 0, "ledger credit");
+    if (!accountId || (debitAmount > 0 && creditAmount > 0) || debitAmount + creditAmount <= 0) {
+      throw new HttpsError("failed-precondition", "A marketplace ledger line is invalid.");
+    }
+    debit += debitAmount;
+    credit += creditAmount;
+  }
+  if (
+    lines.length < 2 ||
+    !Number.isSafeInteger(debit) ||
+    debit <= 0 ||
+    debit !== credit ||
+    debit !== Number(entry.totalCentavos)
+  ) {
+    throw new HttpsError("failed-precondition", "The marketplace ledger entry is not balanced.");
+  }
+  const payload = { ...entry, entryId, currency: "PHP" };
+  const payloadHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  const entryRef = db.ref("ledger/" + entryId);
+  const transaction = await entryRef.transaction((currentValue) => {
+    if (currentValue !== null && currentValue !== undefined) return;
+    return { ...payload, payloadHash };
+  });
+  if (!transaction.committed) {
+    const existing = asRecord((await entryRef.get()).val());
+    if (
+      asString(existing.payloadHash) !== payloadHash ||
+      asString(existing.operationId) !== asString(entry.operationId)
+    ) {
+      throw new HttpsError("data-loss", "An immutable marketplace ledger entry conflicts with an earlier entry.");
+    }
+  }
+
+  // Per-account postings are immutable and deterministic, so the admin ledger can
+  // be reconciled without trusting mutable wallet summaries.
+  for (const rawLine of lines) {
+    const accountId = asString(rawLine.accountId);
+    const postingRef = db.ref("ledgerAccounts/" + accountId + "/" + entryId);
+    const posting = {
+      entryId,
+      operationId: asString(entry.operationId),
+      accountId,
+      accountType: asString(rawLine.accountType),
+      ownerId: asString(rawLine.ownerId),
+      debitCentavos: Number(rawLine.debitCentavos ?? 0),
+      creditCentavos: Number(rawLine.creditCentavos ?? 0),
+      createdAtTimestamp: Number(entry.createdAtTimestamp ?? Date.now()),
+      currency: "PHP",
+    };
+    const postingTransaction = await postingRef.transaction((currentValue) => {
+      if (currentValue !== null && currentValue !== undefined) return;
+      return posting;
+    });
+    if (!postingTransaction.committed) {
+      const existing = asRecord((await postingRef.get()).val());
+      if (
+        !postingTransaction.snapshot.exists() ||
+        asString(existing.entryId) !== entryId ||
+        Number(existing.debitCentavos) !== posting.debitCentavos ||
+        Number(existing.creditCentavos) !== posting.creditCentavos
+      ) {
+        throw new HttpsError("data-loss", "An immutable ledger account posting conflicts with an earlier posting.");
+      }
+    }
+  }
+  await db.ref("ledgerPostingStatus/" + entryId).set({
+    status: "POSTED",
+    debitTotalCentavos: debit,
+    creditTotalCentavos: credit,
+    postedAtTimestamp: Date.now(),
+  });
+}
+
+function enqueueWalletPayout(uid: string): void {
+  void db.ref("walletPayoutQueue/" + uid).set({
+    userId: uid,
+    dueAtTimestamp: Date.now(),
+    updatedAtTimestamp: Date.now(),
+  }).catch((error) => logger.warn("Could not queue wallet payout", { uid, error }));
+}
+
+function payoutAccountSummary(account: Record<string, unknown>): Record<string, unknown> {
+  return {
+    status: asString(account.status) || "NOT_CONFIGURED",
+    accountType: asString(account.accountType),
+    channelCode: asString(account.channelCode),
+    accountHolderName: asString(account.accountHolderName),
+    maskedAccountNumber: asString(account.maskedAccountNumber),
+    submittedAtTimestamp: Number(account.submittedAtTimestamp ?? 0),
+    reviewedAtTimestamp: Number(account.reviewedAtTimestamp ?? 0),
+    reviewNote: asString(account.reviewNote),
+  };
+}
+
+function normalizePhilippineMobile(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (/^09\d{9}$/.test(digits)) return "+63" + digits.slice(1);
+  if (/^639\d{9}$/.test(digits)) return "+" + digits;
+  if (/^9\d{9}$/.test(digits)) return "+63" + digits;
+  throw new HttpsError("invalid-argument", "Enter a valid Philippine mobile number.");
+}
+
+async function requireApprovedEarningsRole(uid: string): Promise<void> {
+  const snapshot = await db.ref("users/" + uid).get();
+  if (!snapshot.exists()) throw new HttpsError("failed-precondition", "Your Labmda profile is missing.");
+  const profile = asRecord(snapshot.val());
+  const delivery = asRecord(profile.deliveryServices);
+  const driver = asRecord(profile.driverService);
+  const approved = [
+    asString(profile.foodStatus),
+    asString(profile.shopStatus),
+    asString(delivery.status),
+    asString(driver.status),
+  ].some((status) => ["APPROVED", "ACTIVE"].includes(status.toUpperCase()));
+  if (!approved) {
+    throw new HttpsError("failed-precondition", "Wallet payouts are available only to approved merchants, couriers and drivers.");
+  }
+}
+
+async function applyCashCollectionWalletEffects(collection: Record<string, unknown>): Promise<void> {
+  const collectionId = asString(collection.collectionId);
+  const collectorId = asString(collection.collectorId);
+  const merchantId = asString(collection.merchantId);
+  const merchantOwed = nonNegativeInteger(collection.merchantOwedCentavos ?? 0, "merchant cash payable");
+  const platformOwed = nonNegativeInteger(collection.platformOwedCentavos ?? 0, "platform cash payable");
+  const collectorEarnings = nonNegativeInteger(collection.collectorEarningsCentavos ?? 0, "collector cash earnings");
+  const remittable = merchantOwed + platformOwed;
+  if (collectorId) {
+    await applyWalletDeltas(collectorId, "cash_collection_" + collectionId, {
+      cashOwedCentavos: remittable,
+      cashEarningsCentavos: collectorEarnings,
+    });
+  }
+  if (merchantId && merchantOwed > 0) {
+    await applyWalletDeltas(merchantId, "cash_merchant_pending_" + collectionId, {
+      pendingCentavos: merchantOwed,
+    });
+  }
+}
+
+async function applyCashRemittanceWalletEffects(
+  collection: Record<string, unknown>,
+  remittance: Record<string, unknown>
+): Promise<void> {
+  const collectionId = asString(collection.collectionId);
+  const remittanceId = asString(remittance.remittanceId);
+  const collectorId = asString(collection.collectorId);
+  const amount = nonNegativeInteger(remittance.amountCentavos, "cash remittance amount");
+  if (collectorId && amount > 0) {
+    await applyWalletDeltas(collectorId, "cash_remittance_" + remittanceId, {
+      cashOwedCentavos: -amount,
+    });
+  }
+  const outstanding = nonNegativeInteger(
+    collection.outstandingRemittanceCentavos ?? 0,
+    "cash remittance outstanding amount"
+  );
+  const merchantId = asString(collection.merchantId);
+  const merchantOwed = nonNegativeInteger(collection.merchantOwedCentavos ?? 0, "merchant cash payable");
+  if (outstanding === 0 && merchantId && merchantOwed > 0) {
+    const walletRelease = await applyWalletEarningCredit(
+      merchantId,
+      "cash_merchant_release_" + collectionId + "_" + merchantId,
+      merchantOwed,
+      true
+    );
+    const availableCredit = merchantOwed - walletRelease.recoveredCentavos;
+    const releaseEntryId = "cash_merchant_release_" + collectionId;
+    const releaseEntry = {
+      operationId: "CASH_MERCHANT_RELEASE:" + collectionId,
+      entryType: "CASH_MERCHANT_RELEASE",
+      collectionId,
+      merchantId,
+      totalCentavos: merchantOwed,
+      lines: [
+        ledgerLine("MERCHANT_PENDING_PAYABLE", merchantId, "DEBIT", merchantOwed),
+        ...(availableCredit > 0 ? [ledgerLine("MERCHANT_AVAILABLE_PAYABLE", merchantId, "CREDIT", availableCredit)] : []),
+        ...(walletRelease.recoveredCentavos > 0 ? [ledgerLine("WALLET_REFUND_RECEIVABLE", merchantId, "CREDIT", walletRelease.recoveredCentavos)] : []),
+      ],
+      memo: "Release merchant cash earnings after collector remittance is complete",
+      createdAtTimestamp: Number(collection.createdAtTimestamp ?? 1),
+    };
+    await ensureMarketplaceLedgerEntry(releaseEntryId, releaseEntry);
+    await db.ref("cashCollections/" + collectionId).update({
+      merchantSettlementStatus: "RELEASED",
+      merchantSettlementLedgerEntryId: releaseEntryId,
+      merchantSettledAtTimestamp: Date.now(),
+    });
+    const wallet = asRecord((await db.ref("wallets/" + merchantId).get()).val());
+    if (walletNumber(wallet, "refundDebtCentavos") === 0 && walletNumber(wallet, "availableCentavos") > 0) {
+      enqueueWalletPayout(merchantId);
+    }
+  }
+}
+
+async function applyWalletEarningCredit(
+  uid: string,
+  eventId: string,
+  amountCentavos: number,
+  releasePending: boolean
+): Promise<{ recoveredCentavos: number }> {
+  const walletRef = db.ref("wallets/" + uid);
+  let recoveredCentavos = 0;
+  let priorEvent = false;
+  const transaction = await walletRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const applied = asRecord(current.appliedLedgerEntries);
+    const creditEvents = asRecord(current.earningCreditEvents);
+    const previous = asRecord(creditEvents[eventId]);
+    if (applied[eventId] === true || Object.keys(previous).length > 0) {
+      priorEvent = true;
+      recoveredCentavos = Number(previous.recoveredCentavos ?? 0);
+      return current;
+    }
+    const pending = walletNumber(current, "pendingCentavos");
+    if (releasePending && pending < amountCentavos) {
+      throw new HttpsError("data-loss", "Pending earnings are smaller than the amount being released.");
+    }
+    const debt = walletNumber(current, "refundDebtCentavos");
+    recoveredCentavos = Math.min(debt, amountCentavos);
+    const availableCredit = amountCentavos - recoveredCentavos;
+    const next: Record<string, unknown> = {
+      ...current,
+      availableCentavos: walletNumber(current, "availableCentavos") + availableCredit,
+      refundDebtCentavos: debt - recoveredCentavos,
+      currency: "PHP",
+      updatedAtTimestamp: Date.now(),
+      appliedLedgerEntries: { ...applied, [eventId]: true },
+      earningCreditEvents: {
+        ...creditEvents,
+        [eventId]: {
+          amountCentavos,
+          recoveredCentavos,
+          availableCreditCentavos: availableCredit,
+          releasedPending: releasePending,
+        },
+      },
+    };
+    if (releasePending) next.pendingCentavos = pending - amountCentavos;
+    return next;
+  });
+  if (!transaction.committed && !priorEvent) {
+    const current = asRecord((await walletRef.get()).val());
+    const saved = asRecord(asRecord(current.earningCreditEvents)[eventId]);
+    if (Object.keys(saved).length === 0) {
+      throw new HttpsError("aborted", "Wallet earnings release could not be committed.");
+    }
+    recoveredCentavos = Number(saved.recoveredCentavos ?? 0);
+  }
+  return { recoveredCentavos };
+}
+
+async function reconcileCompletedPaymentEarnings(
+  entityType: "ORDER" | "TRIP",
+  entityId: string,
+  entity: Record<string, unknown>,
+  payment: Record<string, unknown>
+): Promise<boolean> {
+  if (
+    asString(payment.provider).toUpperCase() !== "XENDIT" ||
+    asString(payment.status).toUpperCase() !== "PAID" ||
+    asString(entity.paymentMethod).toUpperCase() !== "GCASH"
+  ) return false;
+
+  const amount = nonNegativeInteger(payment.amountCentavos, "settled payment amount");
+  const breakdown = asRecord(payment.breakdown ?? entity.breakdown);
+  const merchantShare = entityType === "ORDER" ? nonNegativeInteger(breakdown.merchantShare ?? 0, "merchant share") : 0;
+  const courierShare = entityType === "ORDER" ? nonNegativeInteger(breakdown.courierShare ?? 0, "courier share") : 0;
+  const driverShare = entityType === "TRIP" ? nonNegativeInteger(breakdown.driverShare ?? 0, "driver share") : 0;
+  const platformShare = nonNegativeInteger(breakdown.platformShare ?? 0, "platform share");
+  const totalShares = merchantShare + courierShare + driverShare + platformShare;
+  if (!Number.isSafeInteger(totalShares) || totalShares !== amount) {
+    throw new HttpsError("failed-precondition", "The paid transaction breakdown does not reconcile to its received amount.");
+  }
+
+  const merchantId = asString(entity.merchantId) || asString(entity.sourceId);
+  const courierId = asString(entity.deliveryId);
+  const driverId = asString(entity.driverId);
+  if (merchantShare > 0 && !merchantId) throw new HttpsError("failed-precondition", "The completed order has no merchant recipient.");
+  if (courierShare > 0 && !courierId) return false;
+  if (driverShare > 0 && !driverId) throw new HttpsError("failed-precondition", "The completed ride has no assigned driver recipient.");
+
+  const complete = entityType === "ORDER"
+    ? asString(entity.status).toUpperCase() === "DELIVERED"
+    : asString(entity.status).toUpperCase() === "COMPLETED";
+  const hasPending = asString(payment.earningsPendingStatus).toUpperCase() === "PENDING";
+  if (!complete && hasPending) return false;
+
+  const shares: Array<{ ownerId: string; accountType: string; amount: number }> = [];
+  if (merchantShare > 0) shares.push({ ownerId: merchantId, accountType: "MERCHANT", amount: merchantShare });
+  if (courierShare > 0) shares.push({ ownerId: courierId, accountType: "COURIER", amount: courierShare });
+  if (driverShare > 0) shares.push({ ownerId: driverId, accountType: "DRIVER", amount: driverShare });
+  const participantTotal = merchantShare + courierShare + driverShare;
+  const entryId = (complete ? "earning_release_" : "earning_pending_") + entityType.toLowerCase() + "_" + entityId;
+  const lines: LedgerLine[] = [];
+  const recoveredByOwner = new Map<string, number>();
+
+  if (complete) {
+    // Apply each wallet mutation idempotently first, then build the immutable journal
+    // from the exact recovered/debt-offset amount returned by that wallet transaction.
+    for (const share of shares) {
+      const eventId = "earning_release_" + entryId + "_" + share.ownerId;
+      const result = await applyWalletEarningCredit(share.ownerId, eventId, share.amount, hasPending);
+      recoveredByOwner.set(share.ownerId, result.recoveredCentavos);
+    }
+    if (hasPending) {
+      for (const share of shares) {
+        lines.push(ledgerLine(share.accountType + "_PENDING_PAYABLE", share.ownerId, "DEBIT", share.amount));
+        const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
+        const available = share.amount - recovered;
+        if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
+        if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
+      }
+    } else {
+      lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
+      for (const share of shares) {
+        const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
+        const available = share.amount - recovered;
+        if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
+        if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
+      }
+      if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
+    }
+  } else {
+    lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
+    for (const share of shares) lines.push(ledgerLine(share.accountType + "_PENDING_PAYABLE", share.ownerId, "CREDIT", share.amount));
+    if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
+  }
+
+  const journalTotal = complete && hasPending ? participantTotal : amount;
+  if (journalTotal <= 0) {
+    await db.ref("payments/" + entityId).update({ earningsSettlementStatus: "RELEASED", earningsReleasedAtTimestamp: Date.now() });
+    return true;
+  }
+  const entry = {
+    operationId: (complete ? "EARNING_RELEASE:" : "EARNING_PENDING:") + entityType + ":" + entityId,
+    entryType: complete ? "EARNING_RELEASE" : "EARNING_PENDING",
+    entityType,
+    entityId,
+    paymentId: asString(payment.providerReference),
+    totalCentavos: journalTotal,
+    lines,
+    memo: complete ? "Move pending GCash earnings to available after service completion" : "Reserve paid GCash earnings pending service completion",
+    createdAtTimestamp: Number(payment.earningsPendingAtTimestamp ?? payment.paidAtTimestamp ?? payment.updatedAtTimestamp ?? entity.createdAtTimestamp ?? 1),
+  };
+  await ensureMarketplaceLedgerEntry(entryId, entry);
+
+  if (!complete) {
+    for (const share of shares) {
+      await applyWalletDeltas(share.ownerId, "earning_pending_" + entryId + "_" + share.ownerId, { pendingCentavos: share.amount });
+    }
+  }
+
+  if (complete) {
+    if (payment.suppressPayoutQueue !== true) {
+      for (const share of shares) enqueueWalletPayout(share.ownerId);
+    }
+    await db.ref("payments/" + entityId).update({
+      earningsPendingStatus: hasPending ? "RELEASED" : asString(payment.earningsPendingStatus),
+      earningsSettlementStatus: "RELEASED",
+      earningsReleasedAtTimestamp: Date.now(),
+      earningsLedgerEntryId: entryId,
+    });
+    await db.ref((entityType === "ORDER" ? "orders/" : "trips/") + entityId).update({
+      earningsSettlementStatus: "RELEASED",
+      earningsReleasedAtTimestamp: Date.now(),
+      earningsLedgerEntryId: entryId,
+    });
+  } else {
+    await db.ref("payments/" + entityId).update({
+      earningsPendingStatus: "PENDING",
+      earningsPendingLedgerEntryId: entryId,
+      earningsPendingAtTimestamp: Date.now(),
+    });
+    await db.ref((entityType === "ORDER" ? "orders/" : "trips/") + entityId).update({
+      earningsPendingStatus: "PENDING",
+      earningsPendingLedgerEntryId: entryId,
+    });
+  }
+  return true;
+}
+
+async function applyWalletRefundDebit(
+  uid: string,
+  eventId: string,
+  sourceField: "pendingCentavos" | "availableCentavos",
+  amountCentavos: number
+): Promise<{ debitedCentavos: number; debtCentavos: number }> {
+  const walletRef = db.ref("wallets/" + uid);
+  let result: { debitedCentavos: number; debtCentavos: number } | null = null;
+  const transaction = await walletRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const applied = asRecord(current.appliedLedgerEntries);
+    const refundAdjustments = asRecord(current.refundAdjustments);
+    const previous = asRecord(refundAdjustments[eventId]);
+    if (applied[eventId] === true || Object.keys(previous).length > 0) {
+      result = {
+        debitedCentavos: Number(previous.debitedCentavos ?? 0),
+        debtCentavos: Number(previous.debtCentavos ?? 0),
+      };
+      return current;
+    }
+    const availableToDebit = walletNumber(current, sourceField);
+    const debitedCentavos = Math.min(availableToDebit, amountCentavos);
+    const debtCentavos = amountCentavos - debitedCentavos;
+    const existingDebt = walletNumber(current, "refundDebtCentavos");
+    if (!Number.isSafeInteger(existingDebt + debtCentavos)) {
+      throw new HttpsError("data-loss", "Refund recovery balance exceeded the supported wallet range.");
+    }
+    result = { debitedCentavos, debtCentavos };
+    return {
+      ...current,
+      [sourceField]: availableToDebit - debitedCentavos,
+      refundDebtCentavos: existingDebt + debtCentavos,
+      appliedLedgerEntries: { ...applied, [eventId]: true },
+      refundAdjustments: {
+        ...refundAdjustments,
+        [eventId]: {
+          sourceField,
+          requestedCentavos: amountCentavos,
+          debitedCentavos,
+          debtCentavos,
+          createdAtTimestamp: Date.now(),
+        },
+      },
+      currency: "PHP",
+      updatedAtTimestamp: Date.now(),
+    };
+  });
+  if (!result) {
+    const current = asRecord((await walletRef.get()).val());
+    const saved = asRecord(asRecord(current.refundAdjustments)[eventId]);
+    if (Object.keys(saved).length === 0) {
+      throw new HttpsError("aborted", "Refund recovery could not be committed to the wallet.");
+    }
+    result = {
+      debitedCentavos: Number(saved.debitedCentavos ?? 0),
+      debtCentavos: Number(saved.debtCentavos ?? 0),
+    };
+  }
+  if (!transaction.committed && !result) {
+    throw new HttpsError("aborted", "Refund recovery transaction did not commit.");
+  }
+  return result;
+}
+
+async function reconcileRefundedPaymentEarnings(entityId: string, refundAttemptId: string): Promise<void> {
+  const paymentRef = db.ref("payments/" + entityId);
+  let payment = asRecord((await paymentRef.get()).val());
+  let refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
+  if (
+    asString(payment.provider).toUpperCase() !== "XENDIT" ||
+    asString(refund.status).toUpperCase() !== "SUCCEEDED"
+  ) return;
+  if (asString(refund.walletSettlementStatus).toUpperCase() === "POSTED") return;
+
+  const entityType = asString(payment.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
+  const entityPath = entityType === "TRIP" ? "trips/" : "orders/";
+  const entitySnapshot = await db.ref(entityPath + entityId).get();
+  if (!entitySnapshot.exists()) throw new HttpsError("not-found", "The refunded order or trip was not found.");
+  const entity = asRecord(entitySnapshot.val());
+
+  if (
+    asString(payment.earningsPendingStatus).toUpperCase() !== "PENDING" &&
+    asString(payment.earningsSettlementStatus).toUpperCase() !== "RELEASED"
+  ) {
+    await reconcileCompletedPaymentEarnings(entityType, entityId, entity, {
+      ...payment,
+      status: "PAID",
+      suppressPayoutQueue: true,
+    });
+    payment = asRecord((await paymentRef.get()).val());
+    refund = asRecord(asRecord(payment.refunds)[refundAttemptId]);
+    if (asString(refund.walletSettlementStatus).toUpperCase() === "POSTED") return;
+  }
+
+  const refundAmount = nonNegativeInteger(refund.amountCentavos, "confirmed refund amount");
+  const grossAmount = nonNegativeInteger(payment.amountCentavos, "original payment amount");
+  if (refundAmount <= 0 || grossAmount <= 0 || refundAmount > grossAmount) {
+    throw new HttpsError("data-loss", "The confirmed refund amount does not match the original payment.");
+  }
+  const breakdown = asRecord(payment.breakdown ?? entity.breakdown);
+  const merchantShare = entityType === "ORDER" ? nonNegativeInteger(breakdown.merchantShare ?? 0, "merchant share") : 0;
+  const courierShare = entityType === "ORDER" ? nonNegativeInteger(breakdown.courierShare ?? 0, "courier share") : 0;
+  const driverShare = entityType === "TRIP" ? nonNegativeInteger(breakdown.driverShare ?? 0, "driver share") : 0;
+  const platformShare = nonNegativeInteger(breakdown.platformShare ?? 0, "platform share");
+  const originalShares = merchantShare + courierShare + driverShare + platformShare;
+  if (originalShares !== grossAmount) throw new HttpsError("failed-precondition", "Original payment split does not reconcile.");
+
+  const scaled = (share: number): number =>
+    Number((BigInt(refundAmount) * BigInt(share)) / BigInt(grossAmount));
+  const merchantRefund = scaled(merchantShare);
+  const courierRefund = scaled(courierShare);
+  const driverRefund = scaled(driverShare);
+  const platformRefund = refundAmount - merchantRefund - courierRefund - driverRefund;
+  const isPending = asString(payment.earningsPendingStatus).toUpperCase() === "PENDING";
+  const sourceField: "pendingCentavos" | "availableCentavos" = isPending ? "pendingCentavos" : "availableCentavos";
+  const recipients: Array<{ uid: string; type: string; amount: number }> = [];
+  const merchantId = asString(entity.merchantId) || asString(entity.sourceId);
+  const courierId = asString(entity.deliveryId);
+  const driverId = asString(entity.driverId);
+  if (merchantRefund > 0 && !merchantId) {
+    throw new HttpsError("failed-precondition", "The refund cannot be reconciled because the original merchant recipient is missing.");
+  }
+  if (courierRefund > 0 && !courierId) {
+    throw new HttpsError("failed-precondition", "The refund is waiting for the original courier assignment before it can be reconciled.");
+  }
+  if (driverRefund > 0 && !driverId) {
+    throw new HttpsError("failed-precondition", "The refund cannot be reconciled because the original driver recipient is missing.");
+  }
+  if (merchantRefund > 0) recipients.push({ uid: merchantId, type: "MERCHANT", amount: merchantRefund });
+  if (courierRefund > 0) recipients.push({ uid: courierId, type: "COURIER", amount: courierRefund });
+  if (driverRefund > 0) recipients.push({ uid: driverId, type: "DRIVER", amount: driverRefund });
+
+  const lines: LedgerLine[] = [];
+  for (const recipient of recipients) {
+    const walletResult = await applyWalletRefundDebit(
+      recipient.uid,
+      "refund_" + refundAttemptId + "_" + recipient.uid,
+      sourceField,
+      recipient.amount
+    );
+    if (walletResult.debitedCentavos > 0) {
+      lines.push(ledgerLine(recipient.type + (isPending ? "_PENDING_PAYABLE" : "_AVAILABLE_PAYABLE"), recipient.uid, "DEBIT", walletResult.debitedCentavos));
+    }
+    if (walletResult.debtCentavos > 0) {
+      lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", recipient.uid, "DEBIT", walletResult.debtCentavos));
+    }
+  }
+  if (platformRefund > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "DEBIT", platformRefund));
+  lines.push(ledgerLine("XENDIT_REFUND_CLEARING", "PLATFORM", "CREDIT", refundAmount));
+
+  const entryId = "refund_settlement_" + entityType.toLowerCase() + "_" + entityId + "_" + refundAttemptId;
+  const entry = {
+    operationId: "REFUND_SETTLEMENT:" + entityType + ":" + entityId + ":" + refundAttemptId,
+    entryType: "REFUND_SETTLEMENT",
+    entityType,
+    entityId,
+    refundAttemptId,
+    refundId: asString(refund.providerRefundId),
+    totalCentavos: refundAmount,
+    lines,
+    memo: "Reconcile a provider-confirmed Xendit refund against participant earnings and commission",
+    createdAtTimestamp: Number(refund.createdAtTimestamp ?? refund.updatedAtTimestamp ?? payment.updatedAtTimestamp ?? 1),
+  };
+  await ensureMarketplaceLedgerEntry(entryId, entry);
+  await db.ref().update({
+    ["payments/" + entityId + "/refunds/" + refundAttemptId + "/walletSettlementStatus"]: "POSTED",
+    ["payments/" + entityId + "/refunds/" + refundAttemptId + "/walletLedgerEntryId"]: entryId,
+    ["payments/" + entityId + "/refunds/" + refundAttemptId + "/walletSettledAtTimestamp"]: Date.now(),
+  });
+}
+
+export const reconcileMarketplaceEarnings = onSchedule(
+  { schedule: "every 5 minutes", timeZone: "Asia/Manila", region: REGION },
+  async () => {
+    let released = 0;
+    let failed = 0;
+    const paidSnapshot = await db.ref("payments").orderByChild("status").equalTo("PAID").limitToLast(500).get();
+    const paidRows: Array<{ id: string; value: Record<string, unknown> }> = [];
+    paidSnapshot.forEach((child) => {
+      if (child.key) paidRows.push({ id: child.key, value: asRecord(child.val()) });
+      return false;
+    });
+    for (const row of paidRows) {
+      try {
+        const payment = row.value;
+        if (asString(payment.provider).toUpperCase() !== "XENDIT" ||
+            asString(payment.channelCode).toUpperCase() !== "GCASH" ||
+            asString(payment.earningsSettlementStatus).toUpperCase() === "RELEASED") continue;
+        const entityType = asString(payment.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
+        const entityPath = entityType === "TRIP" ? "trips/" : "orders/";
+        const entitySnapshot = await db.ref(entityPath + row.id).get();
+        if (!entitySnapshot.exists()) continue;
+        if (await reconcileCompletedPaymentEarnings(entityType, row.id, asRecord(entitySnapshot.val()), payment)) released++;
+      } catch (error) {
+        failed++;
+        logger.error("Paid transaction earnings reservation/release failed", { entityId: row.id, error });
+      }
+    }
+    const orderSnapshot = await db.ref("orders").orderByChild("status").equalTo("DELIVERED").limitToFirst(300).get();
+    const orders: Array<{ id: string; value: Record<string, unknown> }> = [];
+    orderSnapshot.forEach((child) => {
+      if (child.key) orders.push({ id: child.key, value: asRecord(child.val()) });
+      return false;
+    });
+    for (const order of orders) {
+      try {
+        const payment = asRecord((await db.ref("payments/" + order.id).get()).val());
+        if (asString(payment.earningsSettlementStatus) === "RELEASED") continue;
+        if (await reconcileCompletedPaymentEarnings("ORDER", order.id, order.value, payment)) released++;
+      } catch (error) {
+        failed++;
+        logger.error("Order earnings settlement failed", { orderId: order.id, error });
+      }
+    }
+
+    const tripSnapshot = await db.ref("trips").orderByChild("status").equalTo("COMPLETED").limitToFirst(300).get();
+    const trips: Array<{ id: string; value: Record<string, unknown> }> = [];
+    tripSnapshot.forEach((child) => {
+      if (child.key) trips.push({ id: child.key, value: asRecord(child.val()) });
+      return false;
+    });
+    for (const trip of trips) {
+      try {
+        const payment = asRecord((await db.ref("payments/" + trip.id).get()).val());
+        if (asString(payment.earningsSettlementStatus) === "RELEASED") continue;
+        if (await reconcileCompletedPaymentEarnings("TRIP", trip.id, trip.value, payment)) released++;
+      } catch (error) {
+        failed++;
+        logger.error("Ride earnings settlement failed", { tripId: trip.id, error });
+      }
+    }
+    logger.info("Marketplace earnings reconciliation finished", { released, failed });
+  }
+);
+
+function payoutStatusIsActive(status: string): boolean {
+  return [
+    "RESERVING",
+    "SUBMITTING",
+    "ACCEPTED",
+    "PENDING_COMPLIANCE_ASSESSMENT",
+    "ROUTING",
+    "REQUESTED",
+    "READY",
+    "LOCKED",
+    "RECONCILIATION_REQUIRED",
+  ].includes(status.toUpperCase());
+}
+
+function normalizePayoutProviderStatus(value: string): string {
+  const status = value.toUpperCase();
+  const allowed = [
+    "ACCEPTED",
+    "PENDING_COMPLIANCE_ASSESSMENT",
+    "REJECTED",
+    "ROUTING",
+    "REQUESTED",
+    "READY",
+    "LOCKED",
+    "EXPIRED",
+    "FAILED",
+    "SUCCEEDED",
+    "CANCELLED",
+    "REVERSED",
+  ];
+  return allowed.includes(status) ? status : "RECONCILIATION_REQUIRED";
+}
+
+function payoutIntentId(uid: string, key: string): string {
+  return createHash("sha256").update("LABMDA_PAYOUT|" + uid + "|" + key).digest("hex").slice(0, 32);
+}
+
+async function createPayoutProviderRequest(
+  payoutId: string,
+  secret: string
+): Promise<void> {
+  const payoutRef = db.ref("payouts/" + payoutId);
+  const payout = asRecord((await payoutRef.get()).val());
+  if (!payoutRef || !Object.keys(payout).length) return;
+  if (asString(payout.providerPayoutId)) return;
+  if (!["SUBMITTING", "RECONCILIATION_REQUIRED"].includes(asString(payout.status))) return;
+
+  const uid = asString(payout.userId);
+  const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
+  if (asString(account.status).toUpperCase() !== "VERIFIED") {
+    throw new HttpsError("failed-precondition", "The payout recipient account is not verified.");
+  }
+  const accountNumber = decryptPayoutAccountNumber(account);
+  const idempotencyKey = asString(payout.providerIdempotencyKey);
+  if (!idempotencyKey) throw new HttpsError("data-loss", "Payout idempotency reference is missing.");
+
+  const requestBody = {
+    reference_id: "labmda_payout_" + payoutId,
+    recipient: {
+      type: "INDIVIDUAL",
+      given_name: asString(account.givenName),
+      surname: asString(account.surname),
+      relationship: "CUSTOMER",
+      details: {
+        personal_mobile_number: asString(account.personalMobileNumber),
+      },
+      address: {
+        country: "PH",
+        street_line_1: asString(account.streetLine1),
+        city: asString(account.city),
+        province_state: asString(account.provinceState),
+        postal_code: asString(account.postalCode),
+      },
+      account_details: {
+        currency: "PHP",
+        account_country: "PH",
+        account_holder_name: asString(account.accountHolderName),
+        account_number: accountNumber,
+        routing_type_1: "WALLET",
+        routing_value_1: "PH_GCASH",
+      },
+    },
+    payout_details: {
+      source_currency: "PHP",
+      source_amount: nonNegativeInteger(payout.amountCentavos, "payout amount"),
+      destination_currency: "PHP",
+    },
+    source_of_fund: "BUSINESS_REVENUE",
+    purpose_code: "SALARY",
+    description: ("Labmda " + asString(payout.earningType) + " earnings").slice(0, 100),
+  };
+
+  let response: Response;
+  let providerBody: Record<string, unknown>;
+  try {
+    response = await fetch("https://api.xendit.co/v3/payouts", {
+      method: "POST",
+      headers: {
+        Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
+        "Content-Type": "application/json",
+        "api-version": "2025-09-01",
+        "Idempotency-key": idempotencyKey,
+      },
+      body: JSON.stringify(requestBody),
+    });
+    providerBody = asRecord(await response.json().catch(() => ({})));
+  } catch (error) {
+    logger.warn("Xendit payout request response is uncertain; it will be retried idempotently", {
+      payoutId,
+      error,
+    });
+    await payoutRef.update({
+      status: "RECONCILIATION_REQUIRED",
+      lastError: "Provider response was not received; retry will use the same idempotency key.",
+      updatedAtTimestamp: Date.now(),
+    });
+    await db.ref("payoutReconciliationQueue/" + payoutId).set({
+      payoutId,
+      dueAtTimestamp: Date.now() + PAYOUT_RECONCILIATION_MS,
+      attempts: Number(payout.attempts ?? 0) + 1,
+    });
+    return;
+  }
+
+  if (!response.ok) {
+    const failureCode = asString(providerBody.error_code) || "XENDIT_HTTP_" + response.status;
+    logger.error("Xendit payout creation failed", { payoutId, status: response.status, providerBody });
+    // 5xx/429 and DUPLICATE_ERROR may represent an unknown create result. Keep the
+    // reservation and retry the identical body with the identical provider key.
+    if (response.status >= 500 || response.status === 429 || failureCode === "DUPLICATE_ERROR") {
+      await payoutRef.update({
+        status: "RECONCILIATION_REQUIRED",
+        failureCode,
+        lastError: "Provider response is uncertain; the same idempotency key will be reconciled.",
+        updatedAtTimestamp: Date.now(),
+      });
+      await db.ref("payoutReconciliationQueue/" + payoutId).set({
+        payoutId,
+        dueAtTimestamp: Date.now() + PAYOUT_RECONCILIATION_MS,
+        attempts: Number(payout.attempts ?? 0) + 1,
+      });
+      return;
+    }
+    await applyPayoutProviderStatus({
+      payoutId,
+      providerPayoutId: "",
+      referenceId: asString(providerBody.reference_id) || "labmda_payout_" + payoutId,
+      status: "FAILED",
+      sourceAmount: nonNegativeInteger(payout.amountCentavos, "payout amount"),
+      failureCode,
+      providerUpdatedAt: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const providerPayoutId = asString(providerBody.payout_id);
+  const referenceId = asString(providerBody.reference_id);
+  const sourceAmount = nonNegativeInteger(providerBody.source_amount, "provider payout source amount");
+  if (
+    !providerPayoutId.startsWith("po-") ||
+    referenceId !== "labmda_payout_" + payoutId ||
+    sourceAmount !== Number(payout.amountCentavos) ||
+    asString(providerBody.source_currency).toUpperCase() !== "PHP"
+  ) {
+    logger.error("Xendit payout response did not match the reserved payout", { payoutId, providerBody });
+    await payoutRef.update({
+      status: "RECONCILIATION_REQUIRED",
+      lastError: "Provider response could not be matched to the reserved payout.",
+      updatedAtTimestamp: Date.now(),
+    });
+    await db.ref("payoutReconciliationQueue/" + payoutId).set({
+      payoutId,
+      dueAtTimestamp: Date.now() + PAYOUT_RECONCILIATION_MS,
+      attempts: Number(payout.attempts ?? 0) + 1,
+    });
+    return;
+  }
+  await applyPayoutProviderStatus({
+    payoutId,
+    providerPayoutId,
+    referenceId,
+    status: normalizePayoutProviderStatus(asString(providerBody.status)),
+    sourceAmount,
+    failureCode: asString(providerBody.failure_code),
+    providerUpdatedAt: asString(providerBody.updated) || asString(providerBody.created),
+  });
+}
+
+async function applyPayoutProviderStatus(args: {
+  payoutId: string;
+  providerPayoutId: string;
+  referenceId: string;
+  status: string;
+  sourceAmount: number;
+  failureCode?: string;
+  providerUpdatedAt?: string;
+}): Promise<void> {
+  const payoutRef = db.ref("payouts/" + args.payoutId);
+  let payoutError = "";
+  const transaction = await payoutRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    if (!Object.keys(current).length) return;
+    const expectedReference = "labmda_payout_" + args.payoutId;
+    if (
+      asString(current.referenceId) !== expectedReference ||
+      args.referenceId !== expectedReference ||
+      Number(current.amountCentavos) !== args.sourceAmount ||
+      (asString(current.providerPayoutId) &&
+        args.providerPayoutId &&
+        asString(current.providerPayoutId) !== args.providerPayoutId)
+    ) {
+      payoutError = "Provider payout reference or amount did not match the server reservation.";
+      return;
+    }
+    const currentStatus = asString(current.status).toUpperCase();
+    const incomingStatus = normalizePayoutProviderStatus(args.status);
+    if (currentStatus === "SUCCEEDED" && incomingStatus !== "REVERSED") return current;
+    if (["FAILED", "REJECTED", "CANCELLED", "EXPIRED"].includes(currentStatus) &&
+        !["SUCCEEDED", "REVERSED"].includes(incomingStatus)) return current;
+    return {
+      ...current,
+      providerPayoutId: args.providerPayoutId || asString(current.providerPayoutId),
+      providerStatus: incomingStatus,
+      status: incomingStatus,
+      failureCode: args.failureCode || asString(current.failureCode),
+      providerUpdatedAt: args.providerUpdatedAt || asString(current.providerUpdatedAt),
+      updatedAtTimestamp: Date.now(),
+    };
+  });
+  if (payoutError) throw new HttpsError("data-loss", payoutError);
+  if (!transaction.committed) {
+    const current = asRecord((await payoutRef.get()).val());
+    if (!Object.keys(current).length) throw new HttpsError("not-found", "Payout reservation not found.");
+    const savedStatus = asString(current.status).toUpperCase();
+    if (savedStatus !== normalizePayoutProviderStatus(args.status) &&
+        !(savedStatus === "SUCCEEDED" && args.status === "SUCCEEDED")) return;
+  }
+  const payout = asRecord((await payoutRef.get()).val());
+  const status = asString(payout.status).toUpperCase();
+  const uid = asString(payout.userId);
+  const amount = nonNegativeInteger(payout.amountCentavos, "payout amount");
+  const entryPrefix = "payout_" + args.payoutId;
+
+  if (status === "SUCCEEDED") {
+    const walletResult = await applyPayoutWalletTerminal(uid, args.payoutId, amount, "SUCCEEDED");
+    const entryId = entryPrefix + "_success";
+    const entry = {
+      operationId: "PAYOUT_SUCCESS:" + args.payoutId,
+      entryType: "PAYOUT_SUCCESS",
+      payoutId: args.payoutId,
+      userId: uid,
+      totalCentavos: amount,
+      lines: [
+        ledgerLine("WALLET_PAYOUT_PENDING", uid, "DEBIT", amount),
+        ledgerLine("XENDIT_PAYOUT_CLEARING", "PLATFORM", "CREDIT", amount),
+      ],
+      memo: "Confirmed Xendit payout",
+      createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
+    };
+    await ensureMarketplaceLedgerEntry(entryId, entry);
+    await payoutRef.update({ ledgerEntryId: entryId, successLedgerEntryId: entryId, refundRecoveredCentavos: walletResult.refundRecoveredCentavos, completedAtTimestamp: Date.now() });
+    await db.ref("payoutReconciliationQueue/" + args.payoutId).remove();
+  } else if (status === "FAILED" || status === "REJECTED" || status === "CANCELLED" || status === "EXPIRED") {
+    const walletResult = await applyPayoutWalletTerminal(uid, args.payoutId, amount, "FAILED");
+    const availableAfterRecovery = amount - walletResult.refundRecoveredCentavos;
+    const entryId = entryPrefix + "_failed";
+    const entry = {
+      operationId: "PAYOUT_FAILED:" + args.payoutId,
+      entryType: "PAYOUT_FAILED",
+      payoutId: args.payoutId,
+      userId: uid,
+      totalCentavos: amount,
+      lines: [
+        ledgerLine("WALLET_PAYOUT_PENDING", uid, "DEBIT", amount),
+        ...(availableAfterRecovery > 0 ? [ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", availableAfterRecovery)] : []),
+        ...(walletResult.refundRecoveredCentavos > 0 ? [ledgerLine("WALLET_REFUND_RECEIVABLE", uid, "CREDIT", walletResult.refundRecoveredCentavos)] : []),
+      ],
+      memo: "Return reserved wallet funds after a failed payout",
+      createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
+    };
+    await ensureMarketplaceLedgerEntry(entryId, entry);
+    await payoutRef.update({ ledgerEntryId: entryId, failureLedgerEntryId: entryId, refundRecoveredCentavos: walletResult.refundRecoveredCentavos, completedAtTimestamp: Date.now() });
+    await db.ref("payoutReconciliationQueue/" + args.payoutId).remove();
+  } else if (status === "REVERSED") {
+    const walletResult = await applyPayoutWalletTerminal(uid, args.payoutId, amount, "REVERSED");
+    const availableAfterRecovery = amount - walletResult.refundRecoveredCentavos;
+    const entryId = entryPrefix + "_reversed";
+    const entry = {
+      operationId: "PAYOUT_REVERSED:" + args.payoutId,
+      entryType: "PAYOUT_REVERSED",
+      payoutId: args.payoutId,
+      userId: uid,
+      totalCentavos: amount,
+      lines: [
+        ledgerLine("XENDIT_PAYOUT_CLEARING", "PLATFORM", "DEBIT", amount),
+        ...(availableAfterRecovery > 0 ? [ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "CREDIT", availableAfterRecovery)] : []),
+        ...(walletResult.refundRecoveredCentavos > 0 ? [ledgerLine("WALLET_REFUND_RECEIVABLE", uid, "CREDIT", walletResult.refundRecoveredCentavos)] : []),
+      ],
+      memo: "Restore a payout returned by the recipient bank or wallet",
+      createdAtTimestamp: Number(payout.createdAtTimestamp ?? 1),
+    };
+    await ensureMarketplaceLedgerEntry(entryId, entry);
+    await payoutRef.update({ ledgerEntryId: entryId, reversalLedgerEntryId: entryId, refundRecoveredCentavos: walletResult.refundRecoveredCentavos, reversedAtTimestamp: Date.now() });
+    await db.ref("payoutReconciliationQueue/" + args.payoutId).remove();
+    enqueueWalletPayout(uid);
+  } else {
+    await db.ref("payoutReconciliationQueue/" + args.payoutId).set({
+      payoutId: args.payoutId,
+      dueAtTimestamp: Date.now() + PAYOUT_RECONCILIATION_MS,
+      attempts: 0,
+    });
+  }
+}
+
+async function reserveAndSubmitPayout(
+  uid: string,
+  requestKey: string,
+  automatic: boolean
+): Promise<Record<string, unknown>> {
+  const payoutId = payoutIntentId(uid, requestKey);
+  const payoutRef = db.ref("payouts/" + payoutId);
+  const existing = asRecord((await payoutRef.get()).val());
+  if (Object.keys(existing).length) {
+    if (asString(existing.userId) !== uid) throw new HttpsError("already-exists", "This payout key belongs to another user.");
+    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
+    if (!asString(existing.providerPayoutId) && ["SUBMITTING", "RECONCILIATION_REQUIRED"].includes(asString(existing.status))) {
+      if (!secret) throw new HttpsError("failed-precondition", "Xendit money-out credentials are not configured.");
+      await createPayoutProviderRequest(payoutId, secret);
+    }
+    return asRecord((await payoutRef.get()).val());
+  }
+
+  const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
+  if (asString(account.status).toUpperCase() !== "VERIFIED") {
+    throw new HttpsError("failed-precondition", "Set up a payout account and have it verified before requesting a payout.");
+  }
+  const secret = XENDIT_PAYOUT_SECRET_KEY.value();
+  if (!secret) throw new HttpsError("failed-precondition", "Xendit money-out credentials are not configured.");
+  const walletRef = db.ref("wallets/" + uid);
+  const wallet = asRecord((await walletRef.get()).val());
+  const amount = walletNumber(wallet, "availableCentavos");
+  if (walletNumber(wallet, "refundDebtCentavos") > 0) {
+    throw new HttpsError("failed-precondition", "Outstanding refund recovery must be cleared from future earnings before another payout.");
+  }
+  const minimum = automatic ? AUTO_PAYOUT_MINIMUM_CENTAVOS : MANUAL_PAYOUT_MINIMUM_CENTAVOS;
+  if (amount < minimum) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Available earnings must reach PHP " + phpFromCents(minimum).toFixed(2) + " before payout."
+    );
+  }
+  if (asString(wallet.activePayoutId)) {
+    throw new HttpsError("already-exists", "A payout is already being processed for this wallet.");
+  }
+
+  const timestamp = Date.now();
+  const providerIdempotencyKey = "labmda_payout_" + payoutId;
+  const payout = {
+    id: payoutId,
+    userId: uid,
+    earningType: "MARKETPLACE",
+    amountCentavos: amount,
+    amount: phpFromCents(amount),
+    currency: "PHP",
+    status: "RESERVING",
+    provider: "XENDIT",
+    providerIdempotencyKey,
+    referenceId: "labmda_payout_" + payoutId,
+    payoutAccountStatus: "VERIFIED",
+    accountChannelCode: asString(account.channelCode),
+    maskedAccountNumber: asString(account.maskedAccountNumber),
+    automatic,
+    attempts: 0,
+    createdAtTimestamp: timestamp,
+    updatedAtTimestamp: timestamp,
+  };
+  const createTransaction = await payoutRef.transaction((currentValue) => {
+    if (currentValue !== null && currentValue !== undefined) return;
+    return payout;
+  });
+  if (!createTransaction.committed) {
+    const saved = asRecord((await payoutRef.get()).val());
+    if (asString(saved.userId) !== uid) throw new HttpsError("already-exists", "This payout key is already in use.");
+    return saved;
+  }
+
+  let reserveError = "";
+  const reserve = await walletRef.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    if (asString(current.activePayoutId)) {
+      reserveError = "A payout is already being processed for this wallet.";
+      return;
+    }
+    const available = walletNumber(current, "availableCentavos");
+    if (available !== amount) {
+      reserveError = "Wallet balance changed while the payout was being prepared. Please retry.";
+      return;
+    }
+    const pending = walletNumber(current, "pendingPayoutCentavos");
+    const applied = asRecord(current.appliedLedgerEntries);
+    return {
+      ...current,
+      availableCentavos: available - amount,
+      pendingPayoutCentavos: pending + amount,
+      activePayoutId: payoutId,
+      appliedLedgerEntries: { ...applied, ["payout_reserve_" + payoutId]: true },
+      currency: "PHP",
+      updatedAtTimestamp: Date.now(),
+    };
+  });
+  if (!reserve.committed) {
+    await payoutRef.update({
+      status: "CANCELLED",
+      failureCode: reserveError || "WALLET_RESERVATION_FAILED",
+      updatedAtTimestamp: Date.now(),
+    });
+    throw new HttpsError("failed-precondition", reserveError || "Wallet balance could not be reserved.");
+  }
+
+  const reserveLedger = {
+    operationId: "PAYOUT_RESERVE:" + payoutId,
+    entryType: "PAYOUT_RESERVE",
+    payoutId,
+    userId: uid,
+    totalCentavos: amount,
+    lines: [
+      ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "DEBIT", amount),
+      ledgerLine("WALLET_PAYOUT_PENDING", uid, "CREDIT", amount),
+    ],
+    memo: automatic ? "Automatically reserve available earnings for payout" : "User requested an earnings payout",
+    createdAtTimestamp: timestamp,
+  };
+  await ensureMarketplaceLedgerEntry("payout_" + payoutId + "_reserve", reserveLedger);
+  await payoutRef.update({
+    status: "SUBMITTING",
+    reserveLedgerEntryId: "payout_" + payoutId + "_reserve",
+    updatedAtTimestamp: Date.now(),
+  });
+  await db.ref("payoutReconciliationQueue/" + payoutId).set({
+    payoutId,
+    dueAtTimestamp: Date.now() + PAYOUT_RECONCILIATION_MS,
+    attempts: 0,
+  });
+  await createPayoutProviderRequest(payoutId, secret);
+  return asRecord((await payoutRef.get()).val());
+}
+
+export const getMyWallet = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = requireUid(request);
+    const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
+    const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
+    const payoutSnapshot = await db.ref("payouts").orderByChild("userId").equalTo(uid).limitToLast(25).get();
+    const payouts: Record<string, unknown>[] = [];
+    payoutSnapshot.forEach((child) => {
+      if (child.exists()) {
+        const payout = asRecord(child.val());
+        payouts.push({
+          id: child.key,
+          amountCentavos: Number(payout.amountCentavos ?? 0),
+          status: asString(payout.status),
+          provider: asString(payout.provider),
+          providerPayoutId: asString(payout.providerPayoutId),
+          failureCode: asString(payout.failureCode),
+          createdAtTimestamp: Number(payout.createdAtTimestamp ?? 0),
+          updatedAtTimestamp: Number(payout.updatedAtTimestamp ?? 0),
+          maskedAccountNumber: asString(payout.maskedAccountNumber),
+        });
+      }
+      return false;
+    });
+    return {
+      userId: uid,
+      currency: "PHP",
+      availableCentavos: walletNumber(wallet, "availableCentavos"),
+      pendingCentavos: walletNumber(wallet, "pendingCentavos"),
+      cashOwedCentavos: walletNumber(wallet, "cashOwedCentavos"),
+      cashEarningsCentavos: walletNumber(wallet, "cashEarningsCentavos"),
+      pendingPayoutCentavos: walletNumber(wallet, "pendingPayoutCentavos"),
+      paidOutCentavos: walletNumber(wallet, "paidOutCentavos"),
+      refundDebtCentavos: walletNumber(wallet, "refundDebtCentavos"),
+      payoutAccount: Object.keys(account).length ? payoutAccountSummary(account) : { status: "NOT_CONFIGURED" },
+      payouts: payouts.sort((a, b) => Number(b.createdAtTimestamp) - Number(a.createdAtTimestamp)),
+    };
+  }
+);
+
+export const getMyPayoutAccount = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = requireUid(request);
+    const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
+    return Object.keys(account).length ? payoutAccountSummary(account) : { status: "NOT_CONFIGURED" };
+  }
+);
+
+export const savePayoutAccount = onCall(
+  { region: REGION, secrets: [PAYOUT_ACCOUNT_ENCRYPTION_KEY] },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const givenName = asString(data.givenName);
+    const surname = asString(data.surname);
+    const accountHolderName = asString(data.accountHolderName);
+    const accountNumber = asString(data.accountNumber).replace(/\s+/g, "");
+    const phone = normalizePhilippineMobile(asString(data.personalMobileNumber));
+    const streetLine1 = asString(data.streetLine1);
+    const city = asString(data.city);
+    const provinceState = asString(data.provinceState);
+    const postalCode = asString(data.postalCode);
+    if (!givenName || !surname || !accountHolderName) {
+      throw new HttpsError("invalid-argument", "Enter the recipient's first name, last name and account holder name.");
+    }
+    if (!/^\d{10,13}$/.test(accountNumber)) {
+      throw new HttpsError("invalid-argument", "Enter a valid GCash mobile/account number.");
+    }
+    if (!streetLine1 || !city || !provinceState || !/^[A-Za-z0-9 -]{3,12}$/.test(postalCode)) {
+      throw new HttpsError("invalid-argument", "Enter the recipient's Philippine street, city, province and postal code.");
+    }
+    const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
+    if (asString(wallet.activePayoutId)) {
+      throw new HttpsError("failed-precondition", "Payout account details cannot be changed while a payout is processing.");
+    }
+    const encrypted = encryptPayoutAccountNumber(accountNumber);
+    const timestamp = Date.now();
+    const record = {
+      userId: uid,
+      accountType: "GCASH",
+      channelCode: "PH_GCASH",
+      accountHolderName: accountHolderName.slice(0, 255),
+      givenName: givenName.slice(0, 50),
+      surname: surname.slice(0, 50),
+      personalMobileNumber: phone,
+      streetLine1: streetLine1.slice(0, 255),
+      city: city.slice(0, 255),
+      provinceState: provinceState.slice(0, 255),
+      postalCode: postalCode.slice(0, 30),
+      accountNumberCiphertext: encrypted.ciphertext,
+      accountNumberIv: encrypted.iv,
+      accountNumberTag: encrypted.tag,
+      maskedAccountNumber: maskAccountNumber(accountNumber),
+      status: "PENDING_REVIEW",
+      submittedAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    };
+    await db.ref("payoutAccounts/" + uid).set(record);
+    await db.ref("payoutAccountReviews/" + uid).set({
+      userId: uid,
+      accountType: "GCASH",
+      channelCode: "PH_GCASH",
+      accountHolderName: record.accountHolderName,
+      maskedAccountNumber: record.maskedAccountNumber,
+      status: "PENDING_REVIEW",
+      submittedAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    });
+    return payoutAccountSummary(record);
+  }
+);
+
+export const requestPayout = onCall(
+  { region: REGION, secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY] },
+  async (request) => {
+    const uid = requireUid(request);
+    await requireApprovedEarningsRole(uid);
+    const data = asRecord(request.data);
+    const key = parseIdempotencyKey(data.idempotencyKey);
+    const result = await reserveAndSubmitPayout(uid, key, false);
+    return {
+      payoutId: asString(result.id),
+      status: asString(result.status),
+      amountCentavos: Number(result.amountCentavos ?? 0),
+      providerPayoutId: asString(result.providerPayoutId),
+      maskedAccountNumber: asString(result.maskedAccountNumber),
+    };
+  }
+);
+
+export const adminReviewPayoutAccount = onCall(
+  { region: REGION },
+  async (request) => {
+    const adminUid = requireAdmin(request);
+    const data = asRecord(request.data);
+    const targetUid = asString(data.userId);
+    const approved = data.approved === true;
+    const note = asString(data.note).slice(0, 300);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(targetUid)) {
+      throw new HttpsError("invalid-argument", "A valid account owner is required.");
+    }
+    const accountRef = db.ref("payoutAccounts/" + targetUid);
+    const snapshot = await accountRef.get();
+    if (!snapshot.exists()) throw new HttpsError("not-found", "Payout account was not found.");
+    const account = asRecord(snapshot.val());
+    const wallet = asRecord((await db.ref("wallets/" + targetUid).get()).val());
+    if (asString(wallet.activePayoutId)) throw new HttpsError("failed-precondition", "A payout is currently in progress.");
+    const status = approved ? "VERIFIED" : "REJECTED";
+    const timestamp = Date.now();
+    await accountRef.update({
+      status,
+      reviewNote: note,
+      reviewedBy: adminUid,
+      reviewedAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    });
+    await db.ref("payoutAccountReviews/" + targetUid).update({
+      status,
+      reviewNote: note,
+      reviewedBy: adminUid,
+      reviewedAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    });
+    if (approved) enqueueWalletPayout(targetUid);
+    return {
+      userId: targetUid,
+      status,
+      maskedAccountNumber: asString(account.maskedAccountNumber),
+      reviewedAtTimestamp: timestamp,
+    };
+  }
+);
+
+export const getAdminPaymentDashboard = onCall(
+  { region: REGION },
+  async (request) => {
+    requireAdmin(request);
+    const [payments, ledger, payouts, wallets, accountReviews, cashCollections] = await Promise.all([
+      db.ref("payments").limitToLast(100).get(),
+      db.ref("ledger").limitToLast(100).get(),
+      db.ref("payouts").limitToLast(100).get(),
+      db.ref("wallets").limitToLast(100).get(),
+      db.ref("payoutAccountReviews").limitToLast(100).get(),
+      db.ref("cashCollections").limitToLast(100).get(),
+    ]);
+    const values = (snapshot: DataSnapshot): Record<string, unknown>[] => {
+      const output: Record<string, unknown>[] = [];
+      snapshot.forEach((child) => {
+        if (child.exists()) output.push({ id: child.key, ...asRecord(child.val()) });
+        return false;
+      });
+      return output.reverse();
+    };
+    return {
+      payments: values(payments),
+      ledgerEntries: values(ledger),
+      payouts: values(payouts),
+      wallets: values(wallets).map((wallet) => ({
+        userId: wallet.id,
+        availableCentavos: Number(wallet.availableCentavos ?? 0),
+        pendingCentavos: Number(wallet.pendingCentavos ?? 0),
+        cashOwedCentavos: Number(wallet.cashOwedCentavos ?? 0),
+        cashEarningsCentavos: Number(wallet.cashEarningsCentavos ?? 0),
+        pendingPayoutCentavos: Number(wallet.pendingPayoutCentavos ?? 0),
+        paidOutCentavos: Number(wallet.paidOutCentavos ?? 0),
+        refundDebtCentavos: Number(wallet.refundDebtCentavos ?? 0),
+      })),
+      payoutAccountReviews: values(accountReviews),
+      cashCollections: values(cashCollections),
+    };
+  }
+);
+
+export const xenditPayoutWebhook = onRequest(
+  { region: REGION, secrets: [XENDIT_PAYOUT_WEBHOOK_TOKEN] },
+  async (request, response) => {
+    if (request.method !== "POST") {
+      response.status(405).send("Method not allowed");
+      return;
+    }
+    if (!validCallbackToken(asString(request.get("x-callback-token")), XENDIT_PAYOUT_WEBHOOK_TOKEN.value())) {
+      response.status(401).send("Invalid payout callback token");
+      return;
+    }
+    const body = asRecord(request.body);
+    const event = asString(body.event).toLowerCase();
+    const data = asRecord(body.data);
+    const referenceId = asString(data.reference_id);
+    const match = /^labmda_payout_([a-f0-9]{32})$/i.exec(referenceId);
+    if (!match) {
+      response.status(200).send("Ignored unrelated payout event");
+      return;
+    }
+    const payoutId = match[1];
+    const payoutSnapshot = await db.ref("payouts/" + payoutId).get();
+    if (!payoutSnapshot.exists()) {
+      response.status(503).send("Payout reservation is not ready");
+      return;
+    }
+    const payout = asRecord(payoutSnapshot.val());
+    const sourceAmount = nonNegativeInteger(data.source_amount, "provider payout amount");
+    const providerPayoutId = asString(data.payout_id);
+    if (
+      referenceId !== asString(payout.referenceId) ||
+      sourceAmount !== Number(payout.amountCentavos) ||
+      asString(data.source_currency).toUpperCase() !== "PHP" ||
+      !providerPayoutId.startsWith("po-") ||
+      (asString(payout.providerPayoutId) && asString(payout.providerPayoutId) !== providerPayoutId)
+    ) {
+      logger.error("Xendit payout webhook did not match the stored payout", { payoutId, event });
+      response.status(400).send("Payout details mismatch");
+      return;
+    }
+    const mapped: Record<string, string> = {
+      "v3_payout.succeeded": "SUCCEEDED",
+      "v3_payout.failed": "FAILED",
+      "v3_payout.reversed": "REVERSED",
+      "v3_payout.rejected": "REJECTED",
+      "v3_payout.pending_compliance": "PENDING_COMPLIANCE_ASSESSMENT",
+    };
+    const status = mapped[event];
+    if (!status) {
+      response.status(200).send("Ignored payout event");
+      return;
+    }
+    try {
+      await applyPayoutProviderStatus({
+        payoutId,
+        providerPayoutId,
+        referenceId,
+        status,
+        sourceAmount,
+        failureCode: asString(data.failure_code),
+        providerUpdatedAt: asString(data.updated) || asString(body.created),
+      });
+      response.status(200).send("OK");
+    } catch (error) {
+      logger.error("Xendit payout webhook reconciliation failed", { payoutId, event, error });
+      response.status(503).send("Payout status could not be applied");
+    }
+  }
+);
+
+export const reconcileRefundEarnings = onSchedule(
+  { schedule: "every 5 minutes", timeZone: "Asia/Manila", region: REGION },
+  async () => {
+    let reconciled = 0;
+    let failed = 0;
+    for (const status of ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"]) {
+      const snapshot = await db.ref("payments").orderByChild("status").equalTo(status).limitToLast(300).get();
+      const rows: Array<{ entityId: string; payment: Record<string, unknown> }> = [];
+      snapshot.forEach((child) => {
+        if (child.key) rows.push({ entityId: child.key, payment: asRecord(child.val()) });
+        return false;
+      });
+      for (const row of rows) {
+        const refunds = asRecord(row.payment.refunds);
+        for (const [refundAttemptId, rawRefund] of Object.entries(refunds)) {
+          const refund = asRecord(rawRefund);
+          if (
+            asString(refund.status).toUpperCase() !== "SUCCEEDED" ||
+            asString(refund.walletSettlementStatus).toUpperCase() === "POSTED"
+          ) continue;
+          try {
+            await reconcileRefundedPaymentEarnings(row.entityId, refundAttemptId);
+            const latest = asRecord((await db.ref("payments/" + row.entityId + "/refunds/" + refundAttemptId).get()).val());
+            if (asString(latest.walletSettlementStatus).toUpperCase() === "POSTED") reconciled++;
+          } catch (error) {
+            failed++;
+            logger.warn("Confirmed refund remains queued for wallet reconciliation", {
+              entityId: row.entityId,
+              refundAttemptId,
+              error,
+            });
+          }
+        }
+      }
+    }
+    logger.info("Refund wallet reconciliation finished", { reconciled, failed });
+  }
+);
+
+export const reconcilePayouts = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "Asia/Manila",
+    region: REGION,
+    secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY],
+  },
+  async () => {
+    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
+    if (!secret) {
+      logger.error("Payout reconciliation skipped because Xendit secret key is not configured");
+      return;
+    }
+    const now = Date.now();
+    const pending = await db.ref("payoutReconciliationQueue")
+      .orderByChild("dueAtTimestamp")
+      .endAt(now)
+      .limitToFirst(100)
+      .get();
+    const entries: Array<{ payoutId: string }> = [];
+    pending.forEach((child) => {
+      if (child.key) entries.push({ payoutId: child.key });
+      return false;
+    });
+    for (const entry of entries) {
+      try {
+        const payoutRef = db.ref("payouts/" + entry.payoutId);
+        const payout = asRecord((await payoutRef.get()).val());
+        if (!Object.keys(payout).length || !payoutStatusIsActive(asString(payout.status))) {
+          await db.ref("payoutReconciliationQueue/" + entry.payoutId).remove();
+          continue;
+        }
+        const providerId = asString(payout.providerPayoutId);
+        if (!providerId) {
+          await createPayoutProviderRequest(entry.payoutId, secret);
+          continue;
+        }
+        const response = await fetch(
+          "https://api.xendit.co/v3/payouts/" + encodeURIComponent(providerId),
+          {
+            method: "GET",
+            headers: {
+              Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
+              "Content-Type": "application/json",
+              "api-version": "2025-09-01",
+            },
+          }
+        );
+        const provider = asRecord(await response.json().catch(() => ({})));
+        if (!response.ok) throw new Error("Xendit payout status lookup returned HTTP " + response.status);
+        const sourceAmount = nonNegativeInteger(provider.source_amount, "provider payout source amount");
+        const referenceId = asString(provider.reference_id);
+        if (
+          asString(provider.payout_id) !== providerId ||
+          referenceId !== asString(payout.referenceId) ||
+          sourceAmount !== Number(payout.amountCentavos) ||
+          asString(provider.source_currency).toUpperCase() !== "PHP"
+        ) {
+          throw new Error("Xendit payout status did not match the reserved recipient transfer.");
+        }
+        await applyPayoutProviderStatus({
+          payoutId: entry.payoutId,
+          providerPayoutId: providerId,
+          referenceId,
+          status: normalizePayoutProviderStatus(asString(provider.status)),
+          sourceAmount,
+          failureCode: asString(provider.failure_code),
+          providerUpdatedAt: asString(provider.updated),
+        });
+      } catch (error) {
+        logger.error("Payout reconciliation attempt failed", { payoutId: entry.payoutId, error });
+        const queueRef = db.ref("payoutReconciliationQueue/" + entry.payoutId);
+        const queue = asRecord((await queueRef.get()).val());
+        const attempts = Number(queue.attempts ?? 0) + 1;
+        await queueRef.update({
+          attempts,
+          dueAtTimestamp: now + Math.min(60, 5 * Math.pow(2, Math.min(attempts, 3))) * 60 * 1000,
+          lastError: "Provider status lookup failed; payout remains reserved.",
+        });
+      }
+    }
+  }
+);
+
+export const processAutomaticPayouts = onSchedule(
+  {
+    schedule: "every 15 minutes",
+    timeZone: "Asia/Manila",
+    region: REGION,
+    secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY],
+  },
+  async () => {
+    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
+    if (!secret) return;
+    const queue = await db.ref("walletPayoutQueue").limitToFirst(100).get();
+    const entries: Array<{ uid: string; updatedAtTimestamp: number }> = [];
+    queue.forEach((child) => {
+      if (child.key) {
+        const item = asRecord(child.val());
+        entries.push({
+          uid: child.key,
+          updatedAtTimestamp: Number(item.updatedAtTimestamp ?? item.dueAtTimestamp ?? 0),
+        });
+      }
+      return false;
+    });
+    for (const queued of entries) {
+      const uid = queued.uid;
+      try {
+        await requireApprovedEarningsRole(uid);
+        const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
+        const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
+        const available = walletNumber(wallet, "availableCentavos");
+        if (walletNumber(wallet, "refundDebtCentavos") > 0) {
+          await db.ref("walletPayoutQueue/" + uid).remove();
+          continue;
+        }
+        if (asString(account.status).toUpperCase() !== "VERIFIED") continue;
+        if (available < AUTO_PAYOUT_MINIMUM_CENTAVOS) {
+          await db.ref("walletPayoutQueue/" + uid).remove();
+          continue;
+        }
+        const requestKey = "auto_" + createHash("sha256").update(uid + "|" + queued.updatedAtTimestamp).digest("hex").slice(0, 32);
+        await reserveAndSubmitPayout(uid, requestKey, true);
+        await db.ref("walletPayoutQueue/" + uid).remove();
+      } catch (error) {
+        logger.warn("Automatic wallet payout is deferred", { uid, error });
+      }
+    }
   }
 );

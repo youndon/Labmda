@@ -97,6 +97,15 @@ class PanelScreen : Screen {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Cash Ledger & Remittances")
                 }
+                Button(
+                    onClick = { navigator?.push(AdminPaymentsScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Payments, Wallets & Payouts")
+                }
             }
         }
     }
