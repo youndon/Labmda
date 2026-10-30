@@ -52,14 +52,14 @@ class ShopsScreenModel : ScreenModel {
             }
 
             launch {
-                db.child("shops").valueEvents.collect { snapshot ->
+                db.child("publicShops").valueEvents.collect { snapshot ->
                     val list = mutableListOf<Shop>()
                     var ownedShop: Shop? = null
 
                     snapshot.children.forEach { child ->
                         try {
                             val id = child.key ?: return@forEach
-                            val ownerUid: String = child.child("ownerUid").value()
+                            val ownerUid: String = ""
                             val name: String = child.child("name").value()
                             val description: String = child.child("description").value()
                             val category: String = child.child("category").value()

@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.payments.ServiceActionsRepository
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
@@ -16,6 +18,7 @@ import kotlinx.coroutines.launch
 
 class FoodActivitiesScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
+    private val serviceActions = ServiceActionsRepository()
     private val currentUserId = Firebase.auth.currentUser?.uid
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
@@ -47,7 +50,7 @@ class FoodActivitiesScreenModel : ScreenModel {
     }
     fun cancelOrder(orderId: String) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            serviceActions.transitionOrderStatus(orderId, OrderStatus.CANCELLED.name)
         }
     }
 }

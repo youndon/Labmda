@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.common
 
+import com.zouitel.presentaion.payments.ServiceActionsRepository
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.CartItem
@@ -16,6 +18,7 @@ import kotlinx.coroutines.launch
 
 class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
     private val db = Firebase.database.reference()
+    private val serviceActions = ServiceActionsRepository()
 
     private val _order = MutableStateFlow<Order?>(null)
     val order: StateFlow<Order?> = _order.asStateFlow()
@@ -102,7 +105,7 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
 
     fun cancelOrder() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            serviceActions.transitionOrderStatus(orderId, OrderStatus.CANCELLED.name)
         }
     }
 }

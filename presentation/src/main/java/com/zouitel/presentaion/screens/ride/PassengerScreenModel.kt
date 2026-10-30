@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.payments.ServiceActionsRepository
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
@@ -21,6 +23,7 @@ data class PassengerInfo(val name: String = "", val phone: String = "")
 
 class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepository()) : ScreenModel {
     private val db = Firebase.database.reference()
+    private val serviceActions = ServiceActionsRepository()
     private val currentUser = Firebase.auth.currentUser
     private var pendingTripFingerprint: String? = null
     private var pendingTripIdempotencyKey: String? = null
@@ -108,11 +111,11 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
 
     private fun listenToOnlineDrivers() {
         screenModelScope.launch {
-            db.child("users").orderByChild("driverService/isOnline").equalTo(true).valueEvents.collect { snapshot ->
+            db.child("publicDrivers").valueEvents.collect { snapshot ->
                 val drivers = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
-                        val isOnline = runCatching { child.child("driverService").child("isOnline").value<Boolean>() }.getOrDefault(false)
+                        val isOnline = runCatching { child.child("isOnline").value<Boolean>() }.getOrDefault(false)
                         if (!isOnline) return@mapNotNull null
 
                         val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
@@ -215,7 +218,7 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
 
     fun cancelTrip(tripId: String) {
         screenModelScope.launch {
-            db.child("trips").child(tripId).child("status").setValue("CANCELLED")
+            serviceActions.transitionTripStatus(tripId, "CANCELLED")
         }
     }
 }

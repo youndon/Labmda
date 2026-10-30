@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.payments.ServiceActionsRepository
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.CartItem
@@ -16,6 +18,7 @@ import kotlinx.coroutines.launch
 
 class ShopActivitiesScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
+    private val serviceActions = ServiceActionsRepository()
     private val currentUserId = Firebase.auth.currentUser?.uid
 
     private val _activities = MutableStateFlow<List<Order>>(emptyList())
@@ -109,7 +112,7 @@ class ShopActivitiesScreenModel : ScreenModel {
 
     fun cancelShopOrder(orderId: String) {
         screenModelScope.launch {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            serviceActions.transitionOrderStatus(orderId, OrderStatus.CANCELLED.name)
         }
     }
 }

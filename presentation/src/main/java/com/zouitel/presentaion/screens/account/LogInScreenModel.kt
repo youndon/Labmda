@@ -15,7 +15,7 @@ class LogInScreenModel(
             val userNode = usersRef.child("users").child(userProfile.uid)
 
             // RTDB uses setValue() for serialized classes
-            userNode.setValue(userProfile)
+            userNode.updateChildren(mapOf("uid" to userProfile.uid, "fullName" to userProfile.fullName, "email" to userProfile.email, "phoneNumber" to userProfile.phoneNumber, "photoUrl" to userProfile.photoUrl))
 
             result.data = Unit
         } catch (e: Exception) {

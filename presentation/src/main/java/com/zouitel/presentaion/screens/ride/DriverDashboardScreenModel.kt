@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.payments.ServiceActionsRepository
+
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
@@ -20,6 +22,7 @@ class DriverDashboardScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUser = Firebase.auth.currentUser
     private val payments = PaymentRepository()
+    private val serviceActions = ServiceActionsRepository()
 
     private val _availableTrips = MutableStateFlow<List<Trip>>(emptyList())
     val availableTrips: StateFlow<List<Trip>> = _availableTrips.asStateFlow()
@@ -73,7 +76,7 @@ class DriverDashboardScreenModel : ScreenModel {
         }
 
         val trips = db.child("trips")
-        val openRequests = trips.orderByChild("status").equalTo("REQUESTED").valueEvents
+        val openRequests = db.child("availableRideRequests").valueEvents
         val assignedToDriver = trips.orderByChild("driverId").equalTo(uid).valueEvents
 
         screenModelScope.launch {
@@ -151,37 +154,8 @@ class DriverDashboardScreenModel : ScreenModel {
         val driverUid = currentUser?.uid ?: return
 
         screenModelScope.launch {
-            val tripRef = db.child("trips").child(trip.id)
-
-            val status = runCatching { tripRef.child("status").valueEvents.first().value<String>() }.getOrDefault("")
-            val takenBy = runCatching { tripRef.child("driverId").valueEvents.first().value<String>() }.getOrDefault("")
-            if (status != "REQUESTED" || takenBy.isNotBlank()) return@launch
-
-            val profile = db.child("users").child(driverUid).valueEvents.first()
-
-            val fullName = runCatching { profile.child("fullName").value<String>() }
-                .getOrElse { currentUser.displayName ?: "Verified Driver" }
-            val phone = runCatching { profile.child("phoneNumber").value<String>() }
-                .getOrElse {
-                    runCatching { profile.child("phone").value<String>() }
-                        .getOrDefault(currentUser.phoneNumber ?: "")
-                }
-
-            val vehicle = profile.child("driverService").child("vehicleInfo")
-            val make = runCatching { vehicle.child("make").value<String>() }.getOrDefault("Toyota")
-            val model = runCatching { vehicle.child("model").value<String>() }.getOrDefault("Corolla")
-            val color = runCatching { vehicle.child("color").value<String>() }.getOrDefault("Silver")
-            val plate = runCatching { vehicle.child("licensePlate").value<String>() }.getOrDefault("N/A")
-
-            tripRef.updateChildren(
-                mapOf(
-                    "driverId" to driverUid,
-                    "driverName" to fullName,
-                    "driverPhone" to phone,
-                    "vehicleDetails" to "$color $make $model ($plate)",
-                    "status" to "ACCEPTED"
-                )
-            )
+            runCatching { serviceActions.claimTrip(trip.id) }
+                .onFailure { error -> _cashActionError.value = error.message ?: "This ride could not be accepted." }
         }
     }
 
@@ -201,7 +175,8 @@ class DriverDashboardScreenModel : ScreenModel {
                     return@launch
                 }
             }
-            db.child("trips").child(tripId).child("status").setValue(newStatus)
+            runCatching { serviceActions.transitionTripStatus(tripId, newStatus) }
+                .onFailure { error -> _cashActionError.value = error.message ?: "Ride status could not be updated." }
         }
     }
 
