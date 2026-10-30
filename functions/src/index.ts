@@ -2916,13 +2916,18 @@ export const reconcilePendingPayments = onSchedule(
       .endAt(now)
       .limitToFirst(100)
       .get();
+    const paymentEntries: Array<{ key: string; value: Record<string, unknown> }> = [];
+    pendingPayments.forEach((snapshot) => {
+      if (snapshot.key) paymentEntries.push({ key: snapshot.key, value: asRecord(snapshot.val()) });
+      return false;
+    });
 
-    for (const child of pendingPayments.children) {
+    for (const child of paymentEntries) {
       const entityId = child.key;
-      if (!entityId) continue;
+      const queueRef = db.ref("paymentReconciliationQueue/" + entityId);
       const paymentSnapshot = await db.ref("payments/" + entityId).get();
       if (!paymentSnapshot.exists()) {
-        await child.ref.remove();
+        await queueRef.remove();
         continue;
       }
       const payment = asRecord(paymentSnapshot.val());
@@ -2931,7 +2936,7 @@ export const reconcilePendingPayments = onSchedule(
         asString(payment.channelCode).toUpperCase() !== "GCASH" ||
         asString(payment.status).toUpperCase() !== "PENDING"
       ) {
-        await child.ref.remove();
+        await childQueueRef.remove();
         continue;
       }
 
@@ -2971,7 +2976,7 @@ export const reconcilePendingPayments = onSchedule(
           });
         } else {
           const attempts = Number(asRecord(child.val()).attempts ?? 0) + 1;
-          await child.ref.update({
+          await queueRef.update({
             attempts,
             lastCheckedAtTimestamp: now,
             dueAtTimestamp: now + 5 * 60 * 1000,
@@ -2979,10 +2984,10 @@ export const reconcilePendingPayments = onSchedule(
         }
       } catch (error) {
         logger.warn("Payment reconciliation lookup failed", { entityId, error });
-        const queue = asRecord(child.val());
+        const queue = child.value;
         const attempts = Number(queue.attempts ?? 0) + 1;
         const backoffMinutes = Math.min(30, 5 * Math.pow(2, Math.min(attempts, 2)));
-        await child.ref.update({
+        await childQueueRef.update({
           attempts,
           lastCheckedAtTimestamp: now,
           dueAtTimestamp: now + backoffMinutes * 60 * 1000,
@@ -2995,9 +3000,15 @@ export const reconcilePendingPayments = onSchedule(
       .endAt(now)
       .limitToFirst(100)
       .get();
+    const refundEntries: Array<{ key: string; value: Record<string, unknown> }> = [];
+    pendingRefunds.forEach((snapshot) => {
+      if (snapshot.key) refundEntries.push({ key: snapshot.key, value: asRecord(snapshot.val()) });
+      return false;
+    });
 
-    for (const child of pendingRefunds.children) {
-      const queue = asRecord(child.val());
+    for (const child of refundEntries) {
+      const childQueueRef = db.ref("refundReconciliationQueue/" + child.key);
+      const queue = child.value;
       const entityId = asString(queue.entityId);
       const refundAttemptId = asString(queue.refundAttemptId);
       const providerRefundId = asString(queue.providerRefundId);
@@ -3071,8 +3082,8 @@ export const reconcilePendingPayments = onSchedule(
     }
 
     logger.info("Xendit payment reconciliation finished", {
-      paymentCandidates: pendingPayments.size,
-      refundCandidates: pendingRefunds.size,
+      paymentCandidates: pendingPayments.numChildren(),
+      refundCandidates: pendingRefunds.numChildren(),
     });
   }
 );
