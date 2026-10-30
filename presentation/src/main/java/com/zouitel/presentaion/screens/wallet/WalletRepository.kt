@@ -23,7 +23,7 @@ class WalletRepository {
     private fun Map<String,Any?>.n(key:String)=(this[key] as? Number)?.toLong() ?: 0L
     private fun Map<String,Any?>.commission():Long = (this["lines"] as? List<*>)?.sumOf { raw ->
         val line=rec(raw)
-        if(line["accountType"]=="PLATFORM_COMMISSION_REVENUE") line.n("creditCentavos") else 0L
+        if(line["accountType"]=="PLATFORM_COMMISSION_REVENUE") line.n("creditCentavos") - line.n("debitCentavos") else 0L
     } ?: 0L
     private fun rows(value: Any?): List<Map<String, Any?>> = (value as? List<*>)?.mapNotNull { rec(it).takeIf { x->x.isNotEmpty() } } ?: emptyList()
     private fun Map<String,Any?>.account()=PayoutAccountSummary(s("status").ifBlank{"NOT_CONFIGURED"},s("accountType"),s("channelCode"),s("accountHolderName"),s("maskedAccountNumber"),n("submittedAtTimestamp"),n("reviewedAtTimestamp"),s("reviewNote"))
