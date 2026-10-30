@@ -41,7 +41,7 @@ class StoreDetailsScreenModel(
 
     private fun loadShopLocation() {
         screenModelScope.launch {
-            val shopRef = db.child("shops").child(shop.id)
+            val shopRef = db.child("publicShops").child(shop.id)
             val lat = runCatching { shopRef.child("latitude").valueEvents.first().value<Double>() }.getOrNull()
             val lng = runCatching { shopRef.child("longitude").valueEvents.first().value<Double>() }.getOrNull()
             if (lat != null && lng != null && (lat != 0.0 || lng != 0.0)) {

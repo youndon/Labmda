@@ -1,80 +1,254 @@
 {
- "rules": {
-  ".read": false, ".write": false,
-  "users": {
-   ".read": "auth != null && auth.token.admin === true",
-   "$uid": {
-    ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
-    ".write": "auth != null && (auth.token.admin === true || (auth.uid === $uid && newData.child('isAdmin').val() === data.child('isAdmin').val() && newData.child('admin').val() === data.child('admin').val() && newData.child('adminRole').val() === data.child('adminRole').val() && newData.child('isAdministrator').val() === data.child('isAdministrator').val() && newData.child('administrator').val() === data.child('administrator').val() && newData.child('role').val() === data.child('role').val() && newData.child('roles').val() === data.child('roles').val() && newData.child('permissions').val() === data.child('permissions').val() && newData.child('isSuperAdmin').val() === data.child('isSuperAdmin').val() && (newData.child('foodStatus').val() === data.child('foodStatus').val() || ((data.child('foodStatus').val() === null || data.child('foodStatus').val() === 'NONE' || data.child('foodStatus').val() === 'REJECTED') && newData.child('foodStatus').val() === 'PENDING')) && newData.child('shopStatus').val() === data.child('shopStatus').val() && (newData.child('deliveryServices').child('status').val() === data.child('deliveryServices').child('status').val() || ((data.child('deliveryServices').child('status').val() === null || data.child('deliveryServices').child('status').val() === 'NONE' || data.child('deliveryServices').child('status').val() === 'REJECTED') && newData.child('deliveryServices').child('status').val() === 'PENDING')) && (newData.child('driverService').child('status').val() === data.child('driverService').child('status').val() || ((data.child('driverService').child('status').val() === null || data.child('driverService').child('status').val() === 'NONE' || data.child('driverService').child('status').val() === 'REJECTED') && newData.child('driverService').child('status').val() === 'PENDING'))))",
-    "$other": { ".validate": "($other !== 'isAdmin' && $other !== 'admin' && $other !== 'adminRole' && $other !== 'isAdministrator' && $other !== 'administrator' && $other !== 'role' && $other !== 'roles' && $other !== 'permissions' && $other !== 'isSuperAdmin') || newData.val() === data.val()" }
-   },
-   ".indexOn": ["driverService/isOnline"]
-  },
-  "publicDrivers": { ".read": "auth != null", ".write": false },
-  "availableRideRequests": { ".read": "auth != null && (root.child('users').child(auth.uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child(auth.uid).child('driverService').child('status').val() === 'ACTIVE')", ".write": false },
-  "availableDeliveryTasks": { ".read": "auth != null && (root.child('users').child(auth.uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child(auth.uid).child('deliveryServices').child('status').val() === 'ACTIVE')", ".write": false },
-  "orders": {
-   ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'clientId' && query.equalTo === auth.uid) || (query.orderByChild === 'sourceId' && query.equalTo === auth.uid) || (query.orderByChild === 'merchantId' && query.equalTo === auth.uid) || (query.orderByChild === 'deliveryId' && query.equalTo === auth.uid))",
-   ".write": false, ".indexOn": ["clientId","sourceId","merchantId","deliveryId","status"],
-   "$orderId": { ".read": "auth != null && (auth.token.admin === true || data.child('clientId').val() === auth.uid || data.child('sourceId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('deliveryId').val() === auth.uid)", ".write": false }
-  },
-  "trips": {
-   ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'passengerId' && query.equalTo === auth.uid) || (query.orderByChild === 'driverId' && query.equalTo === auth.uid))",
-   ".write": false, ".indexOn": ["passengerId","driverId","status"],
-   "$tripId": { ".read": "auth != null && (auth.token.admin === true || data.child('passengerId').val() === auth.uid || data.child('driverId').val() === auth.uid)", ".write": false }
-  },
-  "payments": {
-   ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'clientId' && query.equalTo === auth.uid) || (query.orderByChild === 'merchantId' && query.equalTo === auth.uid))",
-   ".write": false, ".indexOn": ["clientId","merchantId"],
-   "$paymentId": { ".read": "auth != null && (auth.token.admin === true || data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || root.child('orders').child($paymentId).child('deliveryId').val() === auth.uid || root.child('trips').child($paymentId).child('driverId').val() === auth.uid)", ".write": false }
-  },
-  "orderQuotes": { "$quoteId": { ".read": "auth != null && data.child('userId').val() === auth.uid", ".write": false } },
-  "pricingQuotes": { "$quoteId": { ".read": "auth != null && data.child('userId').val() === auth.uid", ".write": false } },
-  "config": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "restaurants": {
-   ".read": true, ".write": false,
-   "$restaurantId": {
-    ".write": "auth != null && auth.token.admin === true",
-    "isOpen": { ".write": "auth != null && auth.uid === $restaurantId && (root.child('users').child(auth.uid).child('foodStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('foodStatus').val() === 'ACTIVE')" },
-    "imageUrl": { ".write": "auth != null && auth.uid === $restaurantId && (root.child('users').child(auth.uid).child('foodStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('foodStatus').val() === 'ACTIVE')" },
-    "meals": { ".read": true, ".write": "auth != null && auth.uid === $restaurantId && (root.child('users').child(auth.uid).child('foodStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('foodStatus').val() === 'ACTIVE')" }
-   }
-  },
-  "shops": {
-   ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'ownerUid' && query.equalTo === auth.uid))",
-   ".write": false, ".indexOn": ["ownerUid"],
-   "$shopId": {
-    ".read": "auth != null && (auth.token.admin === true || data.child('ownerUid').val() === auth.uid)", ".write": false,
-    "name": { ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid" },
-    "description": { ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid" },
-    "category": { ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid" },
-    "phone": { ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid" },
-    "address": { ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid" },
-    "imageUrl": { ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid" },
-    "isOnline": { ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid && (root.child('users').child(auth.uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('shopStatus').val() === 'ACTIVE')" },
-    "status": { ".write": "auth != null && auth.token.admin === true" },
-    "ownerUid": { ".write": "auth != null && auth.token.admin === true" },
-    "createdAtTimestamp": { ".write": "auth != null && auth.token.admin === true" }
-   }
-  },
-  "publicShops": { ".read": "auth != null", ".write": false },
-  "wallets": { ".read": "auth != null && auth.token.admin === true", ".write": false, "$uid": { ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)", ".write": false } },
-  "payouts": { ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'userId' && query.equalTo === auth.uid))", ".write": false, ".indexOn": ["userId"], "$payoutId": { ".read": "auth != null && (auth.token.admin === true || data.child('userId').val() === auth.uid)", ".write": false } },
-  "payoutAccounts": { ".read": false, ".write": false },
-  "payoutAccountReviews": { ".read": "auth != null && auth.token.admin === true", ".write": false, "$uid": { ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)", ".write": false } },
-  "ledger": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "ledgerAccounts": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "ledgerPostingStatus": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "cashCollections": { ".read": "auth != null && auth.token.admin === true", ".write": false, ".indexOn": ["reconciliationStatus"] },
-  "cashRemittances": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "cashLedgerEntries": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "cashLedgerAccounts": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "cashLedgerPostingStatus": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "paymentCustomers": { ".read": false, ".write": false },
-  "paymentReconciliationQueue": { ".read": "auth != null && auth.token.admin === true", ".write": false, ".indexOn": ["dueAtTimestamp"] },
-  "refundReconciliationQueue": { ".read": "auth != null && auth.token.admin === true", ".write": false, ".indexOn": ["dueAtTimestamp"] },
-  "payoutReconciliationQueue": { ".read": "auth != null && auth.token.admin === true", ".write": false, ".indexOn": ["dueAtTimestamp"] },
-  "processedWebhookEvents": { ".read": "auth != null && auth.token.admin === true", ".write": false },
-  "user_profiles": { "$uid": { ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)", ".write": "auth != null && auth.uid === $uid" } }
- }
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "users": {
+      ".read": "auth != null && auth.token.admin === true",
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && (auth.token.admin === true || (auth.uid === $uid && newData.child('isAdmin').val() === data.child('isAdmin').val() && newData.child('admin').val() === data.child('admin').val() && newData.child('adminRole').val() === data.child('adminRole').val() && newData.child('isAdministrator').val() === data.child('isAdministrator').val() && newData.child('administrator').val() === data.child('administrator').val() && newData.child('role').val() === data.child('role').val() && newData.child('roles').val() === data.child('roles').val() && newData.child('permissions').val() === data.child('permissions').val() && newData.child('isSuperAdmin').val() === data.child('isSuperAdmin').val() && (newData.child('foodStatus').val() === data.child('foodStatus').val() || ((data.child('foodStatus').val() === null || data.child('foodStatus').val() === 'NONE' || data.child('foodStatus').val() === 'REJECTED') && newData.child('foodStatus').val() === 'PENDING')) && newData.child('shopStatus').val() === data.child('shopStatus').val() && (newData.child('deliveryServices').child('status').val() === data.child('deliveryServices').child('status').val() || ((data.child('deliveryServices').child('status').val() === null || data.child('deliveryServices').child('status').val() === 'NONE' || data.child('deliveryServices').child('status').val() === 'REJECTED') && newData.child('deliveryServices').child('status').val() === 'PENDING')) && (newData.child('driverService').child('status').val() === data.child('driverService').child('status').val() || ((data.child('driverService').child('status').val() === null || data.child('driverService').child('status').val() === 'NONE' || data.child('driverService').child('status').val() === 'REJECTED') && newData.child('driverService').child('status').val() === 'PENDING'))))",
+        "$other": {
+          ".validate": "($other !== 'isAdmin' && $other !== 'admin' && $other !== 'adminRole' && $other !== 'isAdministrator' && $other !== 'administrator' && $other !== 'role' && $other !== 'roles' && $other !== 'permissions' && $other !== 'isSuperAdmin') || newData.val() === data.val()"
+        }
+      },
+      ".indexOn": [
+        "driverService/isOnline"
+      ]
+    },
+    "publicDrivers": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "availableRideRequests": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child(auth.uid).child('driverService').child('status').val() === 'ACTIVE')",
+      ".write": false
+    },
+    "availableDeliveryTasks": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child(auth.uid).child('deliveryServices').child('status').val() === 'ACTIVE')",
+      ".write": false
+    },
+    "orders": {
+      ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'clientId' && query.equalTo === auth.uid) || (query.orderByChild === 'sourceId' && query.equalTo === auth.uid) || (query.orderByChild === 'merchantId' && query.equalTo === auth.uid) || (query.orderByChild === 'deliveryId' && query.equalTo === auth.uid))",
+      ".write": false,
+      ".indexOn": [
+        "clientId",
+        "sourceId",
+        "merchantId",
+        "deliveryId",
+        "status"
+      ],
+      "$orderId": {
+        ".read": "auth != null && (auth.token.admin === true || data.child('clientId').val() === auth.uid || data.child('sourceId').val() === auth.uid || data.child('merchantId').val() === auth.uid || data.child('deliveryId').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "trips": {
+      ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'passengerId' && query.equalTo === auth.uid) || (query.orderByChild === 'driverId' && query.equalTo === auth.uid))",
+      ".write": false,
+      ".indexOn": [
+        "passengerId",
+        "driverId",
+        "status"
+      ],
+      "$tripId": {
+        ".read": "auth != null && (auth.token.admin === true || data.child('passengerId').val() === auth.uid || data.child('driverId').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "payments": {
+      ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'clientId' && query.equalTo === auth.uid) || (query.orderByChild === 'merchantId' && query.equalTo === auth.uid))",
+      ".write": false,
+      ".indexOn": [
+        "clientId",
+        "merchantId"
+      ],
+      "$paymentId": {
+        ".read": "auth != null && (auth.token.admin === true || data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || root.child('orders').child($paymentId).child('deliveryId').val() === auth.uid || root.child('trips').child($paymentId).child('driverId').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "orderQuotes": {
+      "$quoteId": {
+        ".read": "auth != null && data.child('userId').val() === auth.uid",
+        ".write": false
+      }
+    },
+    "pricingQuotes": {
+      "$quoteId": {
+        ".read": "auth != null && data.child('userId').val() === auth.uid",
+        ".write": false
+      }
+    },
+    "config": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "restaurants": {
+      ".read": true,
+      ".write": false,
+      "$restaurantId": {
+        ".write": "auth != null && auth.token.admin === true",
+        "isOpen": {
+          ".write": "auth != null && auth.uid === $restaurantId && (root.child('users').child(auth.uid).child('foodStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('foodStatus').val() === 'ACTIVE')"
+        },
+        "imageUrl": {
+          ".write": "auth != null && auth.uid === $restaurantId && (root.child('users').child(auth.uid).child('foodStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('foodStatus').val() === 'ACTIVE')"
+        },
+        "meals": {
+          ".read": true,
+          ".write": "auth != null && auth.uid === $restaurantId && (root.child('users').child(auth.uid).child('foodStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('foodStatus').val() === 'ACTIVE')"
+        }
+      }
+    },
+    "shops": {
+      ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'ownerUid' && query.equalTo === auth.uid))",
+      ".write": false,
+      ".indexOn": [
+        "ownerUid"
+      ],
+      "$shopId": {
+        ".read": "auth != null && (auth.token.admin === true || data.child('ownerUid').val() === auth.uid)",
+        ".write": false,
+        "name": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid"
+        },
+        "description": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid"
+        },
+        "category": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid"
+        },
+        "phone": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid"
+        },
+        "address": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid"
+        },
+        "imageUrl": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid"
+        },
+        "isOnline": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid && (root.child('users').child(auth.uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('shopStatus').val() === 'ACTIVE')"
+        },
+        "status": {
+          ".write": "auth != null && auth.token.admin === true"
+        },
+        "ownerUid": {
+          ".write": "auth != null && auth.token.admin === true"
+        },
+        "createdAtTimestamp": {
+          ".write": "auth != null && auth.token.admin === true"
+        },
+        "products": {
+          ".read": true,
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid && (root.child('users').child(auth.uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('shopStatus').val() === 'ACTIVE')"
+        }
+      }
+    },
+    "publicShops": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "wallets": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false,
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
+    "payouts": {
+      ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'userId' && query.equalTo === auth.uid))",
+      ".write": false,
+      ".indexOn": [
+        "userId"
+      ],
+      "$payoutId": {
+        ".read": "auth != null && (auth.token.admin === true || data.child('userId').val() === auth.uid)",
+        ".write": false
+      }
+    },
+    "payoutAccounts": {
+      ".read": false,
+      ".write": false
+    },
+    "payoutAccountReviews": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false,
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": false
+      }
+    },
+    "ledger": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "ledgerAccounts": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "ledgerPostingStatus": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "cashCollections": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false,
+      ".indexOn": [
+        "reconciliationStatus"
+      ]
+    },
+    "cashRemittances": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "cashLedgerEntries": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "cashLedgerAccounts": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "cashLedgerPostingStatus": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "paymentCustomers": {
+      ".read": false,
+      ".write": false
+    },
+    "paymentReconciliationQueue": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false,
+      ".indexOn": [
+        "dueAtTimestamp"
+      ]
+    },
+    "refundReconciliationQueue": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false,
+      ".indexOn": [
+        "dueAtTimestamp"
+      ]
+    },
+    "payoutReconciliationQueue": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false,
+      ".indexOn": [
+        "dueAtTimestamp"
+      ]
+    },
+    "processedWebhookEvents": {
+      ".read": "auth != null && auth.token.admin === true",
+      ".write": false
+    },
+    "user_profiles": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    }
+  }
 }
