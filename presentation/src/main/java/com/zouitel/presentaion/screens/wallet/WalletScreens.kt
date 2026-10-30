@@ -82,6 +82,7 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
             item { WalletAmountCard("Pending earnings", wallet.pendingCentavos, "Released after the service has been completed") }
             item { WalletAmountCard("Cash owed to Labmda", wallet.cashOwedCentavos, "Cash collected by you that must be remitted") }
             item { WalletAmountCard("Cash earnings held by you", wallet.cashEarningsCentavos, "Your share from cash collected in person") }
+            item { WalletAmountCard("Refund recovery owed", wallet.refundDebtCentavos, "Deducted from future earnings before another payout is enabled") }
             item { WalletAmountCard("Payout in progress", wallet.pendingPayoutCentavos, "Reserved while Xendit processes a payout") }
             item { WalletAmountCard("Total paid out", wallet.paidOutCentavos, "Confirmed successful wallet payouts") }
             item {
