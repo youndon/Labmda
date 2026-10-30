@@ -78,6 +78,14 @@ class PanelScreen : Screen {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Manage Driver Applications")
                 }
+
+                Button(
+                    onClick = { navigator?.push(AdminPricingScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Text("Manage Pricing & Commissions")
+                }
             }
         }
     }
