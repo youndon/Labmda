@@ -2564,7 +2564,7 @@ export const refundPayment = onCall(
       .digest("hex")
       .slice(0, 32);
     const reasonValue = asString(data.reason).toUpperCase() || "REQUESTED_BY_CUSTOMER";
-    const validReasons = ["FRAUDULENT", "DUPLICATE", "REQUESTED_BY_CUSTOMER", "OTHERS"];
+    const validReasons = ["FRAUDULENT", "DUPLICATE", "REQUESTED_BY_CUSTOMER", "CANCELLATION", "OTHERS"];
     if (!validReasons.includes(reasonValue)) {
       throw new HttpsError("invalid-argument", "Unsupported refund reason.");
     }
