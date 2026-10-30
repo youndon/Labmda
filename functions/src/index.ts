@@ -1227,6 +1227,7 @@ export const createOrder = onCall(
         totalCentavos: Number(existing.totalPriceCentavos ?? 0),
         amount: Number(existing.totalPrice ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
+        distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
         reused: true,
       };
@@ -1803,6 +1804,7 @@ export const createTrip = onCall(
         fareCentavos: Number(existing.fareCentavos ?? 0),
         fare: Number(existing.fare ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
+        distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
         reused: true,
       };
@@ -1886,6 +1888,7 @@ export const createTrip = onCall(
           fareCentavos: Number(saved.fareCentavos ?? 0),
           fare: Number(saved.fare ?? 0),
           pricingVersion: Number(saved.pricingVersion ?? 0),
+          distanceMeters: Number(saved.distanceMeters ?? 0),
           breakdown: saved.breakdown ?? null,
           reused: true,
         };
