@@ -469,8 +469,8 @@ only the masked account number. An administrator must approve the account throug
 `adminReviewPayoutAccount`; `VERIFIED` means the recipient passed Labmda's manual review, not
 that Xendit has guaranteed a future transfer.
 
-Create or use an Xendit secret API key with the `MONEY-OUT` permission and set it as
-`XENDIT_SECRET_KEY`. Set `XENDIT_PAYOUT_WEBHOOK_TOKEN` to the payout callback verification token.
+Create a dedicated Xendit secret API key with the `MONEY-OUT` permission and set it as
+`XENDIT_PAYOUT_SECRET_KEY`. Keep `XENDIT_SECRET_KEY` limited to payment collection and refunds. Set `XENDIT_PAYOUT_WEBHOOK_TOKEN` to the payout callback verification token.
 Generate a random 32-byte encryption key (64 hexadecimal characters) and configure it as
 `PAYOUT_ACCOUNT_ENCRYPTION_KEY`. Keep these values in Firebase Secret Manager; do not commit
 real credentials or place them in Android resources.
