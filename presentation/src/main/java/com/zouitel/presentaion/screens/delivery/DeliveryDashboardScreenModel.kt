@@ -6,6 +6,7 @@ import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.screens.payment.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -22,6 +23,7 @@ data class OrderPoint(val lat: Double, val lng: Double)
 
 class DeliveryDashboardScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
+    private val payments = PaymentRepository()
     private val currentUid: String? get() = Firebase.auth.currentUser?.uid
 
     private val _activeDeliveries = MutableStateFlow<List<Order>>(emptyList())
@@ -31,6 +33,8 @@ class DeliveryDashboardScreenModel : ScreenModel {
     val completedDeliveries: StateFlow<List<Order>> = _completedDeliveries.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
+    private val _cashActionError = MutableStateFlow<String?>(null)
+    val cashActionError: StateFlow<String?> = _cashActionError.asStateFlow()
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 //
 //    private val _orderPoints = MutableStateFlow<Map<String, OrderPoint>>(emptyMap())
@@ -128,6 +132,16 @@ class DeliveryDashboardScreenModel : ScreenModel {
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
                             deliveryPhone = deliveryPhone,
+                            cashCollectionStatus = runCatching { child.child("cashCollectionStatus").value<String>() }.getOrDefault(""),
+                            cashCollectedBy = runCatching { child.child("cashCollectedBy").value<String>() }.getOrDefault(""),
+                            cashCollectedByRole = runCatching { child.child("cashCollectedByRole").value<String>() }.getOrDefault(""),
+                            cashCollectedAmountCentavos = runCatching { child.child("cashCollectedAmountCentavos").value<Long>() }.getOrDefault(0L),
+                            cashMerchantOwedCentavos = runCatching { child.child("cashMerchantOwedCentavos").value<Long>() }.getOrDefault(0L),
+                            cashPlatformOwedCentavos = runCatching { child.child("cashPlatformOwedCentavos").value<Long>() }.getOrDefault(0L),
+                            cashCollectorEarningsCentavos = runCatching { child.child("cashCollectorEarningsCentavos").value<Long>() }.getOrDefault(0L),
+                            cashRemittedCentavos = runCatching { child.child("cashRemittedCentavos").value<Long>() }.getOrDefault(0L),
+                            cashOutstandingRemittanceCentavos = runCatching { child.child("cashOutstandingRemittanceCentavos").value<Long>() }.getOrDefault(0L),
+                            cashRemittanceStatus = runCatching { child.child("cashRemittanceStatus").value<String>() }.getOrDefault(""),
                             pickupLocation = pickupLocation, pickupLat = pickupLat, pickupLng = pickupLng,
                             dropoffLocation = dropoffLocation, dropoffLat = dropoffLat, dropoffLng = dropoffLng,
                         )
@@ -203,11 +217,17 @@ class DeliveryDashboardScreenModel : ScreenModel {
 
     fun markCourierOrderDelivered(order: Order) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(order.id).updateChildren(
-                mapOf(
-                    "status" to OrderStatus.DELIVERED.name
-                )
-            )
+            if (order.paymentMethod.trim().equals("CASH", ignoreCase = true)) {
+                // Cash amount and split are read from the server-owned order record.
+                // The callable also changes the order status to DELIVERED.
+                runCatching { payments.confirmCashCollected("ORDER", order.id) }
+                    .onFailure { error ->
+                        _cashActionError.value = error.message ?: "Cash collection could not be confirmed."
+                    }
+            } else {
+                db.child("orders").child(order.id).child("status")
+                    .setValue(OrderStatus.DELIVERED.name)
+            }
         }
     }
 }
