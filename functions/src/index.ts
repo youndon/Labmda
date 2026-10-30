@@ -13,6 +13,7 @@ const db = getDatabase();
 const XENDIT_SECRET_KEY = defineSecret("XENDIT_SECRET_KEY");
 const XENDIT_WEBHOOK_TOKEN = defineSecret("XENDIT_WEBHOOK_TOKEN");
 const XENDIT_PAYOUT_WEBHOOK_TOKEN = defineSecret("XENDIT_PAYOUT_WEBHOOK_TOKEN");
+const XENDIT_PAYOUT_SECRET_KEY = defineSecret("XENDIT_PAYOUT_SECRET_KEY");
 const PAYOUT_ACCOUNT_ENCRYPTION_KEY = defineSecret("PAYOUT_ACCOUNT_ENCRYPTION_KEY");
 const GOOGLE_ROUTES_API_KEY = defineSecret("GOOGLE_ROUTES_API_KEY");
 const PAYMENT_SUCCESS_RETURN_URL = defineString("PAYMENT_SUCCESS_RETURN_URL");
@@ -4837,7 +4838,7 @@ async function reserveAndSubmitPayout(
   const existing = asRecord((await payoutRef.get()).val());
   if (Object.keys(existing).length) {
     if (asString(existing.userId) !== uid) throw new HttpsError("already-exists", "This payout key belongs to another user.");
-    const secret = XENDIT_SECRET_KEY.value();
+    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
     if (!asString(existing.providerPayoutId) && ["SUBMITTING", "RECONCILIATION_REQUIRED"].includes(asString(existing.status))) {
       if (!secret) throw new HttpsError("failed-precondition", "Xendit money-out credentials are not configured.");
       await createPayoutProviderRequest(payoutId, secret);
@@ -4849,7 +4850,7 @@ async function reserveAndSubmitPayout(
   if (asString(account.status).toUpperCase() !== "VERIFIED") {
     throw new HttpsError("failed-precondition", "Set up a payout account and have it verified before requesting a payout.");
   }
-  const secret = XENDIT_SECRET_KEY.value();
+  const secret = XENDIT_PAYOUT_SECRET_KEY.value();
   if (!secret) throw new HttpsError("failed-precondition", "Xendit money-out credentials are not configured.");
   const walletRef = db.ref("wallets/" + uid);
   const wallet = asRecord((await walletRef.get()).val());
@@ -5071,7 +5072,7 @@ export const savePayoutAccount = onCall(
 );
 
 export const requestPayout = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY] },
+  { region: REGION, secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY] },
   async (request) => {
     const uid = requireUid(request);
     await requireApprovedEarningsRole(uid);
@@ -5245,10 +5246,10 @@ export const reconcilePayouts = onSchedule(
     schedule: "every 5 minutes",
     timeZone: "Asia/Manila",
     region: REGION,
-    secrets: [XENDIT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY],
+    secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY],
   },
   async () => {
-    const secret = XENDIT_SECRET_KEY.value();
+    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
     if (!secret) {
       logger.error("Payout reconciliation skipped because Xendit secret key is not configured");
       return;
@@ -5329,10 +5330,10 @@ export const processAutomaticPayouts = onSchedule(
     schedule: "every 15 minutes",
     timeZone: "Asia/Manila",
     region: REGION,
-    secrets: [XENDIT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY],
+    secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY],
   },
   async () => {
-    const secret = XENDIT_SECRET_KEY.value();
+    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
     if (!secret) return;
     const queue = await db.ref("walletPayoutQueue").limitToFirst(100).get();
     const entries: string[] = [];
