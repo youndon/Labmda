@@ -5,8 +5,8 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
-import com.zouitel.presentaion.screens.payment.PaymentCreationResult
-import com.zouitel.presentaion.screens.payment.PaymentRepository
+import com.zouitel.presentaion.payments.PaymentCreationResult
+import com.zouitel.presentaion.payments.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -19,10 +19,9 @@ import java.util.UUID
 /** Name and phone used to prefill the request form. */
 data class PassengerInfo(val name: String = "", val phone: String = "")
 
-class PassengerScreenModel : ScreenModel {
+class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepository()) : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUser = Firebase.auth.currentUser
-    private val payments = PaymentRepository()
     private var pendingTripFingerprint: String? = null
     private var pendingTripIdempotencyKey: String? = null
     private var isRequestingTrip = false
@@ -148,7 +147,6 @@ class PassengerScreenModel : ScreenModel {
         }
     }
 
-    @Suppress("UNUSED_PARAMETER")
     fun requestTrip(
         pickupAddress: String,
         pickupLat: Double,
@@ -156,7 +154,6 @@ class PassengerScreenModel : ScreenModel {
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        fare: Double,
         passengerName: String,
         passengerPhone: String,
         targetDriver: UserProfile? = null,

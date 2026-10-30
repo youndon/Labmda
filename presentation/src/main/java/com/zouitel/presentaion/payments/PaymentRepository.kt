@@ -1,4 +1,4 @@
-package com.zouitel.presentaion.screens.payment
+package com.zouitel.presentaion.payments
 
 import com.zouitel.presentaion.model.Money
 import com.zouitel.presentaion.model.OrderBreakdown

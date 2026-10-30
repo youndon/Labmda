@@ -2,8 +2,8 @@ package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.screens.payment.PaymentCreationResult
-import com.zouitel.presentaion.screens.payment.PaymentRepository
+import com.zouitel.presentaion.payments.PaymentCreationResult
+import com.zouitel.presentaion.payments.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -78,7 +78,8 @@ class RestaurantScreenModel(
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        onSuccess: (PaymentCreationResult) -> Unit
+        onSuccess: (PaymentCreationResult) -> Unit,
+        onFailure: (String) -> Unit = {}
     ) {
         if (_isSubmitting.value) return
         val uid = auth.currentUser?.uid
@@ -131,7 +132,9 @@ class RestaurantScreenModel(
                 clearCart()
                 onSuccess(result)
             } catch (e: Exception) {
-                _error.value = e.message ?: "Could not place the order. Please try again."
+                val message = e.message ?: "Could not place the order. Please try again."
+                _error.value = message
+                onFailure(message)
             } finally {
                 _isSubmitting.value = false
             }
