@@ -3293,33 +3293,56 @@ async function postImmutableCashLedgerEntry(entryId: string): Promise<void> {
   if (lines.length < 2) {
     throw new HttpsError("failed-precondition", "A cash journal entry must contain at least two ledger lines.");
   }
+
+  const normalizedLines: Array<{
+    line: Record<string, unknown>;
+    accountId: string;
+    debit: number;
+    credit: number;
+  }> = [];
   let debitTotal = 0;
   let creditTotal = 0;
 
+  // Validate the complete journal before creating any account posting.
   for (const rawLine of lines) {
     const line = asRecord(rawLine);
     const debit = nonNegativeInteger(line.debitCentavos ?? 0, "ledger debit");
     const credit = nonNegativeInteger(line.creditCentavos ?? 0, "ledger credit");
+    const accountId = asString(line.accountId);
     if ((debit > 0 && credit > 0) || debit + credit <= 0) {
       throw new HttpsError("failed-precondition", "Each ledger line must contain one positive debit or credit.");
     }
-    debitTotal += debit;
-    creditTotal += credit;
-    const accountId = asString(line.accountId);
     if (!/^[A-Za-z0-9_-]{1,160}$/.test(accountId)) {
       throw new HttpsError("failed-precondition", "A cash ledger account ID is invalid.");
     }
+    debitTotal += debit;
+    creditTotal += credit;
+    normalizedLines.push({ line, accountId, debit, credit });
+  }
+
+  if (
+    !Number.isSafeInteger(debitTotal) ||
+    !Number.isSafeInteger(creditTotal) ||
+    debitTotal <= 0 ||
+    debitTotal !== creditTotal ||
+    debitTotal !== Number(entry.totalCentavos)
+  ) {
+    throw new HttpsError("failed-precondition", "The cash ledger journal entry is not balanced.");
+  }
+
+  for (const normalized of normalizedLines) {
+    const line = normalized.line;
     const postingId = entryId;
-    const postingRef = db.ref("cashLedgerAccounts/" + accountId + "/" + postingId);
+    const postingRef = db.ref("cashLedgerAccounts/" + normalized.accountId + "/" + postingId);
     const posting = {
       entryId,
       operationId: asString(entry.operationId),
-      accountId,
+      accountId: normalized.accountId,
       accountType: asString(line.accountType),
       ownerId: asString(line.ownerId),
       normalSide: asString(line.normalSide),
-      debitCentavos: debit,
-      creditCentavos: credit,
+      debitCentavos: normalized.debit,
+      creditCentavos: normalized.credit,
       currency: "PHP",
       createdAtTimestamp: Number(entry.createdAtTimestamp ?? Date.now()),
     };
@@ -3333,22 +3356,13 @@ async function postImmutableCashLedgerEntry(entryId: string): Promise<void> {
       if (
         !existingSnapshot.exists() ||
         asString(existing.entryId) !== entryId ||
-        Number(existing.debitCentavos) !== debit ||
-        Number(existing.creditCentavos) !== credit
+        asString(existing.operationId) !== asString(entry.operationId) ||
+        Number(existing.debitCentavos) !== normalized.debit ||
+        Number(existing.creditCentavos) !== normalized.credit
       ) {
         throw new HttpsError("data-loss", "A cash account posting conflicts with an existing immutable posting.");
       }
     }
-  }
-
-  if (
-    !Number.isSafeInteger(debitTotal) ||
-    !Number.isSafeInteger(creditTotal) ||
-    debitTotal <= 0 ||
-    debitTotal !== creditTotal ||
-    debitTotal !== Number(entry.totalCentavos)
-  ) {
-    throw new HttpsError("failed-precondition", "The cash ledger journal entry is not balanced.");
   }
 
   await db.ref("cashLedgerPostingStatus/" + entryId).set({
