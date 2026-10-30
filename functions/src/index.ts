@@ -2936,7 +2936,7 @@ export const reconcilePendingPayments = onSchedule(
         asString(payment.channelCode).toUpperCase() !== "GCASH" ||
         asString(payment.status).toUpperCase() !== "PENDING"
       ) {
-        await childQueueRef.remove();
+        await queueRef.remove();
         continue;
       }
 
@@ -2975,7 +2975,7 @@ export const reconcilePendingPayments = onSchedule(
             failureCode: asString(provider.failure_code),
           });
         } else {
-          const attempts = Number(asRecord(child.val()).attempts ?? 0) + 1;
+          const attempts = Number(child.value.attempts ?? 0) + 1;
           await queueRef.update({
             attempts,
             lastCheckedAtTimestamp: now,
@@ -2987,7 +2987,7 @@ export const reconcilePendingPayments = onSchedule(
         const queue = child.value;
         const attempts = Number(queue.attempts ?? 0) + 1;
         const backoffMinutes = Math.min(30, 5 * Math.pow(2, Math.min(attempts, 2)));
-        await childQueueRef.update({
+        await queueRef.update({
           attempts,
           lastCheckedAtTimestamp: now,
           dueAtTimestamp: now + backoffMinutes * 60 * 1000,
@@ -3014,7 +3014,7 @@ export const reconcilePendingPayments = onSchedule(
       const providerRefundId = asString(queue.providerRefundId);
       const referenceId = asString(queue.referenceId);
       if (!entityId || !refundAttemptId || !providerRefundId) {
-        await child.ref.remove();
+        await childQueueRef.remove();
         continue;
       }
       const paymentSnapshot = await db.ref("payments/" + entityId).get();
@@ -3063,7 +3063,7 @@ export const reconcilePendingPayments = onSchedule(
           });
         } else {
           const attempts = Number(queue.attempts ?? 0) + 1;
-          await child.ref.update({
+          await childQueueRef.update({
             attempts,
             lastCheckedAtTimestamp: now,
             dueAtTimestamp: now + 5 * 60 * 1000,
