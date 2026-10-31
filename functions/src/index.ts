@@ -7110,10 +7110,7 @@ export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", reg
     return;
   }
 
-  const [locationSnapshot, existingSnapshot] = await Promise.all([
-    db.ref("driverLocations/" + uid).get(),
-    target.get(),
-  ]);
+  const locationSnapshot = await db.ref("driverLocations/" + uid).get();
   const location = asRecord(locationSnapshot.val());
   const vehicle = asRecord(driver.vehicleInfo ?? profile.vehicleInfo);
   const latitude = Number(location.latitude);
@@ -7139,8 +7136,6 @@ export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", reg
   };
   if (hasLocation) {
     publicProfile.currentLocation = { latitude, longitude, heading: Number.isFinite(heading) ? heading : 0 };
-  } else {
-    delete asRecord(existingSnapshot.val()).currentLocation;
   }
   await target.set(publicProfile);
 });
@@ -7179,6 +7174,39 @@ export const syncPublicDriverLocation = onValueWritten({ ref: "/driverLocations/
     updatedAtTimestamp: Date.now(),
   });
 });
+
+/**
+ * One-time admin migration: remove phone fields from already-published driver
+ * records. The ongoing projection never republishes phone numbers.
+ */
+export const sanitizePublicDriverProfiles = onCall({ region: REGION }, async (request) => {
+  requireUid(request);
+  if (request.auth?.token.admin !== true) {
+    throw new HttpsError("permission-denied", "Only an administrator can sanitize public driver profiles.");
+  }
+
+  const snapshot = await db.ref("publicDrivers").get();
+  const batches: Array<Record<string, null>> = [];
+  let batch: Record<string, null> = {};
+  let sanitizedProfiles = 0;
+  snapshot.forEach((child) => {
+    const uid = child.key;
+    if (!uid) return false;
+    const profile = asRecord(child.val());
+    if (profile.phoneNumber !== undefined) batch[uid + "/phoneNumber"] = null;
+    if (profile.phone !== undefined) batch[uid + "/phone"] = null;
+    if (Object.keys(batch).length >= 400) {
+      batches.push(batch);
+      batch = {};
+    }
+    if (profile.phoneNumber !== undefined || profile.phone !== undefined) sanitizedProfiles++;
+    return false;
+  });
+  if (Object.keys(batch).length) batches.push(batch);
+  for (const updates of batches) await db.ref("publicDrivers").update(updates);
+  return { sanitizedProfiles };
+});
+
 export const syncAvailableDeliveryTask = onValueWritten({ ref: "/orders/{orderId}", region: REGION }, async (event) => {
   const id = event.params.orderId, after = event.data.after, target = db.ref("availableDeliveryTasks/" + event.params.orderId);
   if (!after.exists()) { await target.remove(); return; }
