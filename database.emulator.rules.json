@@ -173,6 +173,14 @@
         "products": {
           ".read": true,
           ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid && (root.child('users').child(auth.uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child(auth.uid).child('shopStatus').val() === 'ACTIVE')"
+        },
+        "latitude": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid",
+          ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
+        },
+        "longitude": {
+          ".write": "auth != null && data.parent().child('ownerUid').val() === auth.uid",
+          ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
         }
       }
     },
