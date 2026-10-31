@@ -49,10 +49,32 @@ class LogInScreen : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        val context = LocalContext.current
+        val screenModel = koinInject<LogInScreenModel>()
 
         LaunchedEffect(Unit) {
-            if (Firebase.auth.currentUser != null) {
-                navigator.replaceAll(MainScreen())
+            val firebaseUser = Firebase.auth.currentUser
+            if (firebaseUser != null) {
+                // Repair profiles for users who signed in before profile provisioning
+                // was added, rather than sending them into the app with a missing record.
+                val profileResult = screenModel.saveUserProfile(
+                    UserProfile(
+                        uid = firebaseUser.uid,
+                        fullName = firebaseUser.displayName ?: "",
+                        email = firebaseUser.email,
+                        phoneNumber = firebaseUser.phoneNumber,
+                        photoUrl = firebaseUser.photoURL
+                    )
+                )
+                if (profileResult.e == null) {
+                    navigator.replaceAll(MainScreen())
+                } else {
+                    Toast.makeText(
+                        context,
+                        profileResult.e?.message ?: "Could not load your account profile",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
 
