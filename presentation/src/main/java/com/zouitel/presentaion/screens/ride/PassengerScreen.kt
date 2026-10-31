@@ -86,6 +86,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         val paymentUiState by paymentScreenModel.uiState.collectAsState()
 
         val trips by screenModel.trips.collectAsState()
+        val refundNotice by screenModel.refundNotice.collectAsState()
         val onlineDrivers by screenModel.onlineDrivers.collectAsState()
         val passengerInfo by screenModel.passengerInfo.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
@@ -402,12 +403,14 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                             )
                             Spacer(Modifier.height(16.dp))
 
+                            refundNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                             if (activeTrip != null) {
                                 Text("Your current trip", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                 Spacer(Modifier.height(12.dp))
                                 PassengerTripCard(
                                     trip = activeTrip,
-                                    onCancel = { screenModel.cancelTrip(activeTrip.id) }
+                                    onCancel = { screenModel.cancelTrip(activeTrip.id) },
+                                    onRequestRefund = { screenModel.requestRefund(activeTrip.id) }
                                 )
                             } else {
                                 RequestPanel(
@@ -520,7 +523,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                 verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 items(trips, key = { it.id }) { trip ->
-                                    PassengerTripCard(trip = trip, onCancel = { screenModel.cancelTrip(trip.id) })
+                                    PassengerTripCard(trip = trip, onCancel = { screenModel.cancelTrip(trip.id) }, onRequestRefund = { screenModel.requestRefund(trip.id) })
                                 }
                             }
                         }
@@ -1029,7 +1032,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
     }
 
     @Composable
-    private fun PassengerTripCard(trip: Trip, onCancel: () -> Unit) {
+    private fun PassengerTripCard(trip: Trip, onCancel: () -> Unit, onRequestRefund: () -> Unit) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -1100,7 +1103,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     }
                 }
 
-                if (trip.status == "REQUESTED" || trip.status == "ACCEPTED") {
+                if (trip.paymentMethod.equals("GCASH", ignoreCase = true) && trip.paymentStatus.equals("PAID", ignoreCase = true) && trip.status != "CANCELLED") {
+                    OutlinedButton(onClick = onRequestRefund, modifier = Modifier.fillMaxWidth()) { Text("Request refund") }
+                }
+                if ((trip.status == "REQUESTED" || trip.status == "ACCEPTED") && !trip.paymentStatus.equals("PAID", ignoreCase = true)) {
                     Spacer(Modifier.height(4.dp))
                     OutlinedButton(
                         onClick = onCancel,
