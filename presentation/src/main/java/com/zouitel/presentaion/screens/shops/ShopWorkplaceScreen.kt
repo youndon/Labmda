@@ -27,7 +27,6 @@ import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
-import com.zouitel.presentaion.common.DriveTokenProvider
 import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.common.ImagePicker
@@ -221,7 +220,7 @@ class ShopWorkplaceScreen : Screen {
     @Composable
     private fun ShopRegistrationForm(
         uploadState: ImageUploadState,
-        onUploadImage: (PickedImage, DriveTokenProvider) -> Unit,
+        onUploadImage: (PickedImage) -> Unit,
         onUploadHandled: () -> Unit,
         onSubmit: (String, String, String, String, String, String) -> Unit
     ) {
