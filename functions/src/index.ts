@@ -128,6 +128,115 @@ function normalizeCatalogItems(value: unknown): Array<{ id: string; quantity: nu
   });
 }
 
+async function createXenditGcashRequest(args: {
+  referenceId: string;
+  amount: number;
+  description: string;
+  entityType: "ORDER" | "TRIP";
+  entityId: string;
+  clientId: string;
+  idempotencyKey: string;
+}): Promise<{ paymentId: string; checkoutUrl: string; status: string; webCheckoutUrl: string; checkoutActionDescriptor: string }> {
+  const secret = XENDIT_SECRET_KEY.value();
+  const successUrl = PAYMENT_SUCCESS_RETURN_URL.value();
+  const failureUrl = PAYMENT_FAILURE_RETURN_URL.value();
+
+  if (!secret) {
+    throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
+  }
+  if (!successUrl.startsWith("https://") || !failureUrl.startsWith("https://")) {
+    throw new HttpsError("failed-precondition", "Configure public HTTPS payment return URLs before enabling GCash.");
+  }
+
+  const response = await fetch("https://api.xendit.co/v3/payment_requests", {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
+      "Content-Type": "application/json",
+      "api-version": "2024-11-11",
+      "Idempotency-key": args.idempotencyKey,
+    },
+    body: JSON.stringify({
+      reference_id: args.referenceId,
+      type: "PAY",
+      country: "PH",
+      currency: "PHP",
+      request_amount: args.amount,
+      capture_method: "AUTOMATIC",
+      channel_code: "GCASH",
+      channel_properties: {
+        success_return_url: successUrl,
+        failure_return_url: failureUrl,
+      },
+      description: args.description.slice(0, 255),
+      metadata: {
+        entity_type: args.entityType,
+        entity_id: args.entityId,
+        client_id: args.clientId,
+      },
+    }),
+  });
+
+  const body = asRecord(await response.json().catch(() => ({})));
+  if (!response.ok) {
+    logger.error("Xendit payment request failed", {
+      status: response.status,
+      response: body,
+      referenceId: args.referenceId,
+    });
+    throw new HttpsError("unavailable", "Xendit could not start this payment. Please try again.");
+  }
+
+  const request = body as XenditPaymentRequest;
+  const paymentId = asString(request.payment_request_id);
+  const actions = request.actions ?? [];
+  const mobileAction = actions.find((candidate) =>
+    candidate.type === "REDIRECT_CUSTOMER" && candidate.descriptor === "DEEPLINK_URL"
+  );
+  const webAction = actions.find((candidate) =>
+    candidate.type === "REDIRECT_CUSTOMER" && candidate.descriptor === "WEB_URL"
+  );
+
+  function normalizeActionUrl(action: XenditAction | undefined): string {
+    const raw = asString(action?.value);
+    if (!raw) return "";
+    const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw)
+      ? raw
+      : "https://" + raw.replace(/^\/+/, "");
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === "https:") return parsed.toString();
+      if (
+        action?.descriptor === "DEEPLINK_URL" &&
+        !["http:", "javascript:", "data:", "file:"].includes(parsed.protocol)
+      ) {
+        return parsed.toString();
+      }
+    } catch {
+      return "";
+    }
+    return "";
+  }
+
+  // Mobile GCash deeplinks are preferred; desktop/web checkout remains the fallback.
+  const deeplinkUrl = normalizeActionUrl(mobileAction);
+  const webCheckoutUrl = normalizeActionUrl(webAction);
+  const checkoutUrl = deeplinkUrl || webCheckoutUrl;
+  const checkoutActionDescriptor = deeplinkUrl ? "DEEPLINK_URL" : webCheckoutUrl ? "WEB_URL" : "";
+
+  const initialStatus = asString(request.status).toUpperCase();
+  const status = initialStatus === "SUCCEEDED"
+    ? "SUCCEEDED"
+    : initialStatus === "EXPIRED"
+      ? "EXPIRED"
+      : ["CANCELED", "CANCELLED"].includes(initialStatus)
+        ? "CANCELLED"
+        : initialStatus === "FAILED"
+          ? "FAILED"
+          : "PENDING";
+  return { paymentId, checkoutUrl, status, webCheckoutUrl, checkoutActionDescriptor };
+}
+
 async function loadOrderCatalog(
   uid: string,
   orderType: OrderType,
