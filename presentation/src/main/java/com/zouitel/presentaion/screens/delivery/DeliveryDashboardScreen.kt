@@ -160,6 +160,11 @@ class DeliveryDashboardScreen : Screen {
             }
         }
         var selectedOrderId by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(activeDeliveries) {
+            if (selectedOrderId == null) {
+                selectedOrderId = activeDeliveries.firstOrNull { it.deliveryId.isNotBlank() }?.id
+            }
+        }
         var selectedTab by remember { mutableIntStateOf(0) }
         val selectedOrder = activeDeliveries.firstOrNull { it.id == selectedOrderId }
 
@@ -347,9 +352,28 @@ class DeliveryDashboardScreen : Screen {
                                         }
                                         if (routeLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                                     }
-                                    GoogleMap(
+                                    val routeCameraState = rememberCameraPositionState()
+                            LaunchedEffect(from, routeTarget, routePoints) {
+                                val boundsPoints = buildList {
+                                    from?.let { add(it) }
+                                    addAll(routePoints)
+                                    routeTarget?.let { add(it) }
+                                }.distinct()
+                                if (boundsPoints.size >= 2) {
+                                    runCatching {
+                                        routeCameraState.animate(
+                                            CameraUpdateFactory.newLatLngBounds(
+                                                LatLngBounds.Builder().apply { boundsPoints.forEach { include(it) } }.build(), 72
+                                            ), 500
+                                        )
+                                    }
+                                } else boundsPoints.firstOrNull()?.let {
+                                    routeCameraState.animate(CameraUpdateFactory.newLatLngZoom(it, 14f), 500)
+                                }
+                            }
+                            GoogleMap(
                                         modifier = Modifier.fillMaxWidth().height(230.dp),
-                                        cameraPositionState = rememberCameraPositionState(),
+                                        cameraPositionState = routeCameraState,
                                         uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false)
                                     ) {
                                         from?.let { Marker(state = rememberUpdatedMarkerState(it), title = "You", icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)) }
@@ -369,6 +393,11 @@ class DeliveryDashboardScreen : Screen {
                                             modifier = Modifier.weight(1f)
                                         ) { Text("Message") }
                                     }
+                                    Text(
+                                        if (trackingRoute?.recipientName.orEmpty().isNotBlank()) "Recipient: ${trackingRoute?.recipientName}" else "Recipient contact",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     Text(
                                         if (trackingRoute?.routeTo == "PICKUP") "Progress: heading to pickup" else "Progress: order picked up · heading to recipient",
                                         style = MaterialTheme.typography.labelMedium,
