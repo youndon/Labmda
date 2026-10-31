@@ -82,6 +82,13 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                                 RestaurantSalesTile("Today · ${metrics.todayOrders} orders", metrics.todaySales, Modifier.weight(1f))
                                 RestaurantSalesTile("Last 7 days", metrics.weekSales, Modifier.weight(1f))
                             }
+                            OutlinedButton(
+                                onClick = { navigator?.push(FoodOrdersScreen()) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Open order queue")
+                            }
                             val unavailable = meals.filterNot { it.isAvailable }
                             if (unavailable.isNotEmpty()) {
                                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
