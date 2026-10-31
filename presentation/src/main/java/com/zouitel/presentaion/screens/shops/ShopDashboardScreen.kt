@@ -183,10 +183,11 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Switch(
                                             checked = product.isAvailable,
+                                            enabled = product.stockQuantity > 0,
                                             onCheckedChange = { screenModel.toggleProductAvailability(product) }
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text(if (product.isAvailable) "Available" else "Out of Stock", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                        Text(when { product.stockQuantity <= 0 -> "Out of stock"; product.isAvailable -> "Available"; else -> "Hidden" }, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                                     }
 
                                     Row {
@@ -332,7 +333,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                             stockQuantity.toIntOrNull() ?: 0
                         )
                     },
-                    enabled = name.isNotBlank() && price.isNotBlank() && !isUploading,
+                    enabled = name.isNotBlank() && price.toDoubleOrNull()?.let { it >= 0.0 } == true && stockQuantity.toIntOrNull()?.let { it >= 0 } == true && !isUploading,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(if (isUploading) "Uploading photo…" else "Save Product", fontWeight = FontWeight.Bold)
