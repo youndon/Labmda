@@ -1,6 +1,7 @@
 package com.zouitel.presentaion.screens.food
 
 import java.util.Calendar
+import java.util.TimeZone
 
 data class MerchantOrderSnapshot(
     val status: String,
@@ -19,7 +20,7 @@ data class MerchantDashboardMetrics(
 
 fun calculateMerchantDashboardMetrics(orders: List<MerchantOrderSnapshot>): MerchantDashboardMetrics {
     val now = System.currentTimeMillis()
-    val today = Calendar.getInstance().apply {
+    val today = Calendar.getInstance(TimeZone.getTimeZone("Asia/Manila")).apply {
         timeInMillis = now
         set(Calendar.HOUR_OF_DAY, 0)
         set(Calendar.MINUTE, 0)
