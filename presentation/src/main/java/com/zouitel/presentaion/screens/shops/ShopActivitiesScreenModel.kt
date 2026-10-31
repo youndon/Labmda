@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class ShopActivitiesScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
@@ -23,6 +24,9 @@ class ShopActivitiesScreenModel : ScreenModel {
 
     private val _activities = MutableStateFlow<List<Order>>(emptyList())
     val activities: StateFlow<List<Order>> = _activities.asStateFlow()
+
+    private val _refundNotice = MutableStateFlow<String?>(null)
+    val refundNotice: StateFlow<String?> = _refundNotice.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -112,7 +116,16 @@ class ShopActivitiesScreenModel : ScreenModel {
 
     fun cancelShopOrder(orderId: String) {
         screenModelScope.launch {
-            serviceActions.transitionOrderStatus(orderId, OrderStatus.CANCELLED.name)
+            runCatching { serviceActions.transitionOrderStatus(orderId, OrderStatus.CANCELLED.name) }
+                .onFailure { _refundNotice.value = it.message ?: "Could not cancel this order." }
+        }
+    }
+
+    fun requestRefund(orderId: String) {
+        screenModelScope.launch {
+            runCatching { serviceActions.requestPaymentRefund("ORDER", orderId, UUID.randomUUID().toString()) }
+                .onSuccess { _refundNotice.value = "Refund request submitted for administrator review. Your order has not been cancelled." }
+                .onFailure { _refundNotice.value = it.message ?: "Could not submit refund request." }
         }
     }
 }
