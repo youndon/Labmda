@@ -6992,6 +6992,77 @@ export const removePublicRestaurantManagerPhones = onCall({ region: REGION }, as
   return { removedCount };
 });
 
+export const adminReviewRestaurant = onCall({ region: REGION }, async (request) => {
+  const adminUid = requireAdmin(request);
+  const data = asRecord(request.data);
+  const restaurantUid = asString(data.restaurantUid);
+  const decision = asString(data.decision).toUpperCase();
+  if (!restaurantUid || restaurantUid.length > 128) {
+    throw new HttpsError("invalid-argument", "A valid restaurant application UID is required.");
+  }
+  if (decision !== "APPROVED" && decision !== "REJECTED") {
+    throw new HttpsError("invalid-argument", "Decision must be APPROVED or REJECTED.");
+  }
+
+  const userRef = db.ref("users/" + restaurantUid);
+  const transaction = await userRef.transaction((currentValue) => {
+    if (currentValue === null || currentValue === undefined) return;
+    const current = asRecord(currentValue);
+    if (asString(current.foodStatus).toUpperCase() !== "PENDING") return;
+    return { ...current, foodStatus: decision };
+  });
+
+  let profile: Record<string, unknown>;
+  if (transaction.committed) {
+    profile = asRecord(transaction.snapshot.val());
+  } else {
+    // Complete side effects if a retry follows a committed status transition.
+    const currentSnapshot = await userRef.get();
+    profile = asRecord(currentSnapshot.val());
+    if (!currentSnapshot.exists() || asString(profile.foodStatus).toUpperCase() !== decision) {
+      throw new HttpsError("failed-precondition", "This restaurant application is no longer pending review.");
+    }
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (decision === "APPROVED") {
+    const deliveryFee = Number(profile.deliveryFee ?? 0);
+    const estimatedTimeMinutes = Number(profile.estimatedTimeMinutes ?? 20);
+    const latitude = Number(profile.restaurantLatitude ?? 0);
+    const longitude = Number(profile.restaurantLongitude ?? 0);
+    updates["restaurants/" + restaurantUid] = {
+      id: restaurantUid,
+      name: asString(profile.sourceName) || "My Restaurant",
+      imageUrl: asString(profile.restaurantImageUrl),
+      rating: 5.0,
+      deliveryFee: Number.isFinite(deliveryFee) ? deliveryFee : 0,
+      estimatedTimeMinutes: Number.isFinite(estimatedTimeMinutes) ? estimatedTimeMinutes : 20,
+      isOpen: true,
+      paymentMethods: ["GCASH", "CASH"],
+      address: asString(profile.restaurantAddress),
+      latitude: Number.isFinite(latitude) ? latitude : 0,
+      longitude: Number.isFinite(longitude) ? longitude : 0,
+    };
+    updates["restaurantPrivate/" + restaurantUid] = {
+      managerUid: restaurantUid,
+      managerPhone: asString(profile.managerPhone) || asString(profile.phoneNumber),
+    };
+  } else {
+    updates["restaurants/" + restaurantUid] = null;
+    updates["restaurantPrivate/" + restaurantUid] = null;
+  }
+
+  const auditKey = db.ref("admin_audit_logs/restaurants/" + restaurantUid).push().key;
+  if (!auditKey) throw new HttpsError("internal", "Could not create the restaurant audit record.");
+  updates["admin_audit_logs/restaurants/" + restaurantUid + "/" + auditKey] = {
+    restaurantUid, decision, adminUid, reviewedAtTimestamp: Date.now(),
+  };
+  // Publication/private data and the immutable audit event share one atomic update.
+  await db.ref().update(updates);
+  logger.info("Restaurant application reviewed", { restaurantUid, decision, adminUid });
+  return { restaurantUid, decision };
+});
+
 export const syncPublicShop = onValueWritten({ ref: "/shops/{shopId}", region: REGION }, async (event) => {
   const id = event.params.shopId, after = event.data.after, target = db.ref("publicShops/" + event.params.shopId);
   if (!after.exists()) { await target.remove(); return; }
