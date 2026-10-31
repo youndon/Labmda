@@ -82,7 +82,7 @@ class DriverDashboardScreenModel : ScreenModel {
 
         screenModelScope.launch {
             combine(openRequests, assignedToDriver, driverVehicleType) { openSnapshot, assignedSnapshot, vehicleSnapshot ->
-                Triple(
+                Pair(
                     openSnapshot.children + assignedSnapshot.children,
                     runCatching { vehicleSnapshot.value<String>() }.getOrDefault("").uppercase()
                 )
