@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 
 data class CourierLocation(val latitude: Double, val longitude: Double, val heading: Float, val updatedAtTimestamp: Long)
 data class OrderTrackingRoute(val encodedPolyline: String, val distanceMeters: Long, val duration: String)
@@ -151,11 +152,12 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
         }
 
         routeJob = screenModelScope.launch(Dispatchers.IO) {
-            _courierLocation.collectLatest { location ->
-                if (location == null) return@collectLatest
-                delay(5_000)
-                val destination = _order.value ?: return@collectLatest
+            combine(_courierLocation, _order) { location, order -> location to order }
+                .collectLatest { (location, destination) ->
+                if (location == null || destination == null) return@collectLatest
+                if (destination.status != OrderStatus.OUT_FOR_DELIVERY) return@collectLatest
                 if (destination.dropoffLat == 0.0 && destination.dropoffLng == 0.0) return@collectLatest
+                delay(5_000)
                 _routeLoading.value = true
                 try {
                     val route: TrackingRouteResult = paymentRepository.getTrackingRoute(orderId)
