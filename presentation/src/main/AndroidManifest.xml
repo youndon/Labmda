@@ -18,7 +18,7 @@
     <application>
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyCTxle8zvYU-pM41AS2MR2zoWo2gO9gRwk" />
+            android:value="${MAPS_API_KEY}" />
 
         <!-- Background FCM Service -->
 
