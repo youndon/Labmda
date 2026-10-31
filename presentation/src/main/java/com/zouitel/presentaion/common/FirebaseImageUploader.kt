@@ -2,6 +2,7 @@ package com.zouitel.presentaion.common
 
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.storage.Data
+import dev.gitlive.firebase.storage.storage
 import dev.gitlive.firebase.storage.storageMetadata
 import kotlin.random.Random
 
