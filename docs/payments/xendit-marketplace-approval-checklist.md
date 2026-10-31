@@ -17,7 +17,7 @@ This document distinguishes public API capabilities from approval that only Xend
 
 | Area | Publicly documented capability | Implementation consequence |
 |---|---|---|
-| GCash collections | Philippine GCash accepts PHP and has a documented T+2 business-day settlement timeline. | A successful payment callback must not immediately make earnings withdrawable. |
+| GCash collections | Philippine GCash accepts PHP. Xendit's GCash-specific page lists T+2 calendar days (with a weekend caveat), while its broader available-payment-methods table lists T+2 business days. Treat the published estimate as indicative and use the transaction's actual settlement_status as the source of truth; ask Xendit to clarify the documentation discrepancy. | A successful payment callback must not immediately make earnings withdrawable. |
 | Payout destinations | Philippine payout coverage includes the `PH_GCASH` recipient channel; the v3 domestic wallet example uses `routing_type_1: WALLET` and `routing_value_1: PH_GCASH`. | A direct payout can target a supported GCash destination, subject to account eligibility and channel limits. |
 | Payout API | `POST /v3/payouts` requires Money-Out permission and supports the `Idempotency-key` header. | Every Labmda payout uses a persisted idempotency key and the same request body on retry. |
 | Balance | `GET /balance?account_type=CASH&currency=PHP` returns the business cash balance and requires Balance Read permission. | Check actual available PHP funds before making earnings available and before payout submission. |
@@ -26,7 +26,8 @@ This document distinguishes public API capabilities from approval that only Xend
 
 Official references:
 
-- https://docs.xendit.co/docs/available-payment-channels
+- https://docs.xendit.co/docs/gcash
+- https://docs.xendit.co/docs/available-payment-methods
 - https://docs.xendit.co/docs/payouts-coverage-philippines
 - https://docs.xendit.co/apidocs/create-payout-v3
 - https://docs.xendit.co/apidocs/get-balance
@@ -44,7 +45,7 @@ Public API documentation does not approve a particular business model or enable 
 5. **Purpose and relationship codes:** Confirm the correct `relationship`, `source_of_fund` and `purpose_code` values for restaurant/shop earnings, courier earnings and driver earnings. Do not assume that one code such as `SALARY` is correct for every recipient type.
 6. **Recipient verification:** Confirm the KYC, name, address, mobile number and business-document fields required for GCash and bank payout recipients.
 7. **Bank coverage:** Confirm the available Philippine bank payout channels and the required routing/account fields for each channel. The current app form only supports GCash.
-8. **Limits and fees:** Confirm per-transaction and daily payout limits, minimums, fees, settlement/arrival times, reversals, reserves and any required prefunding.
+8. **Limits and fees:** Confirm per-transaction and daily payout limits, minimums, fees, settlement/arrival times (including the published GCash T+2 calendar/business-day discrepancy), reversals, reserves and any required prefunding.
 9. **Account balance permissions:** Confirm the API key can be granted Money-Out Write, Balance Read and Transaction Read in the required environment.
 10. **Compliance and funds flow:** Confirm that the described collection, commission deduction, delayed earnings release and direct participant payout flow meets Xendit's terms and any applicable local requirements.
 
