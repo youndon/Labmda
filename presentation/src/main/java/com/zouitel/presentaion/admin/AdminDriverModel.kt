@@ -17,71 +17,41 @@ import kotlinx.coroutines.launch
 
 class AdminDriverModel : ScreenModel {
     private val db = Firebase.database.reference()
-
     private val _applications = MutableStateFlow<List<UserProfile>>(emptyList())
     val applications: StateFlow<List<UserProfile>> = _applications.asStateFlow()
 
-    init {
-        listenToDriverApplications()
-    }
+    init { listenToDriverApplications() }
 
     private fun listenToDriverApplications() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").valueEvents.collect { snapshot ->
-                val profiles = snapshot.children.mapNotNull { child ->
-                    try {
-                        val uid = child.key ?: return@mapNotNull null
-                        val fullName = runCatching { child.child("fullName").value<String>() }
-                            .getOrElse { runCatching { child.child("name").value<String>() }.getOrDefault("") }
-                        val phoneNumber = runCatching { child.child("phoneNumber").value<String>() }
-                            .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
-
-                        val driverChild = child.child("driverService")
-                        val driverAccount = if (driverChild.exists) {
-                            val statusStr = runCatching { driverChild.child("status").value<String>() }.getOrDefault("NONE")
-                            val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.NONE)
-
-                            val vehicleChild = driverChild.child("vehicleInfo")
-                            val typeStr = runCatching { vehicleChild.child("type").value<String>() }.getOrDefault("CAR")
-                            val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
-
-                            val make = runCatching { vehicleChild.child("make").value<String>() }.getOrDefault("Toyota")
-                            val model = runCatching { vehicleChild.child("model").value<String>() }.getOrDefault("Corolla")
-                            val color = runCatching { vehicleChild.child("color").value<String>() }.getOrDefault("Silver")
-                            val licensePlate = runCatching { vehicleChild.child("licensePlate").value<String>() }.getOrDefault("")
-
-                            DriverAccountInfo(
-                                status = status,
-                                vehicleInfo = VehicleInfo(
-                                    type = vehicleType,
-                                    make = make,
-                                    model = model,
-                                    color = color,
-                                    licensePlate = licensePlate,
-                                    serviceType = "Ride"
-                                )
-                            )
-                        } else {
-                            null
-                        }
-
-                        if (driverAccount?.status == Status.PENDING) {
+            db.child("users").orderByChild("driverService/status")
+                .equalTo(Status.PENDING.name).valueEvents.collect { snapshot ->
+                    _applications.value = snapshot.children.mapNotNull { child ->
+                        runCatching {
+                            val uid = child.key ?: return@mapNotNull null
+                            val vehicle = child.child("driverService").child("vehicleInfo")
+                            val type = runCatching { VehicleType.valueOf(vehicle.child("type").value<String>()) }
+                                .getOrDefault(VehicleType.CAR)
                             UserProfile(
                                 uid = uid,
-                                fullName = fullName,
-                                phoneNumber = phoneNumber,
-                                driverService = driverAccount
+                                fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault(""),
+                                phoneNumber = runCatching { child.child("phoneNumber").value<String>() }
+                                    .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") },
+                                driverService = DriverAccountInfo(
+                                    status = Status.PENDING,
+                                    vehicleInfo = VehicleInfo(
+                                        type = type,
+                                        make = runCatching { vehicle.child("make").value<String>() }.getOrDefault(""),
+                                        model = runCatching { vehicle.child("model").value<String>() }.getOrDefault(""),
+                                        color = runCatching { vehicle.child("color").value<String>() }.getOrDefault(""),
+                                        licensePlate = runCatching { vehicle.child("licensePlate").value<String>() }.getOrDefault(""),
+                                        serviceType = "Ride"
+                                    )
+                                )
                             )
-                        } else {
-                            null
-                        }
-                    } catch (e: Exception) {
-                        null
+                        }.getOrNull()
                     }
                 }
-
-                _applications.value = profiles
-            }
         }
     }
 
