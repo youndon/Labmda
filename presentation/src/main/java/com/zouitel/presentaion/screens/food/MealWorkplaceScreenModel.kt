@@ -57,10 +57,11 @@ class MealWorkplaceScreenModel(
         basePrice: Double,
         category: MealCategory,
         imageUrl: String,
+        isAvailable: Boolean = true,
         onSuccess: () -> Unit
     ) {
         screenModelScope.launch(Dispatchers.IO) {
-            repository.addMeal(restaurantId, mealId, name, description, basePrice, category, imageUrl)
+            repository.addMeal(restaurantId, mealId, name, description, basePrice, category, imageUrl, isAvailable)
             onSuccess()
         }
     }
