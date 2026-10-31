@@ -49,6 +49,8 @@ import com.zouitel.presentaion.screens.wallet.MerchantEarningsScreen
 import com.zouitel.presentaion.screens.wallet.CourierEarningsScreen
 import com.zouitel.presentaion.screens.wallet.DriverEarningsScreen
 import com.zouitel.presentaion.screens.wallet.PayoutAccountScreen
+import com.zouitel.presentaion.screens.account.NotificationPreferencesScreen
+import com.zouitel.presentaion.screens.account.HelpSupportScreen
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import kotlinx.coroutines.launch
@@ -244,7 +246,7 @@ class AccountScreen : Screen {
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.AccountBalanceWallet, "Payout Account") { navigator.push(PayoutAccountScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { /* TODO */ }
+                                GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { navigator.push(NotificationPreferencesScreen()) }
                             }
                         }
                     }
@@ -264,7 +266,7 @@ class AccountScreen : Screen {
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
                             Column {
-                                GroupedAccountRow(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { /* TODO */ }
+                                GroupedAccountRow(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { navigator.push(HelpSupportScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.Settings, "Application Settings") { navigator.push(SettingsScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
