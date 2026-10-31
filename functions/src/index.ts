@@ -1808,7 +1808,7 @@ export const createTripPayment = onCall(
     let fareCentavos: number;
     let optionalChargesCentavos = 0;
     let savedPricingSnapshot: Record<string, unknown>;
-    let rideRule: RidePricingRule;
+    let rideRule: RidePricingRule | null;
 
     if (pricingQuoteId) {
       const quote = await loadOwnedPricingQuote(
