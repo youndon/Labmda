@@ -66,9 +66,14 @@ class PayoutAccountScreen : Screen {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Labmda currently supports GCash wallet payouts. Enter the recipient details exactly as registered to the GCash account.", style = MaterialTheme.typography.bodyMedium)
-                Text("Status: " + state.account.status.replace('_', ' '), fontWeight = FontWeight.Bold)
-                if (state.account.maskedAccountNumber.isNotBlank()) Text("Saved account: " + state.account.maskedAccountNumber)
-                if (state.account.reviewNote.isNotBlank()) Text("Admin note: " + state.account.reviewNote)
+                Text("Verification status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(state.account.status.replace('_', ' '), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
+                    color = if (state.account.status == "VERIFIED") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                if (state.account.maskedAccountNumber.isNotBlank()) Text("Saved GCash destination: " + state.account.maskedAccountNumber)
+                if (state.account.submittedAtTimestamp > 0L) Text("Submitted timestamp: " + state.account.submittedAtTimestamp)
+                if (state.account.reviewedAtTimestamp > 0L) Text("Reviewed timestamp: " + state.account.reviewedAtTimestamp)
+                if (state.account.reviewNote.isNotBlank()) Text("Administrator note: " + state.account.reviewNote,
+                    color = if (state.account.status == "REJECTED") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 if (state.isLoading) CircularProgressIndicator()
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
