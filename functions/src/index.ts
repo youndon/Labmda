@@ -746,9 +746,6 @@ function participantEarningsCentavos(
       walletSettlementStatus?: unknown;
     }>,
   });
-  if (net.refundReconciliationPending) {
-    throw new HttpsError("failed-precondition", "A confirmed refund is still waiting for wallet/ledger reconciliation.");
-  }
   const total = net.merchantCentavos + net.courierCentavos + net.driverCentavos;
   if (!Number.isSafeInteger(total)) {
     throw new HttpsError("data-loss", "Participant earnings exceed the supported amount range.");
@@ -4829,14 +4826,6 @@ async function reconcileCompletedPaymentEarnings(
       walletSettlementStatus?: unknown;
     }>,
   });
-  if (netShares.refundReconciliationPending) {
-    await db.ref("payments/" + entityId).update({
-      earningsSettlementStatus: "WAITING_FOR_REFUND_RECONCILIATION",
-      availableFundsConfirmedAtTimestamp: null,
-    });
-    return false;
-  }
-
   const merchantId = asString(entity.merchantId) || asString(entity.sourceId);
   const courierId = asString(entity.deliveryId);
   const driverId = asString(entity.driverId);
@@ -4851,13 +4840,18 @@ async function reconcileCompletedPaymentEarnings(
     asString(payment.settlementStatus).toUpperCase()
   );
   const availableFundsConfirmed = Number(payment.availableFundsConfirmedAtTimestamp ?? 0) > 0;
-  const release = complete && settlementConfirmed && availableFundsConfirmed;
+  const release = complete && settlementConfirmed && availableFundsConfirmed &&
+    !netShares.refundReconciliationPending;
   const hasPending = asString(payment.earningsPendingStatus).toUpperCase() === "PENDING";
 
   if (!release && hasPending) {
     if (complete) {
       await db.ref("payments/" + entityId).update({
-        earningsSettlementStatus: settlementConfirmed ? "WAITING_FOR_AVAILABLE_FUNDS" : "AWAITING_SETTLEMENT",
+        earningsSettlementStatus: netShares.refundReconciliationPending
+          ? "WAITING_FOR_REFUND_RECONCILIATION"
+          : settlementConfirmed
+            ? "WAITING_FOR_AVAILABLE_FUNDS"
+            : "AWAITING_SETTLEMENT",
         serviceCompletedAtTimestamp: Number(entity.completedAtTimestamp ?? entity.updatedAtTimestamp ?? Date.now()),
       });
     }
