@@ -43,7 +43,10 @@
         }
       },
       ".indexOn": [
-        "driverService/isOnline"
+        "driverService/isOnline",
+        "foodStatus",
+        "driverService/status",
+        "deliveryServices/status"
       ]
     },
     "publicDrivers": {
@@ -135,7 +138,8 @@
       ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'ownerUid' && query.equalTo === auth.uid))",
       ".write": false,
       ".indexOn": [
-        "ownerUid"
+        "ownerUid",
+        "status"
       ],
       "$shopId": {
         ".read": "auth != null && (auth.token.admin === true || data.child('ownerUid').val() === auth.uid)",
