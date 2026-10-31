@@ -6,7 +6,7 @@ import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onValueWritten } from "firebase-functions/v2/database";
-import { isSettledGcashPaymentTransaction, matchesGcashPaymentTransaction, phpAmountToCentavos } from "./xenditSettlement";
+import { calculateNetParticipantShares, isSettledGcashPaymentTransaction, matchesGcashPaymentTransaction, phpAmountToCentavos } from "./xenditSettlement";
 
 initializeApp();
 
@@ -733,13 +733,23 @@ function participantEarningsCentavos(
   payment: Record<string, unknown>
 ): number {
   const breakdown = asRecord(payment.breakdown ?? entity.breakdown);
-  const shares = entityType === "ORDER"
-    ? [
-        nonNegativeInteger(breakdown.merchantShare ?? 0, "merchant share"),
-        nonNegativeInteger(breakdown.courierShare ?? 0, "courier share"),
-      ]
-    : [nonNegativeInteger(breakdown.driverShare ?? 0, "driver share")];
-  const total = shares.reduce((sum, amount) => sum + amount, 0);
+  const amount = nonNegativeInteger(payment.amountCentavos, "payment amount");
+  const net = calculateNetParticipantShares({
+    grossAmountCentavos: amount,
+    merchantCentavos: entityType === "ORDER" ? nonNegativeInteger(breakdown.merchantShare ?? 0, "merchant share") : 0,
+    courierCentavos: entityType === "ORDER" ? nonNegativeInteger(breakdown.courierShare ?? 0, "courier share") : 0,
+    driverCentavos: entityType === "TRIP" ? nonNegativeInteger(breakdown.driverShare ?? 0, "driver share") : 0,
+    platformCentavos: nonNegativeInteger(breakdown.platformShare ?? 0, "platform share"),
+    refunds: asRecord(payment.refunds) as Record<string, {
+      amountCentavos?: unknown;
+      status?: unknown;
+      walletSettlementStatus?: unknown;
+    }>,
+  });
+  if (net.refundReconciliationPending) {
+    throw new HttpsError("failed-precondition", "A confirmed refund is still waiting for wallet/ledger reconciliation.");
+  }
+  const total = net.merchantCentavos + net.courierCentavos + net.driverCentavos;
   if (!Number.isSafeInteger(total)) {
     throw new HttpsError("data-loss", "Participant earnings exceed the supported amount range.");
   }
@@ -4792,7 +4802,7 @@ async function reconcileCompletedPaymentEarnings(
 ): Promise<boolean> {
   if (
     asString(payment.provider).toUpperCase() !== "XENDIT" ||
-    asString(payment.status).toUpperCase() !== "PAID" ||
+    !["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].includes(asString(payment.status).toUpperCase()) ||
     asString(entity.paymentMethod).toUpperCase() !== "GCASH"
   ) return false;
 
@@ -4805,6 +4815,26 @@ async function reconcileCompletedPaymentEarnings(
   const totalShares = merchantShare + courierShare + driverShare + platformShare;
   if (!Number.isSafeInteger(totalShares) || totalShares !== amount) {
     throw new HttpsError("failed-precondition", "The paid transaction breakdown does not reconcile to its received amount.");
+  }
+
+  const netShares = calculateNetParticipantShares({
+    grossAmountCentavos: amount,
+    merchantCentavos: merchantShare,
+    courierCentavos: courierShare,
+    driverCentavos: driverShare,
+    platformCentavos: platformShare,
+    refunds: asRecord(payment.refunds) as Record<string, {
+      amountCentavos?: unknown;
+      status?: unknown;
+      walletSettlementStatus?: unknown;
+    }>,
+  });
+  if (netShares.refundReconciliationPending) {
+    await db.ref("payments/" + entityId).update({
+      earningsSettlementStatus: "WAITING_FOR_REFUND_RECONCILIATION",
+      availableFundsConfirmedAtTimestamp: null,
+    });
+    return false;
   }
 
   const merchantId = asString(entity.merchantId) || asString(entity.sourceId);
@@ -4835,17 +4865,22 @@ async function reconcileCompletedPaymentEarnings(
   }
 
   const shares: Array<{ ownerId: string; accountType: string; amount: number }> = [];
-  if (merchantShare > 0) shares.push({ ownerId: merchantId, accountType: "MERCHANT", amount: merchantShare });
-  if (courierShare > 0) shares.push({ ownerId: courierId, accountType: "COURIER", amount: courierShare });
-  if (driverShare > 0) shares.push({ ownerId: driverId, accountType: "DRIVER", amount: driverShare });
-  const participantTotal = merchantShare + courierShare + driverShare;
+  const releaseMerchantShare = release ? netShares.merchantCentavos : merchantShare;
+  const releaseCourierShare = release ? netShares.courierCentavos : courierShare;
+  const releaseDriverShare = release ? netShares.driverCentavos : driverShare;
+  if (releaseMerchantShare > 0) shares.push({ ownerId: merchantId, accountType: "MERCHANT", amount: releaseMerchantShare });
+  if (releaseCourierShare > 0) shares.push({ ownerId: courierId, accountType: "COURIER", amount: releaseCourierShare });
+  if (releaseDriverShare > 0) shares.push({ ownerId: driverId, accountType: "DRIVER", amount: releaseDriverShare });
+  const participantTotal = release
+    ? releaseMerchantShare + releaseCourierShare + releaseDriverShare
+    : merchantShare + courierShare + driverShare;
   const entryId = (release ? "earning_release_" : "earning_pending_") + entityType.toLowerCase() + "_" + entityId;
   const lines: LedgerLine[] = [];
   const recoveredByOwner = new Map<string, number>();
 
   if (release) {
-    // Wallet balances become withdrawable only after Xendit confirms transaction settlement
-    // and the current PHP cash balance has been checked against existing wallet liabilities.
+    // Wallet balances become withdrawable only after Xendit confirms transaction settlement,
+    // posted refunds are reconciled, and the current PHP cash balance has been checked.
     for (const share of shares) {
       const eventId = "earning_release_" + entryId + "_" + share.ownerId;
       const result = await applyWalletEarningCredit(share.ownerId, eventId, share.amount, hasPending);
@@ -4860,23 +4895,32 @@ async function reconcileCompletedPaymentEarnings(
         if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
       }
     } else {
-      lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
+      lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", netShares.netAmountCentavos));
       for (const share of shares) {
         const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
         const available = share.amount - recovered;
         if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
         if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
       }
-      if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
+      if (netShares.platformCentavos > 0) {
+        lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", netShares.platformCentavos));
+      }
     }
   } else {
-    // Keep the participant shares pending while the service or Xendit settlement is pending.
+    // Keep gross participant shares pending; refund postings reduce these balances
+    // before any later settlement release.
     lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
-    for (const share of shares) lines.push(ledgerLine(share.accountType + "_PENDING_PAYABLE", share.ownerId, "CREDIT", share.amount));
+    if (merchantShare > 0) lines.push(ledgerLine("MERCHANT_PENDING_PAYABLE", merchantId, "CREDIT", merchantShare));
+    if (courierShare > 0) lines.push(ledgerLine("COURIER_PENDING_PAYABLE", courierId, "CREDIT", courierShare));
+    if (driverShare > 0) lines.push(ledgerLine("DRIVER_PENDING_PAYABLE", driverId, "CREDIT", driverShare));
     if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
   }
 
-  const journalTotal = release && hasPending ? participantTotal : amount;
+  const journalTotal = release && hasPending
+    ? participantTotal
+    : release
+      ? netShares.netAmountCentavos
+      : amount;
   if (journalTotal <= 0) {
     if (release) {
       await db.ref("payments/" + entityId).update({
@@ -4895,7 +4939,7 @@ async function reconcileCompletedPaymentEarnings(
     totalCentavos: journalTotal,
     lines,
     memo: release
-      ? "Move settled GCash earnings to available after service completion and balance verification"
+      ? "Move settled GCash earnings to available after refund and balance verification"
       : "Reserve paid GCash earnings pending service completion or Xendit settlement",
     createdAtTimestamp: Number(payment.earningsPendingAtTimestamp ?? payment.paidAtTimestamp ?? payment.updatedAtTimestamp ?? entity.createdAtTimestamp ?? 1),
   };
@@ -5120,12 +5164,19 @@ export const reconcileMarketplaceEarnings = onSchedule(
     let released = 0;
     let pending = 0;
     let failed = 0;
-    const paidSnapshot = await db.ref("payments").orderByChild("status").equalTo("PAID").limitToLast(500).get();
-    const paidRows: Array<{ id: string; value: Record<string, unknown> }> = [];
-    paidSnapshot.forEach((child) => {
-      if (child.key) paidRows.push({ id: child.key, value: asRecord(child.val()) });
-      return false;
-    });
+    const paymentSnapshots = await Promise.all(
+      ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].map((status) =>
+        db.ref("payments").orderByChild("status").equalTo(status).limitToLast(500).get()
+      )
+    );
+    const paidRowsById = new Map<string, Record<string, unknown>>();
+    for (const snapshot of paymentSnapshots) {
+      snapshot.forEach((child) => {
+        if (child.key) paidRowsById.set(child.key, asRecord(child.val()));
+        return false;
+      });
+    }
+    const paidRows = Array.from(paidRowsById.entries()).map(([id, value]) => ({ id, value }));
 
     for (const row of paidRows) {
       try {
