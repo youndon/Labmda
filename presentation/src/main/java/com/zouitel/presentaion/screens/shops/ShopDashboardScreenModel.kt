@@ -60,7 +60,7 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
                                 category = child.child("category").value<String?>() ?: "General",
                                 imageUrl = child.child("imageUrl").value<String?>() ?: "",
                                 isAvailable = child.child("isAvailable").value<Boolean?>() ?: true,
-                                stockQuantity = child.child("stockQuantity").value<Int?>() ?: 0
+                                stockQuantity = child.child("stockQuantity").value<Int?>() ?: 10
                             )
                         } catch (_: Exception) {
                             null
