@@ -340,7 +340,7 @@ class DeliveryDashboardScreen : Screen {
                                             Text(if (trackingRoute?.routeTo == "PICKUP") "Route to pickup" else "Route to recipient", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                             Text(
                                                 if (routeLoading && trackingRoute == null) "Calculating road route…" else
-                                                    trackingRoute?.let { "${it.duration} · ${"%.1f".format(it.distanceMeters / 1000.0)} km" }
+                                                    trackingRoute?.let { "ETA ${formatRouteEta(it.duration)} · ${"%.1f".format(it.distanceMeters / 1000.0)} km" }
                                                         ?: "Waiting for route and live location",
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.primary
@@ -689,6 +689,12 @@ class DeliveryDashboardScreen : Screen {
             }
         }
     }
+}
+
+private fun formatRouteEta(duration: String): String {
+    val seconds = duration.removeSuffix("s").toDoubleOrNull() ?: return duration
+    val minutes = ((seconds + 59.0) / 60.0).toInt().coerceAtLeast(1)
+    return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
 }
 
 private fun decodeRoutePolyline(encoded: String): List<LatLng> {
