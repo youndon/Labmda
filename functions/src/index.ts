@@ -964,8 +964,6 @@ function closeCoordinate(left: number, right: number): boolean {
 function resolveRouteTravelMode(serviceType: string): RouteTravelMode {
   switch (serviceType.toLowerCase()) {
     case "bike":
-    case "e_bike":
-      return "BICYCLE";
     case "scooter":
     case "motorcycle":
       return "TWO_WHEELER";
