@@ -317,7 +317,7 @@
       ".write": false,
       "$uid": {
         ".read": false,
-        ".write": "auth != null && auth.uid === $uid && (root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'ACTIVE') && (root.child('users').child($uid).child('driverService').child('isOnline').val() === true || root.child('users').child($uid).child('deliveryServices').child('isOnline').val() === true)",
+        ".write": "auth != null && auth.uid === $uid && (root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'ACTIVE')",
         "latitude": {
           ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
         },
