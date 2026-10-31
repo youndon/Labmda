@@ -2767,31 +2767,52 @@ async function applyXenditPaymentStatus(args: {
 
   const saved = asRecord(transaction.snapshot.val());
   const entityPath = paymentEntityPath(args.entityType);
-  const updates: Record<string, unknown> = {};
-  updates[entityPath + "/" + args.entityId + "/paymentStatus"] = asString(saved.status);
-  updates[entityPath + "/" + args.entityId + "/paymentId"] = asString(saved.providerReference);
-  // Operational visibility follows the provider-confirmed payment state. A GCash
-  // request is not dispatchable until capture; terminal failures close it.
-  if (asString(saved.status).toUpperCase() === "PAID") {
-    updates[entityPath + "/" + args.entityId + "/status"] =
-      args.entityType === "ORDER" ? "PLACED" : "REQUESTED";
-  } else if (["FAILED", "CANCELLED", "EXPIRED"].includes(asString(saved.status).toUpperCase())) {
-    updates[entityPath + "/" + args.entityId + "/status"] = "CANCELLED";
-    if (args.entityType === "TRIP") {
-      updates[entityPath + "/" + args.entityId + "/driverId"] = "";
-      updates[entityPath + "/" + args.entityId + "/driverName"] = "";
-      updates[entityPath + "/" + args.entityId + "/driverPhone"] = "";
-    } else {
-      updates[entityPath + "/" + args.entityId + "/deliveryId"] = "";
-      updates[entityPath + "/" + args.entityId + "/deliveryName"] = "";
-      updates[entityPath + "/" + args.entityId + "/deliveryPhone"] = "";
+  const savedStatus = asString(saved.status).toUpperCase();
+  const entityRef = db.ref(entityPath + "/" + args.entityId);
+  await entityRef.transaction((rawValue) => {
+    if (!rawValue || typeof rawValue !== "object") return;
+    const entity = asRecord(rawValue);
+    const currentStatus = asString(entity.status).toUpperCase();
+    const nextEntity = {
+      ...entity,
+      paymentStatus: savedStatus,
+      paymentId: asString(saved.providerReference),
+    };
+
+    if (savedStatus === "PAID") {
+      // Do not rewind a ride/order that has already legitimately progressed.
+      // Legacy REQUESTED/PLACED GCash records are normalized only when unassigned.
+      const unassigned = args.entityType === "TRIP"
+        ? !asString(entity.driverId)
+        : !asString(entity.deliveryId);
+      if (
+        currentStatus === "AWAITING_PAYMENT" ||
+        unassigned && (currentStatus === "REQUESTED" || currentStatus === "PLACED")
+      ) {
+        nextEntity.status = args.entityType === "ORDER" ? "PLACED" : "REQUESTED";
+      }
+    } else if (["FAILED", "CANCELLED", "EXPIRED"].includes(savedStatus)) {
+      if ([
+        "AWAITING_PAYMENT", "REQUESTED", "PLACED", "ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY",
+      ].includes(currentStatus)) {
+        nextEntity.status = "CANCELLED";
+        if (args.entityType === "TRIP") {
+          nextEntity.driverId = "";
+          nextEntity.driverName = "";
+          nextEntity.driverPhone = "";
+        } else {
+          nextEntity.deliveryId = "";
+          nextEntity.deliveryName = "";
+          nextEntity.deliveryPhone = "";
+        }
+      }
     }
+    return nextEntity;
+  });
+
+  if (["PAID", "FAILED", "CANCELLED", "EXPIRED"].includes(savedStatus)) {
+    await db.ref("paymentReconciliationQueue/" + args.entityId).remove();
   }
-  updates["payments/" + args.entityId + "/status"] = asString(saved.status);
-  if (["PAID", "FAILED", "CANCELLED", "EXPIRED"].includes(asString(saved.status))) {
-    updates["paymentReconciliationQueue/" + args.entityId] = null;
-  }
-  await db.ref().update(updates);
   return true;
 }
 
