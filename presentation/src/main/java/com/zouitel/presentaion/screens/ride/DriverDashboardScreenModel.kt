@@ -78,11 +78,15 @@ class DriverDashboardScreenModel : ScreenModel {
         val trips = db.child("trips")
         val openRequests = db.child("availableRideRequests").valueEvents
         val assignedToDriver = trips.orderByChild("driverId").equalTo(uid).valueEvents
+        val driverVehicleType = db.child("users").child(uid).child("driverService").child("vehicleInfo").child("type").valueEvents
 
         screenModelScope.launch {
-            combine(openRequests, assignedToDriver) { openSnapshot, assignedSnapshot ->
-                openSnapshot.children + assignedSnapshot.children
-            }.collect { snapshots ->
+            combine(openRequests, assignedToDriver, driverVehicleType) { openSnapshot, assignedSnapshot, vehicleSnapshot ->
+                Triple(
+                    openSnapshot.children + assignedSnapshot.children,
+                    runCatching { vehicleSnapshot.value<String>() }.getOrDefault("").uppercase()
+                )
+            }.collect { (snapshots, currentVehicleType) ->
                 val available = mutableListOf<Trip>()
                 val active = mutableListOf<Trip>()
 
@@ -108,6 +112,9 @@ class DriverDashboardScreenModel : ScreenModel {
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
+                            serviceType = str("serviceType"),
+                            routeDuration = str("routeDuration"),
+                            routePolyline = str("routePolyline"),
                             driverId = driverId,
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
@@ -128,7 +135,12 @@ class DriverDashboardScreenModel : ScreenModel {
                             cashRemittanceStatus = str("cashRemittanceStatus")
                         )
 
-                        if (status == "REQUESTED" && driverId.isBlank()) {
+                        if (
+                            status == "REQUESTED" &&
+                            driverId.isBlank() &&
+                            (trip.serviceType.isBlank() || trip.serviceType.equals("RIDE", true) ||
+                                trip.serviceType.equals(currentVehicleType, true))
+                        ) {
                             available.add(trip)
                         } else if (
                             driverId == uid &&
