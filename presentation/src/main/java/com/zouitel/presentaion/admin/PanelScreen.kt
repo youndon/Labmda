@@ -84,14 +84,10 @@ class PanelScreen : Screen {
                     OverviewMetric("Pending approvals", state.pendingApprovals.toString(), "Merchants & providers", { Icon(Icons.Default.Assessment, null) }, Modifier.weight(1f)) {
                         navigator?.push(AdminApprovalOverviewScreen())
                     }
-                    OverviewMetric("Active orders", state.activeOrders.toString(), "Food & shop", { Icon(Icons.Default.Storefront, null) }, Modifier.weight(1f)) {
-                        navigator?.push(AdminPaymentsScreen())
-                    }
+                    OverviewMetric("Active orders", state.activeOrders.toString(), "Food & shop", { Icon(Icons.Default.Storefront, null) }, Modifier.weight(1f), null)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OverviewMetric("Active rides", state.activeRides.toString(), "Ride requests", { Icon(Icons.Default.DirectionsCar, null) }, Modifier.weight(1f)) {
-                        navigator?.push(AdminDriverScreen())
-                    }
+                    OverviewMetric("Active rides", state.activeRides.toString(), "Ride requests", { Icon(Icons.Default.DirectionsCar, null) }, Modifier.weight(1f), null)
                     OverviewMetric("Payout alerts", state.payoutAlerts.toString(), "Review required", { Icon(Icons.Default.AccountBalanceWallet, null) }, Modifier.weight(1f)) {
                         navigator?.push(AdminPaymentsScreen())
                     }
@@ -164,17 +160,24 @@ private fun OverviewMetric(
     detail: String,
     icon: @Composable () -> Unit,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    onClick: (() -> Unit)? = null
 ) {
-    Card(onClick = onClick, modifier = modifier) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                icon()
-            }
-            Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (onClick == null) {
+        Card(modifier = modifier) { OverviewMetricContent(title, value, detail, icon) }
+    } else {
+        Card(onClick = onClick, modifier = modifier) { OverviewMetricContent(title, value, detail, icon) }
+    }
+}
+
+@Composable
+private fun OverviewMetricContent(title: String, value: String, detail: String, icon: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            icon()
         }
+        Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
