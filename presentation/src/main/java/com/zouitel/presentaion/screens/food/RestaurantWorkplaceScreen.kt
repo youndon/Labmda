@@ -155,7 +155,7 @@ class RestaurantWorkplaceScreen : Screen {
                                     Status.NONE -> RestaurantApplicationForm(
                                         initialPhone = profile.phoneNumber ?: "",
                                         uploadState = imageUpload,
-                                        onUploadImage = { image, token -> screenModel.uploadRestaurantImage(image, token) },
+                                        onUploadImage = { image -> screenModel.uploadRestaurantImage(image) },
                                         onUploadHandled = { screenModel.resetImageUpload() },
                                         onSubmit = { name, img, fee, time, phone, address, lat, lng ->
                                             screenModel.submitApplication(name, img, fee, time, phone, address, lat, lng)
