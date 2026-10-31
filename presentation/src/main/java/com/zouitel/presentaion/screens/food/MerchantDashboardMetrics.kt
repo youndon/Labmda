@@ -4,7 +4,7 @@ import java.util.Calendar
 
 data class MerchantOrderSnapshot(
     val status: String,
-    val totalPrice: Double,
+    val salesAmount: Double,
     val createdAtTimestamp: Long
 )
 
@@ -26,11 +26,7 @@ fun calculateMerchantDashboardMetrics(orders: List<MerchantOrderSnapshot>): Merc
         set(Calendar.SECOND, 0)
         set(Calendar.MILLISECOND, 0)
     }.timeInMillis
-    val week = Calendar.getInstance().apply {
-        timeInMillis = today
-        set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
-        add(Calendar.DAY_OF_YEAR, -6)
-    }.timeInMillis
+    val week = today - 6L * 24L * 60L * 60L * 1000L
     fun timestampMillis(value: Long): Long = if (value in 1L..9_999_999_999L) value * 1000L else value
     val normalized = orders.map { it to timestampMillis(it.createdAtTimestamp) }
     val delivered = normalized.filter { it.first.status == "DELIVERED" }
@@ -39,7 +35,7 @@ fun calculateMerchantDashboardMetrics(orders: List<MerchantOrderSnapshot>): Merc
         preparingOrders = orders.count { it.status == "ACCEPTED" || it.status == "PREPARING" },
         outForDeliveryOrders = orders.count { it.status == "OUT_FOR_DELIVERY" },
         todayOrders = normalized.count { it.second >= today },
-        todaySales = delivered.filter { it.second >= today }.sumOf { it.first.totalPrice },
+        todaySales = delivered.filter { it.second >= today }.sumOf { it.first.salesAmount },
         weekSales = delivered.filter { it.second >= week }.sumOf { it.first.totalPrice }
     )
 }
