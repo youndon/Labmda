@@ -38,14 +38,13 @@ import io.github.vinceglb.filekit.core.PickerType
  *
  * Stateless: [imageUrl] is whatever the form currently holds (the existing photo when editing,
  * or the freshly uploaded one) and [uploadState] only drives the progress / error UI.
- * The caller decides what "picked" means via [onImagePicked] (normally: start an upload to the
- * user's Google Drive). The [DriveTokenProvider] it receives may show Google's consent screen.
+ * The caller uploads the selected image using the signed-in Firebase user session.
  */
 @Composable
 fun ImagePicker(
     imageUrl: String,
     uploadState: ImageUploadState,
-    onImagePicked: (PickedImage, DriveTokenProvider) -> Unit,
+    onImagePicked: (PickedImage) -> Unit,
     modifier: Modifier = Modifier,
     emptyLabel: String = "Add a photo",
     contentDescription: String = "Photo",
@@ -53,12 +52,10 @@ fun ImagePicker(
 ) {
     val isUploading = uploadState is ImageUploadState.Uploading
 
-    val authorizer = rememberDriveAuthorizer()
-
     val picker = rememberFilePickerLauncher(type = PickerType.Image) { picked ->
         picked?.let { file ->
             // Bytes are read lazily by the screen model, so I/O errors land in the upload state
-            onImagePicked(PickedImage { file.readBytes() }, authorizer::getAccessToken)
+            onImagePicked(PickedImage { file.readBytes() })
         }
     }
 
