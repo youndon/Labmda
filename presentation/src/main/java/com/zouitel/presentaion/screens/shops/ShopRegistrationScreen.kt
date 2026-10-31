@@ -168,7 +168,7 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                     ImagePicker(
                         imageUrl = imageUrl,
                         uploadState = imageUpload,
-                        onImagePicked = { image, token -> screenModel.uploadShopImage(image, token) },
+                        onImagePicked = { image -> screenModel.uploadShopImage(image) },
                         emptyLabel = "Add a store photo or logo",
                         contentDescription = "Store photo"
                     )
