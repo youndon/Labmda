@@ -24,15 +24,12 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.model.Order
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.pm.PackageManager
-import android.location.Geocoder
 import android.location.Location
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationResult
 import android.os.Looper
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -60,7 +57,6 @@ import com.google.maps.android.compose.rememberUpdatedMarkerState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Locale
 
 class DeliveryDashboardScreen : Screen {
     @SuppressLint("MissingPermission")
@@ -399,7 +395,11 @@ class DeliveryDashboardScreen : Screen {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        if (trackingRoute?.routeTo == "PICKUP") "Progress: heading to pickup" else "Progress: order picked up · heading to recipient",
+                                        when (trackingRoute?.routeTo) {
+                                            "PICKUP" -> "Progress: heading to pickup"
+                                            "DROPOFF" -> "Progress: pickup confirmed · heading to recipient"
+                                            else -> "Progress: waiting for live route"
+                                        },
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
