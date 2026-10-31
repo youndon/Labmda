@@ -89,6 +89,13 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                 SalesTile("Today · ${metrics.todayOrders} orders", metrics.todaySales, Modifier.weight(1f))
                                 SalesTile("Last 7 days", metrics.weekSales, Modifier.weight(1f))
                             }
+                            OutlinedButton(
+                                onClick = { navigator?.push(ShopOrdersScreen()) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Open order queue")
+                            }
                             val lowStock = products.filter { it.stockQuantity <= 5 }
                             if (lowStock.isNotEmpty()) {
                                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
