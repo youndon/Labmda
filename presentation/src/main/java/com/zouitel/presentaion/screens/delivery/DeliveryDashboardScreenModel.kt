@@ -38,6 +38,11 @@ class DeliveryDashboardScreenModel : ScreenModel {
     private val _isLoading = MutableStateFlow(true)
     private val _cashActionError = MutableStateFlow<String?>(null)
     val cashActionError: StateFlow<String?> = _cashActionError.asStateFlow()
+
+    private val _trackingRoute = MutableStateFlow<com.zouitel.presentaion.payments.TrackingRouteResult?>(null)
+    val trackingRoute: StateFlow<com.zouitel.presentaion.payments.TrackingRouteResult?> = _trackingRoute.asStateFlow()
+    private val _routeLoading = MutableStateFlow(false)
+    val routeLoading: StateFlow<Boolean> = _routeLoading.asStateFlow()
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 //
 //    private val _orderPoints = MutableStateFlow<Map<String, OrderPoint>>(emptyMap())
@@ -135,6 +140,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
                             deliveryPhone = deliveryPhone,
+                            deliveryStage = runCatching { child.child("deliveryStage").value<String>() }.getOrDefault("TO_PICKUP"),
                             cashCollectionStatus = runCatching { child.child("cashCollectionStatus").value<String>() }.getOrDefault(""),
                             cashCollectedBy = runCatching { child.child("cashCollectedBy").value<String>() }.getOrDefault(""),
                             cashCollectedByRole = runCatching { child.child("cashCollectedByRole").value<String>() }.getOrDefault(""),
@@ -179,6 +185,36 @@ class DeliveryDashboardScreenModel : ScreenModel {
             }
         }
     }
+
+    fun updateCourierLocation(latitude: Double, longitude: Double, heading: Float = 0f) {
+        val uid = currentUid ?: return
+        screenModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                db.child("users").child(uid).child("currentLocation").setValue(
+                    mapOf("latitude" to latitude, "longitude" to longitude, "heading" to heading)
+                )
+            }
+        }
+    }
+
+    fun refreshCourierRoute(orderId: String) {
+        screenModelScope.launch(Dispatchers.IO) {
+            _routeLoading.value = true
+            runCatching { payments.getTrackingRoute(orderId, "COURIER") }
+                .onSuccess { _trackingRoute.value = it }
+                .onFailure { _cashActionError.value = it.message ?: "The delivery route is temporarily unavailable." }
+            _routeLoading.value = false
+        }
+    }
+
+    fun markDeliveryPickedUp(order: Order) {
+        screenModelScope.launch(Dispatchers.IO) {
+            runCatching { payments.markDeliveryPickedUp(order.id) }
+                .onFailure { _cashActionError.value = it.message ?: "Pickup could not be confirmed." }
+        }
+    }
+
+    fun clearTrackingRoute() { _trackingRoute.value = null }
 
     fun claimCourierTask(order: Order) {
         val uid = currentUid ?: return
