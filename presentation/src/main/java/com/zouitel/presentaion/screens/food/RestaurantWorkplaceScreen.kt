@@ -32,7 +32,6 @@ import com.zouitel.presentaion.common.UserMode
 import androidx.compose.material.icons.filled.LocationOn
 import com.google.android.gms.maps.model.LatLng
 import com.zouitel.presentaion.common.LocationPickerDialog
-import com.zouitel.presentaion.common.DriveTokenProvider
 import com.zouitel.presentaion.common.ImagePicker
 import com.zouitel.presentaion.common.PickedImage
 import coil3.compose.AsyncImage
@@ -135,7 +134,7 @@ class RestaurantWorkplaceScreen : Screen {
                                 initialLng = restaurantInfo.longitude,
                                 submitButtonText = "Save Changes",
                                 uploadState = imageUpload,
-                                onUploadImage = { image, token -> screenModel.uploadRestaurantImage(image, token) },
+                                onUploadImage = { image -> screenModel.uploadRestaurantImage(image) },
                                 onUploadHandled = { screenModel.resetImageUpload() },
                                 onSubmit = { name, img, fee, time, phone, address, lat, lng ->
                                     screenModel.submitApplication(name, img, fee, time, phone, address, lat, lng)
@@ -248,7 +247,7 @@ class RestaurantWorkplaceScreen : Screen {
         initialLng: Double = 0.0,
         submitButtonText: String = "Submit Application",
         uploadState: ImageUploadState,
-        onUploadImage: (PickedImage, DriveTokenProvider) -> Unit,
+        onUploadImage: (PickedImage) -> Unit,
         onUploadHandled: () -> Unit,
         onSubmit: (String, String, Double, Int, String, String, Double, Double) -> Unit
     ) {
