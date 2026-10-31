@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,7 +26,7 @@ import com.zouitel.presentaion.screens.account.LogInScreen
 
 class MainActivity : ComponentActivity() {
     private val accountPreferencesStore: AccountPreferencesStore by inject()
-    private var darkModeEnabled by mutableStateOf(false)
+    private var darkModeEnabled by mutableStateOf<Boolean?>(null)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -44,7 +45,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         setContent {
-            AppTheme(darkTheme = darkModeEnabled) {
+            AppTheme(darkTheme = darkModeEnabled ?: isSystemInDarkTheme()) {
                 setSingletonImageLoaderFactory { context ->
                     ImageLoader.Builder(context)
                         .components { add(KtorNetworkFetcherFactory()) }
