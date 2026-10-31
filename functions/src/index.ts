@@ -1645,7 +1645,8 @@ export const createOrder = onCall(
       pricingQuoteId: quoteId,
       pricingSnapshot: snapshot,
       breakdown: quote.breakdown,
-      status: "PLACED",
+      // Quote-first orders are created for GCash checkout; keep them hidden from merchants until capture.
+      status: "AWAITING_PAYMENT",
       deliveryId: "",
       deliveryName: "",
       deliveryPhone: "",
@@ -2238,7 +2239,9 @@ export const createTrip = onCall(
       breakdown: rideBreakdown,
       serviceType: serviceType.toUpperCase(),
       driverId: targetDriverId,
-      status: "REQUESTED",
+      // The quote-first flow creates the entity before GCash checkout. Keep it
+      // invisible to drivers until the payment callable confirms capture.
+      status: "AWAITING_PAYMENT",
       paymentMethod: "",
       paymentStatus: "UNPAID",
       paymentId: "",
@@ -2306,12 +2309,21 @@ export const claimDeliveryOrder = onCall({ region: REGION }, async (request) => 
   const profile = await getUserProfileRecord(uid);
   const name = asString(profile.fullName) || "Delivery";
   const phone = asString(profile.phoneNumber) || asString(profile.phone);
+  const paymentSnapshot = await db.ref("payments/" + orderId).get();
+  const serverPaymentStatus = asString(asRecord(paymentSnapshot.val()).status).toUpperCase();
   const ref = db.ref("orders/" + orderId);
   const tx = await ref.transaction((currentValue) => {
     if (!currentValue || typeof currentValue !== "object") return;
     const order = asRecord(currentValue);
     const assigned = asString(order.deliveryId);
-    if (asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || (assigned && assigned !== uid)) return;
+    const paymentMethod = asString(order.paymentMethod).toUpperCase();
+    if (
+      asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" ||
+      (assigned && assigned !== uid) ||
+      !["CASH", "GCASH"].includes(paymentMethod) ||
+      paymentMethod === "GCASH" &&
+        (asString(order.paymentStatus).toUpperCase() !== "PAID" || serverPaymentStatus !== "PAID")
+    ) return;
     return { ...order, deliveryId: uid, deliveryName: name, deliveryPhone: phone, deliveryStage: asString(order.deliveryStage) || "TO_PICKUP" };
   });
   if (!tx.committed) throw new HttpsError("failed-precondition", "This order is no longer available for delivery.");
@@ -2385,7 +2397,12 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
     if (next === "ACCEPTED") from = ["PLACED"];
     if (next === "PREPARING") from = ["ACCEPTED"];
     if (next === "OUT_FOR_DELIVERY") from = ["ACCEPTED", "PREPARING"];
-    if (method === "GCASH" && paymentStatus !== "PAID") throw new HttpsError("failed-precondition", "The customer must complete GCash payment before dispatch.");
+    if (method === "GCASH") {
+      const payment = asRecord((await db.ref("payments/" + orderId).get()).val());
+      if (paymentStatus !== "PAID" || asString(payment.status).toUpperCase() !== "PAID") {
+        throw new HttpsError("failed-precondition", "The customer must complete GCash payment before the merchant can accept or dispatch this order.");
+      }
+    }
   } else if (next === "DELIVERED") {
     if (asString(order.deliveryId) !== uid) throw new HttpsError("permission-denied", "Only the assigned courier can complete this delivery.");
     await requireApprovedCourier(uid);
@@ -2408,6 +2425,8 @@ export const claimTrip = onCall({ region: REGION }, async (request) => {
   if (driver.isOnline !== true) throw new HttpsError("failed-precondition", "Go online before accepting a ride request.");
   const tripId = asString(asRecord(request.data).tripId);
   if (!/^[A-Za-z0-9_-]{12,80}$/.test(tripId)) throw new HttpsError("invalid-argument", "A valid trip ID is required.");
+  const paymentSnapshot = await db.ref("payments/" + tripId).get();
+  const serverPaymentStatus = asString(asRecord(paymentSnapshot.val()).status).toUpperCase();
   const vehicle = asRecord(driver.vehicleInfo);
   const driverVehicleType = asString(vehicle.type).toUpperCase();
   const vehicleName = [asString(vehicle.color), asString(vehicle.make), asString(vehicle.model)].filter(Boolean).join(" ");
@@ -2421,6 +2440,9 @@ export const claimTrip = onCall({ region: REGION }, async (request) => {
     if (
       asString(trip.status).toUpperCase() !== "REQUESTED" ||
       (assigned && assigned !== uid) ||
+      !["CASH", "GCASH"].includes(asString(trip.paymentMethod).toUpperCase()) ||
+      asString(trip.paymentMethod).toUpperCase() === "GCASH" &&
+        (asString(trip.paymentStatus).toUpperCase() !== "PAID" || serverPaymentStatus !== "PAID") ||
       (requestedServiceType && requestedServiceType !== "RIDE" && requestedServiceType !== driverVehicleType)
     ) return;
     return { ...trip, driverId: uid, driverName: asString(profile.fullName) || "Driver", driverPhone: asString(profile.phoneNumber) || asString(profile.phone), vehicleDetails: [vehicleName, plate ? "(" + plate + ")" : ""].filter(Boolean).join(" "), status: "ACCEPTED" };
@@ -2745,14 +2767,52 @@ async function applyXenditPaymentStatus(args: {
 
   const saved = asRecord(transaction.snapshot.val());
   const entityPath = paymentEntityPath(args.entityType);
-  const updates: Record<string, unknown> = {};
-  updates[entityPath + "/" + args.entityId + "/paymentStatus"] = asString(saved.status);
-  updates[entityPath + "/" + args.entityId + "/paymentId"] = asString(saved.providerReference);
-  updates["payments/" + args.entityId + "/status"] = asString(saved.status);
-  if (["PAID", "FAILED", "CANCELLED", "EXPIRED"].includes(asString(saved.status))) {
-    updates["paymentReconciliationQueue/" + args.entityId] = null;
+  const savedStatus = asString(saved.status).toUpperCase();
+  const entityRef = db.ref(entityPath + "/" + args.entityId);
+  await entityRef.transaction((rawValue) => {
+    if (!rawValue || typeof rawValue !== "object") return;
+    const entity = asRecord(rawValue);
+    const currentStatus = asString(entity.status).toUpperCase();
+    const nextEntity: Record<string, unknown> = {
+      ...entity,
+      paymentStatus: savedStatus,
+      paymentId: asString(saved.providerReference),
+    };
+
+    if (savedStatus === "PAID") {
+      // Do not rewind a ride/order that has already legitimately progressed.
+      // Legacy REQUESTED/PLACED GCash records are normalized only when unassigned.
+      const unassigned = args.entityType === "TRIP"
+        ? !asString(entity.driverId)
+        : !asString(entity.deliveryId);
+      if (
+        currentStatus === "AWAITING_PAYMENT" ||
+        unassigned && (currentStatus === "REQUESTED" || currentStatus === "PLACED")
+      ) {
+        nextEntity.status = args.entityType === "ORDER" ? "PLACED" : "REQUESTED";
+      }
+    } else if (["FAILED", "CANCELLED", "EXPIRED"].includes(savedStatus)) {
+      if ([
+        "AWAITING_PAYMENT", "REQUESTED", "PLACED", "ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY",
+      ].includes(currentStatus)) {
+        nextEntity.status = "CANCELLED";
+        if (args.entityType === "TRIP") {
+          nextEntity.driverId = "";
+          nextEntity.driverName = "";
+          nextEntity.driverPhone = "";
+        } else {
+          nextEntity.deliveryId = "";
+          nextEntity.deliveryName = "";
+          nextEntity.deliveryPhone = "";
+        }
+      }
+    }
+    return nextEntity;
+  });
+
+  if (["PAID", "FAILED", "CANCELLED", "EXPIRED"].includes(savedStatus)) {
+    await db.ref("paymentReconciliationQueue/" + args.entityId).remove();
   }
-  await db.ref().update(updates);
   return true;
 }
 
@@ -2982,6 +3042,14 @@ export const createGcashPayment = onCall(
       throw new HttpsError("failed-precondition", "This payment already has an active GCash checkout. Reuse its original idempotency key.");
     }
 
+    // Close the visibility/claim window before making the external Xendit request.
+    // If the provider call fails, the catch block below cancels the unpaid entity.
+    const entityPendingUpdates: Record<string, unknown> = {};
+    entityPendingUpdates[entityPath + "/" + entityId + "/paymentMethod"] = "GCASH";
+    entityPendingUpdates[entityPath + "/" + entityId + "/paymentStatus"] = "CREATING";
+    entityPendingUpdates[entityPath + "/" + entityId + "/status"] = "AWAITING_PAYMENT";
+    await db.ref().update(entityPendingUpdates);
+
     try {
       const provider = await createXenditGcashRequest({
         referenceId,
@@ -3044,6 +3112,12 @@ export const createGcashPayment = onCall(
       updates[entityPath + "/" + entityId + "/paymentMethod"] = "GCASH";
       updates[entityPath + "/" + entityId + "/paymentStatus"] = status;
       updates[entityPath + "/" + entityId + "/paymentId"] = provider.paymentId;
+      updates[entityPath + "/" + entityId + "/status"] =
+        status === "PAID"
+          ? entityType === "ORDER" ? "PLACED" : "REQUESTED"
+          : ["FAILED", "CANCELLED", "EXPIRED"].includes(status)
+            ? "CANCELLED"
+            : "AWAITING_PAYMENT";
       if (["PENDING", "CREATING"].includes(status)) {
         updates["paymentReconciliationQueue/" + entityId] = {
           dueAtTimestamp: timestamp + 2 * 60 * 1000,
@@ -3073,6 +3147,7 @@ export const createGcashPayment = onCall(
       updates["payments/" + entityId + "/attempts/" + attemptKey + "/status"] = failure.status;
       updates["payments/" + entityId + "/attempts/" + attemptKey + "/updatedAtTimestamp"] = failureTimestamp;
       updates[entityPath + "/" + entityId + "/paymentStatus"] = failure.status;
+      updates[entityPath + "/" + entityId + "/status"] = "CANCELLED";
       await db.ref().update(updates);
       logger.error("Could not create Xendit GCash payment request", { entityType, entityId, error });
       if (error instanceof HttpsError) throw error;
@@ -6827,7 +6902,18 @@ export const syncAvailableDeliveryTask = onValueWritten({ ref: "/orders/{orderId
   const id = event.params.orderId, after = event.data.after, target = db.ref("availableDeliveryTasks/" + event.params.orderId);
   if (!after.exists()) { await target.remove(); return; }
   const order = asRecord(after.val());
-  if (asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || asString(order.deliveryId)) { await target.remove(); return; }
+  const paymentMethod = asString(order.paymentMethod).toUpperCase();
+  const paymentStatus = asString(order.paymentStatus).toUpperCase();
+  if (
+    asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" ||
+    asString(order.deliveryId) ||
+    !["CASH", "GCASH"].includes(paymentMethod) ||
+    paymentMethod === "GCASH" && paymentStatus !== "PAID"
+  ) { await target.remove(); return; }
+  if (paymentMethod === "GCASH") {
+    const payment = asRecord((await db.ref("payments/" + id).get()).val());
+    if (asString(payment.status).toUpperCase() !== "PAID") { await target.remove(); return; }
+  }
   await target.set({ id, clientId: asString(order.clientId), orderType: asString(order.orderType), sourceId: asString(order.sourceId), sourceName: asString(order.sourceName),
     items: order.items ?? [], subtotal: Number(order.subtotal ?? 0), deliveryFee: Number(order.deliveryFee ?? 0), totalPrice: Number(order.totalPrice ?? 0),
     status: "OUT_FOR_DELIVERY", createdAtTimestamp: Number(order.createdAtTimestamp ?? 0), paymentMethod: asString(order.paymentMethod), paymentStatus: asString(order.paymentStatus), paymentId: asString(order.paymentId),
@@ -6838,7 +6924,18 @@ export const syncAvailableRideRequest = onValueWritten({ ref: "/trips/{tripId}",
   const id = event.params.tripId, after = event.data.after, target = db.ref("availableRideRequests/" + event.params.tripId);
   if (!after.exists()) { await target.remove(); return; }
   const trip = asRecord(after.val());
-  if (asString(trip.status).toUpperCase() !== "REQUESTED" || asString(trip.driverId)) { await target.remove(); return; }
+  const paymentMethod = asString(trip.paymentMethod).toUpperCase();
+  const paymentStatus = asString(trip.paymentStatus).toUpperCase();
+  if (
+    asString(trip.status).toUpperCase() !== "REQUESTED" ||
+    asString(trip.driverId) ||
+    !["CASH", "GCASH"].includes(paymentMethod) ||
+    paymentMethod === "GCASH" && paymentStatus !== "PAID"
+  ) { await target.remove(); return; }
+  if (paymentMethod === "GCASH") {
+    const payment = asRecord((await db.ref("payments/" + id).get()).val());
+    if (asString(payment.status).toUpperCase() !== "PAID") { await target.remove(); return; }
+  }
   await target.set({ id, passengerId: asString(trip.passengerId), passengerName: asString(trip.passengerName), passengerPhone: "",
     pickupLocation: asString(trip.pickupLocation), dropoffLocation: asString(trip.dropoffLocation), pickupLat: Number(trip.pickupLat ?? 0), pickupLng: Number(trip.pickupLng ?? 0),
     dropoffLat: Number(trip.dropoffLat ?? 0), dropoffLng: Number(trip.dropoffLng ?? 0), fare: Number(trip.fare ?? 0), driverId: "", driverName: "", driverPhone: "",
