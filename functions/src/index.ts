@@ -2542,7 +2542,7 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
         if (!rawValue || typeof rawValue !== "object") return;
         const latest = asRecord(rawValue);
         if (asString(latest.stockReservationToken) !== claimToken) return;
-        const restored = { ...latest, status: "PLACED" };
+        const restored: Record<string, unknown> = { ...latest, status: "PLACED" };
         delete restored.stockReservationStartedAt;
         delete restored.stockReservationToken;
         return restored;
@@ -2556,7 +2556,7 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
         asString(latest.status).toUpperCase() !== "ACCEPTING" ||
         asString(latest.stockReservationToken) !== claimToken
       ) return;
-      const saved = { ...latest, status: "ACCEPTED" };
+      const saved: Record<string, unknown> = { ...latest, status: "ACCEPTED" };
       delete saved.stockReservationStartedAt;
       delete saved.stockReservationToken;
       return saved;
