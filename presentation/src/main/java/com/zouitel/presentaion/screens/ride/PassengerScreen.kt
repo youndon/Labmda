@@ -560,6 +560,9 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         hasDestination: Boolean,
         distanceKm: Double,
         fare: Double,
+        rideQuote: PricingQuoteResult?,
+        isQuotingRide: Boolean,
+        quoteError: String?,
         isSubmitting: Boolean,
         vehicleType: VehicleType,
         selectedDriver: UserProfile?,
@@ -650,23 +653,39 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Approx. ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "Preview ₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                if (isQuotingRide) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text("Calculating road route and fare…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                rideQuote?.let { quote ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Road route · ${"%.1f".format(quote.distanceKm)} km", style = MaterialTheme.typography.bodyMedium)
+                            Text("Estimated drive · ${formatRouteEta(quote.routeDuration)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Server quote", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "₱${"%.2f".format(quote.amount)}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+                quoteError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
 
                 PayButton(
                     label = "Review ride",
-                    enabled = name.isNotBlank() && distanceKm > 0.05,
-                    isLoading = isSubmitting,
+                    enabled = name.isNotBlank() && rideQuote != null &&
+                        rideQuote.expiresAtTimestamp > System.currentTimeMillis() && !isQuotingRide,
+                    isLoading = isSubmitting || isQuotingRide,
                     onClick = { onSubmit(name.trim(), phone.trim()) }
                 )
             }
@@ -678,8 +697,9 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         pickupAddress: String,
         destinationAddress: String,
         vehicleType: VehicleType,
-        distanceKm: Double,
-        indicativeFare: Double,
+        quote: PricingQuoteResult?,
+        isQuotingRide: Boolean,
+        quoteError: String?,
         selectedMethod: com.zouitel.presentaion.model.PaymentMethod,
         onMethodSelected: (com.zouitel.presentaion.model.PaymentMethod) -> Unit,
         isSubmitting: Boolean,
@@ -720,25 +740,42 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         Spacer(Modifier.weight(1f))
                         Text(vehicleType.name.replace('_', ' '), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Map distance (approx.)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.weight(1f))
-                        Text("${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Indicative fare", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            Text("Not the final amount", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (quote != null) {
+                        FareDetailRow("Road distance", "${"%.1f".format(quote.distanceKm)} km")
+                        FareDetailRow("Drive time", formatRouteEta(quote.routeDuration))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        quote.fareBreakdown?.let { breakdown ->
+                            FareDetailRow("Base fare", formatPhp(breakdown.baseFareCentavos))
+                            FareDetailRow("Distance charge", formatPhp(breakdown.distanceChargeCentavos))
+                            FareDetailRow("Additional charges", formatPhp(breakdown.additionalChargesCentavos))
+                            if (breakdown.adjustmentCentavos != 0L) {
+                                FareDetailRow("Rounding / minimum adjustment", formatPhp(breakdown.adjustmentCentavos))
+                            }
                         }
-                        Text("₱${"%.2f".format(indicativeFare)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Server fare", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.weight(1f))
+                            Text("₱${"%.2f".format(quote.amount)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else {
+                        Text(
+                            if (isQuotingRide) "Refreshing your road route and fare…" else quoteError ?: "A current server quote is required before requesting a ride.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (quoteError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
-            Text("Final fare is calculated securely by Labmda using the road route and current administrator pricing. The server-confirmed amount may differ from this map preview.",
+            Text("This quote was calculated by Labmda from Google road distance and current administrator pricing. It is reserved for this route and ride type until it expires.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             PaymentMethodSelector(selectedMethod = selectedMethod, onMethodSelected = onMethodSelected, enabled = !isSubmitting)
-            PayButton(label = "Confirm and request ride", enabled = distanceKm > 0.05, isLoading = isSubmitting, onClick = onConfirm)
+            PayButton(
+                label = "Confirm and request ride",
+                enabled = quote != null && quote.expiresAtTimestamp > System.currentTimeMillis() && !isQuotingRide,
+                isLoading = isSubmitting || isQuotingRide,
+                onClick = onConfirm
+            )
         }
     }
     @Composable
@@ -765,9 +802,8 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             Text(driver.fullName, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
 
             driverDistanceKm?.let {
-                val eta = maxOf(1, Math.ceil(it / 30.0 * 60).toInt())
                 Text(
-                    "${"%.1f".format(it)} km away · ~$eta min",
+                    "${"%.1f".format(it)} km away (straight-line estimate)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -811,11 +847,15 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Distance: ${"%.1f".format(tripDistanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "Est. ₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (fare > 0.0) {
+                        Text(
+                            "Server quote ₱${"%.2f".format(fare)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Calculating server quote…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 PayButton(
@@ -901,11 +941,15 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "Est. ₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (fare > 0.0) {
+                        Text(
+                            "Server quote ₱${"%.2f".format(fare)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Calculating server quote…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
 
@@ -1037,8 +1081,56 @@ private fun distanceKm(a: LatLng, b: LatLng): Double {
     return result[0] / 1000.0
 }
 
-private fun estimateFare(distanceKm: Double): Double =
-    if (distanceKm <= 0.0) 0.0 else maxOf(MIN_FARE, BASE_FARE + distanceKm * PER_KM_FARE)
+private fun decodeRoutePolyline(encoded: String): List<LatLng> {
+    if (encoded.isBlank()) return emptyList()
+    val points = mutableListOf<LatLng>()
+    var index = 0
+    var latitude = 0
+    var longitude = 0
+
+    fun decodeDelta(): Int {
+        var result = 0
+        var shift = 0
+        while (true) {
+            require(index < encoded.length) { "Incomplete encoded route polyline." }
+            val value = encoded[index++].code - 63
+            require(value in 0..63 && shift <= 30) { "Invalid encoded route polyline." }
+            result = result or ((value and 0x1f) shl shift)
+            shift += 5
+            if (value < 0x20) break
+        }
+        return if ((result and 1) != 0) (result shr 1).inv() else result shr 1
+    }
+
+    return runCatching {
+        while (index < encoded.length) {
+            latitude += decodeDelta()
+            longitude += decodeDelta()
+            points += LatLng(latitude / 1e5, longitude / 1e5)
+        }
+        points
+    }.getOrDefault(emptyList())
+}
+
+private fun formatRouteEta(duration: String): String {
+    val seconds = duration.removeSuffix("s").toLongOrNull() ?: return "ETA unavailable"
+    val minutes = maxOf(1, kotlin.math.ceil(seconds / 60.0).toInt())
+    return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
+}
+
+private fun formatPhp(centavos: Long): String = "₱${"%.2f".format(centavos / 100.0)}"
+
+@Composable
+private fun FareDetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
 
 private suspend fun reverseGeocode(context: Context, point: LatLng): String =
     withContext(Dispatchers.IO) {
