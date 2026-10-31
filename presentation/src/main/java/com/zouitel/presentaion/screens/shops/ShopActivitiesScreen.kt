@@ -106,7 +106,7 @@ class ShopActivitiesScreen : Screen {
                 StatusChip(order.status)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Text("Delivery Address: ${order.pickupLocation}", style = MaterialTheme.typography.bodyMedium)
+                Text("Delivery Address: ${order.dropoffLocation.ifBlank { "Address not provided" }}", style = MaterialTheme.typography.bodyMedium)
                 Text("Payment Method: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
                 Text("Payment Status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
