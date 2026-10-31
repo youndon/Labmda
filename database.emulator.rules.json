@@ -37,6 +37,9 @@
         },
         "isShopServiceOnline": {
           ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() !== true || (root.child('users').child($uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child($uid).child('shopStatus').val() === 'ACTIVE'))))"
+        },
+        "currentLocation": {
+          ".validate": "newData.val() === data.val()"
         }
       },
       ".indexOn": [
@@ -327,4 +330,4 @@
       }
     }
   }
-}\n
+}
