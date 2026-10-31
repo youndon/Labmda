@@ -164,9 +164,9 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
         dropoffLng: Double,
         passengerName: String,
         passengerPhone: String,
-        targetDriver: UserProfile? = null,
         serviceType: String,
         pricingQuoteId: String,
+        targetDriver: UserProfile? = null,
         paymentMethod: String = "CASH",
         onSuccess: (PaymentCreationResult) -> Unit = {},
         onFailure: (String) -> Unit = {}
