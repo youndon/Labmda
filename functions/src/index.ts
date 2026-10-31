@@ -4852,6 +4852,7 @@ async function reconcileCompletedPaymentEarnings(
           : settlementConfirmed
             ? "WAITING_FOR_AVAILABLE_FUNDS"
             : "AWAITING_SETTLEMENT",
+        ...(netShares.refundReconciliationPending ? { availableFundsConfirmedAtTimestamp: null } : {}),
         serviceCompletedAtTimestamp: Number(entity.completedAtTimestamp ?? entity.updatedAtTimestamp ?? Date.now()),
       });
     }
@@ -4946,7 +4947,13 @@ async function reconcileCompletedPaymentEarnings(
     await db.ref("payments/" + entityId).update({
       earningsPendingStatus: "PENDING",
       earningsPendingLedgerEntryId: entryId,
-      earningsSettlementStatus: complete ? "AWAITING_SETTLEMENT" : "PENDING_SERVICE_COMPLETION",
+      earningsSettlementStatus: complete
+        ? netShares.refundReconciliationPending
+          ? "WAITING_FOR_REFUND_RECONCILIATION"
+          : settlementConfirmed
+            ? "WAITING_FOR_AVAILABLE_FUNDS"
+            : "AWAITING_SETTLEMENT"
+        : "PENDING_SERVICE_COMPLETION",
       ...(complete ? {
         serviceCompletedAtTimestamp: Number(entity.completedAtTimestamp ?? entity.updatedAtTimestamp ?? Date.now()),
       } : {}),
@@ -4955,7 +4962,11 @@ async function reconcileCompletedPaymentEarnings(
       earningsPendingStatus: "PENDING",
       earningsPendingLedgerEntryId: entryId,
       ...(complete ? {
-        earningsSettlementStatus: "AWAITING_SETTLEMENT",
+        earningsSettlementStatus: netShares.refundReconciliationPending
+          ? "WAITING_FOR_REFUND_RECONCILIATION"
+          : settlementConfirmed
+            ? "WAITING_FOR_AVAILABLE_FUNDS"
+            : "AWAITING_SETTLEMENT",
         serviceCompletedAtTimestamp: Number(entity.completedAtTimestamp ?? entity.updatedAtTimestamp ?? Date.now()),
       } : {}),
     });
