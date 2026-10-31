@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 "use strict";
 
-const ACTIVE = new Set(["PENDING_ADMIN_APPROVAL", "APPROVING"]);
 const TERMINAL = new Set(["PAID", "FAILED", "REVERSED", "REJECTED"]);
 
 function text(value) { return typeof value === "string" ? value.trim() : ""; }
