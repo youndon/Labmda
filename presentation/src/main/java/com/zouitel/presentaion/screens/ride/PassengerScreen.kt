@@ -231,6 +231,19 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             decodeRoutePolyline(displayedRoutePolyline)
         }
 
+        LaunchedEffect(displayedRoutePoints) {
+            if (displayedRoutePoints.size >= 2) {
+                val bounds = LatLngBounds.Builder()
+                displayedRoutePoints.forEach { bounds.include(it) }
+                runCatching {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngBounds(bounds.build(), 140),
+                        800
+                    )
+                }
+            }
+        }
+
         fun submitTrip(name: String, phone: String, driver: UserProfile?, quote: PricingQuoteResult?) {
             val p = pickup
             val d = destination
@@ -668,7 +681,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     ) {
                         Column {
                             Text("Road route · ${"%.1f".format(quote.distanceKm)} km", style = MaterialTheme.typography.bodyMedium)
-                            Text("Estimated drive · ${formatRouteEta(quote.routeDuration)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Estimated route time · ${formatRouteEta(quote.routeDuration)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text("Server quote", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -683,9 +696,11 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 quoteError?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
-                if (rideQuote != null && rideQuote.expiresAtTimestamp <= System.currentTimeMillis()) {
+                if ((rideQuote != null && rideQuote.expiresAtTimestamp <= System.currentTimeMillis()) ||
+                    (rideQuote == null && quoteError != null)
+                ) {
                     TextButton(onClick = onRefreshQuote, modifier = Modifier.fillMaxWidth()) {
-                        Text("Refresh expired quote")
+                        Text("Refresh ride quote")
                     }
                 }
 
@@ -751,7 +766,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     }
                     if (quote != null) {
                         FareDetailRow("Road distance", "${"%.1f".format(quote.distanceKm)} km")
-                        FareDetailRow("Drive time", formatRouteEta(quote.routeDuration))
+                        FareDetailRow("Estimated route time", formatRouteEta(quote.routeDuration))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         quote.fareBreakdown?.let { breakdown ->
                             FareDetailRow("Base fare", formatPhp(breakdown.baseFareCentavos))
@@ -1127,7 +1142,9 @@ private fun decodeRoutePolyline(encoded: String): List<LatLng> {
 }
 
 private fun formatRouteEta(duration: String): String {
-    val seconds = duration.removeSuffix("s").toLongOrNull() ?: return "ETA unavailable"
+    // Google Routes returns protobuf durations such as "754s" and may include decimals.
+    val seconds = duration.removeSuffix("s").toDoubleOrNull() ?: return "ETA unavailable"
+    if (!seconds.isFinite() || seconds <= 0.0) return "ETA unavailable"
     val minutes = maxOf(1, kotlin.math.ceil(seconds / 60.0).toInt())
     return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
 }
