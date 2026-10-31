@@ -16,58 +16,32 @@ import kotlinx.coroutines.launch
 
 class AdminDeliveryModel : ScreenModel {
     private val db = Firebase.database.reference()
-
     private val _applications = MutableStateFlow<List<UserProfile>>(emptyList())
     val applications: StateFlow<List<UserProfile>> = _applications.asStateFlow()
 
-    init {
-        listenToApplications()
-    }
+    init { listenToApplications() }
 
     private fun listenToApplications() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").valueEvents.collect { snapshot ->
-                val profiles = snapshot.children.mapNotNull { child ->
-                    try {
-                        val uid = child.key ?: return@mapNotNull null
-                        val fullName = runCatching { child.child("fullName").value<String>() }
-                            .getOrElse { runCatching { child.child("name").value<String>() }.getOrDefault("") }
-                        val phoneNumber = runCatching { child.child("phoneNumber").value<String>() }
-                            .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
-
-                        val deliveryChild = child.child("deliveryServices")
-                        val deliveryAccount = if (deliveryChild.exists) {
-                            val serviceStr = runCatching { deliveryChild.child("deliveryType").value<String>() }.getOrDefault("COURIER")
-                            val deliveryType = runCatching { DeliveryType.valueOf(serviceStr) }.getOrDefault(DeliveryType.COURIER)
-                            val vehicleType = runCatching { deliveryChild.child("vehicleType").value<String>() }.getOrDefault("")
-                            val statusStr = runCatching { deliveryChild.child("status").value<String>() }.getOrDefault("NONE")
-                            val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.NONE)
-
-                            DeliveryAccountInfo(
-                                deliveryType = deliveryType,
-                                status = status
-                            )
-                        } else {
-                            null
-                        }
-
-                        if (deliveryAccount?.status == Status.PENDING) {
+            db.child("users").orderByChild("deliveryServices/status")
+                .equalTo(Status.PENDING.name).valueEvents.collect { snapshot ->
+                    _applications.value = snapshot.children.mapNotNull { child ->
+                        runCatching {
+                            val uid = child.key ?: return@mapNotNull null
+                            val delivery = child.child("deliveryServices")
+                            val type = runCatching {
+                                DeliveryType.valueOf(delivery.child("deliveryType").value<String>())
+                            }.getOrDefault(DeliveryType.COURIER)
                             UserProfile(
                                 uid = uid,
-                                fullName = fullName,
-                                phoneNumber = phoneNumber,
-                                deliveryServices = deliveryAccount
+                                fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault(""),
+                                phoneNumber = runCatching { child.child("phoneNumber").value<String>() }
+                                    .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") },
+                                deliveryServices = DeliveryAccountInfo(deliveryType = type, status = Status.PENDING)
                             )
-                        } else {
-                            null
-                        }
-                    } catch (e: Exception) {
-                        null
+                        }.getOrNull()
                     }
                 }
-
-                _applications.value = profiles
-            }
         }
     }
 
