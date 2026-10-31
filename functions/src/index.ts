@@ -5413,7 +5413,7 @@ async function reserveAndSubmitPayout(
   if (walletNumber(wallet, "refundDebtCentavos") > 0) {
     throw new HttpsError("failed-precondition", "Outstanding refund recovery must be cleared from future earnings before another payout.");
   }
-  const minimum = automatic ? AUTO_PAYOUT_MINIMUM_CENTAVOS : MANUAL_PAYOUT_MINIMUM_CENTAVOS;
+  const minimum = MANUAL_PAYOUT_MINIMUM_CENTAVOS;
   if (amount < minimum) {
     throw new HttpsError(
       "failed-precondition",
