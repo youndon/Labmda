@@ -52,11 +52,13 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.model.VehicleInfo
 import com.zouitel.presentaion.model.VehicleType
 import com.zouitel.presentaion.payments.PayButton
 import com.zouitel.presentaion.payments.PaymentEventEffect
 import com.zouitel.presentaion.payments.PaymentMethodSelector
 import com.zouitel.presentaion.payments.PaymentRepository
+import com.zouitel.presentaion.payments.PricingQuoteResult
 import com.zouitel.presentaion.payments.PaymentResultSheet
 import com.zouitel.presentaion.payments.PaymentScreenModel
 import org.koin.core.context.GlobalContext
@@ -64,10 +66,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
-
-private const val BASE_FARE = 2.0
-private const val PER_KM_FARE = 1.2
-private const val MIN_FARE = 4.0
+import kotlin.coroutines.cancellation.CancellationException
 
 private val ACTIVE_STATUSES = setOf("AWAITING_PAYMENT", "REQUESTED", "ACCEPTED", "IN_PROGRESS")
 
@@ -101,6 +100,9 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         var pickupAddress by remember { mutableStateOf("") }
         var destinationAddress by remember { mutableStateOf("") }
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
+        var rideQuote by remember { mutableStateOf<PricingQuoteResult?>(null) }
+        var isQuotingRide by remember { mutableStateOf(false) }
+        var rideQuoteError by remember { mutableStateOf<String?>(null) }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember(openHistoryOnStart) { mutableStateOf(openHistoryOnStart) }
@@ -123,7 +125,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
 
         val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
         var tappedDriverId by remember { mutableStateOf<String?>(null) }
-        val tappedDriver = onlineDrivers.firstOrNull { it.uid == tappedDriverId }
+        val compatibleDrivers = onlineDrivers.filter {
+            it.driverService?.vehicleInfo?.type == vehicleType
+        }
+        val tappedDriver = compatibleDrivers.firstOrNull { it.uid == tappedDriverId }
 
         fun locateMe() {
             if (!hasLocationPermission) {
@@ -190,14 +195,49 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             }
         }
 
-        val activeTrip = trips.firstOrNull { it.status in ACTIVE_STATUSES }
-        val distanceKm = if (pickup != null && destination != null) distanceKm(pickup!!, destination!!) else 0.0
-        val fare = estimateFare(distanceKm)
+        LaunchedEffect(pickup, destination, vehicleType) {
+            val p = pickup
+            val d = destination
+            rideQuote = null
+            rideQuoteError = null
+            if (p == null || d == null) {
+                isQuotingRide = false
+                return@LaunchedEffect
+            }
+            isQuotingRide = true
+            try {
+                rideQuote = paymentRepository.quoteTrip(
+                    pickupLat = p.latitude,
+                    pickupLng = p.longitude,
+                    dropoffLat = d.latitude,
+                    dropoffLng = d.longitude,
+                    serviceType = vehicleType.name.lowercase(Locale.ROOT)
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                rideQuoteError = error.message ?: "Could not calculate the road route and fare."
+            } finally {
+                isQuotingRide = false
+            }
+        }
 
-        fun submitTrip(name: String, phone: String, driver: UserProfile?) {
+        val activeTrip = trips.firstOrNull { it.status in ACTIVE_STATUSES }
+        val distanceKm = rideQuote?.distanceKm ?: 0.0
+        val fare = rideQuote?.amount ?: 0.0
+        val displayedRoutePolyline = if (activeTrip != null) activeTrip.routePolyline else rideQuote?.routePolyline.orEmpty()
+        val displayedRoutePoints = remember(displayedRoutePolyline) {
+            decodeRoutePolyline(displayedRoutePolyline)
+        }
+
+        fun submitTrip(name: String, phone: String, driver: UserProfile?, quote: PricingQuoteResult?) {
             val p = pickup
             val d = destination
             if (p == null || d == null) return
+            if (quote == null || quote.expiresAtTimestamp <= System.currentTimeMillis()) {
+                scope.launch { snackbarHostState.showSnackbar("Your ride quote is missing or expired. Please wait for a fresh quote.") }
+                return
+            }
             paymentScreenModel.checkoutStarted()
             screenModel.requestTrip(
                 pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
@@ -209,6 +249,8 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 passengerName = name,
                 passengerPhone = phone,
                 targetDriver = driver,
+                serviceType = vehicleType.name.lowercase(Locale.ROOT),
+                pricingQuoteId = quote.quoteId,
                 paymentMethod = paymentUiState.selectedMethod.name,
                 onSuccess = { result ->
                     paymentScreenModel.checkoutCreated(result)
@@ -265,16 +307,16 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                             icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                         )
                     }
-                    if (shownPickup != null && shownDestination != null) {
+                    if (displayedRoutePoints.size >= 2) {
                         Polyline(
-                            points = listOf(shownPickup, shownDestination),
+                            points = displayedRoutePoints,
                             color = routeColor,
                             width = 8f
                         )
                     }
 
                     if (activeTrip == null) {
-                        onlineDrivers.forEach { driver ->
+                        compatibleDrivers.forEach { driver ->
                             val loc = driver.driverService?.currentLocation ?: return@forEach
                             if (loc.latitude == 0.0 && loc.longitude == 0.0) return@forEach
                             key(driver.uid) {
@@ -361,6 +403,9 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                     hasDestination = destination != null,
                                     distanceKm = distanceKm,
                                     fare = fare,
+                                    rideQuote = rideQuote,
+                                    isQuotingRide = isQuotingRide,
+                                    quoteError = rideQuoteError,
                                     isSubmitting = paymentUiState.isSubmitting,
                                     vehicleType = vehicleType,
                                     selectedDriver = selectedDriver,
@@ -369,6 +414,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                     onVehicleTypeChange = {
                                         vehicleType = it
                                         selectedDriver = null
+                                        tappedDriverId = null
                                     },
                                     onSelectDriver = { selectedDriver = it },
                                     onClearDestination = {
@@ -393,14 +439,20 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         pickupAddress = pickupAddress,
                         destinationAddress = destinationAddress,
                         vehicleType = vehicleType,
-                        distanceKm = distanceKm,
-                        indicativeFare = fare,
+                        quote = rideQuote,
+                        isQuotingRide = isQuotingRide,
+                        quoteError = rideQuoteError,
                         selectedMethod = paymentUiState.selectedMethod,
                         onMethodSelected = paymentScreenModel::selectMethod,
                         isSubmitting = paymentUiState.isSubmitting,
                         onConfirm = {
-                            showCheckout = false
-                            submitTrip(checkoutName, checkoutPhone, selectedDriver)
+                            val quote = rideQuote
+                            if (quote != null && quote.expiresAtTimestamp > System.currentTimeMillis()) {
+                                showCheckout = false
+                                submitTrip(checkoutName, checkoutPhone, selectedDriver, quote)
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Quote expired. Wait for a new server quote before confirming.") }
+                            }
                         }
                     )
                 }
@@ -419,10 +471,16 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         destinationAddress = destinationAddress,
                         distanceKm = distanceKm,
                         fare = fare,
-                        isSubmitting = paymentUiState.isSubmitting,
+                        isSubmitting = paymentUiState.isSubmitting || isQuotingRide,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
-                        onRequest = { name, phone -> submitTrip(name, phone, driver) }
+                        onRequest = { name, phone ->
+                            checkoutName = name
+                            checkoutPhone = phone
+                            selectedDriver = driver
+                            requestSheetDriver = null
+                            showCheckout = true
+                        }
                     )
                 }
             }
@@ -464,11 +522,17 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         destinationAddress = destinationAddress,
                         tripDistanceKm = distanceKm,
                         fare = fare,
-                        isSubmitting = paymentUiState.isSubmitting,
+                        isSubmitting = paymentUiState.isSubmitting || isQuotingRide,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
                         onPickDestination = { tappedDriverId = null },
-                        onRequest = { name, phone -> submitTrip(name, phone, tappedDriver) }
+                        onRequest = { name, phone ->
+                            checkoutName = name
+                            checkoutPhone = phone
+                            selectedDriver = tappedDriver
+                            tappedDriverId = null
+                            showCheckout = true
+                        }
                     )
                 }
             }
