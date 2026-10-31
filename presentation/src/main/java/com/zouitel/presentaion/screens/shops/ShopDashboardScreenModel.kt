@@ -2,8 +2,7 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.DriveImageUploader
-import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.FirebaseImageUploader
 import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.screens.food.ImageUploadState
 import com.zouitel.presentaion.screens.food.MerchantDashboardMetrics
@@ -127,12 +126,13 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
         }
     }
 
-    fun uploadProductImage(image: PickedImage, accessToken: DriveTokenProvider) {
+    fun uploadProductImage(image: PickedImage) {
         if (_imageUpload.value is ImageUploadState.Uploading) return
         _imageUpload.value = ImageUploadState.Uploading
         uploadJob = screenModelScope.launch {
             try {
-                val url = DriveImageUploader.upload(bytes = image.readBytes(), accessToken = accessToken(), label = "product")
+                val url = FirebaseImageUploader.upload(bytes = image.readBytes(), ownerUid = currentUid ?: throw IllegalStateException("Sign in to upload an image."),
+                    category = "product")
                 _imageUpload.value = ImageUploadState.Success(url)
             } catch (e: CancellationException) {
                 if (isActive) _imageUpload.value = ImageUploadState.Idle
