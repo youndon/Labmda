@@ -128,152 +128,6 @@ function normalizeCatalogItems(value: unknown): Array<{ id: string; quantity: nu
   });
 }
 
-async function createXenditGcashRequest(args: {
-  referenceId: string;
-  amount: number;
-  description: string;
-  entityType: "ORDER" | "TRIP";
-  entityId: string;
-  clientId: string;
-  idempotencyKey: string;
-}): Promise<{ paymentId: string; checkoutUrl: string; status: string; webCheckoutUrl: string; checkoutActionDescriptor: string }> {
-  const secret = XENDIT_SECRET_KEY.value();
-  const successUrl = PAYMENT_SUCCESS_RETURN_URL.value();
-  const failureUrl = PAYMENT_FAILURE_RETURN_URL.value();
-
-  if (!secret) {
-    throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
-  }
-  if (!successUrl.startsWith("https://") || !failureUrl.startsWith("https://")) {
-    throw new HttpsError("failed-precondition", "Configure public HTTPS payment return URLs before enabling GCash.");
-  }
-
-  const response = await fetch("https://api.xendit.co/v3/payment_requests", {
-    method: "POST",
-    headers: {
-      Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
-      "Content-Type": "application/json",
-      "api-version": "2024-11-11",
-      "Idempotency-key": args.idempotencyKey,
-    },
-    body: JSON.stringify({
-      reference_id: args.referenceId,
-      type: "PAY",
-      country: "PH",
-      currency: "PHP",
-      request_amount: args.amount,
-      capture_method: "AUTOMATIC",
-      channel_code: "GCASH",
-      channel_properties: {
-        success_return_url: successUrl,
-        failure_return_url: failureUrl,
-      },
-      description: args.description.slice(0, 255),
-      metadata: {
-        entity_type: args.entityType,
-        entity_id: args.entityId,
-        client_id: args.clientId,
-      },
-    }),
-  });
-
-  const body = asRecord(await response.json().catch(() => ({})));
-  if (!response.ok) {
-    logger.error("Xendit payment request failed", {
-      status: response.status,
-      response: body,
-      referenceId: args.referenceId,
-    });
-    throw new HttpsError("unavailable", "Xendit could not start this payment. Please try again.");
-  }
-
-  const request = body as XenditPaymentRequest;
-  const paymentId = asString(request.payment_request_id);
-  const actions = request.actions ?? [];
-  const mobileAction = actions.find((candidate) =>
-    candidate.type === "REDIRECT_CUSTOMER" && candidate.descriptor === "DEEPLINK_URL"
-  );
-  const webAction = actions.find((candidate) =>
-    candidate.type === "REDIRECT_CUSTOMER" && candidate.descriptor === "WEB_URL"
-  );
-
-  function normalizeActionUrl(action: XenditAction | undefined): string {
-    const raw = asString(action?.value);
-    if (!raw) return "";
-    const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw)
-      ? raw
-      : "https://" + raw.replace(/^\/+/, "");
-    try {
-      const parsed = new URL(candidate);
-      if (parsed.protocol === "https:") return parsed.toString();
-      if (
-        action?.descriptor === "DEEPLINK_URL" &&
-        !["http:", "javascript:", "data:", "file:"].includes(parsed.protocol)
-      ) {
-        return parsed.toString();
-      }
-    } catch {
-      return "";
-    }
-    return "";
-  }
-
-  // Mobile GCash deeplinks are preferred; desktop/web checkout remains the fallback.
-  const deeplinkUrl = normalizeActionUrl(mobileAction);
-  const webCheckoutUrl = normalizeActionUrl(webAction);
-  const checkoutUrl = deeplinkUrl || webCheckoutUrl;
-  const checkoutActionDescriptor = deeplinkUrl ? "DEEPLINK_URL" : webCheckoutUrl ? "WEB_URL" : "";
-
-  const initialStatus = asString(request.status).toUpperCase();
-  const status = initialStatus === "SUCCEEDED"
-    ? "SUCCEEDED"
-    : initialStatus === "EXPIRED"
-      ? "EXPIRED"
-      : ["CANCELED", "CANCELLED"].includes(initialStatus)
-        ? "CANCELLED"
-        : initialStatus === "FAILED"
-          ? "FAILED"
-          : "PENDING";
-  return { paymentId, checkoutUrl, status, webCheckoutUrl, checkoutActionDescriptor };
-}
-
-function buildPaymentResponse(
-  entityType: "ORDER" | "TRIP",
-  id: string,
-  payment: Record<string, unknown>,
-  amount: number
-): Record<string, unknown> {
-  return {
-    [entityType === "ORDER" ? "orderId" : "tripId"]: id,
-    paymentId: asString(payment.providerReference),
-    paymentStatus: asString(payment.status),
-    amount,
-    checkoutUrl: asString(payment.checkoutUrl) || null,
-  };
-}
-
-async function returnExistingCheckout(
-  entityPath: "orders" | "trips",
-  id: string,
-  uid: string
-): Promise<Record<string, unknown> | null> {
-  const entitySnapshot = await db.ref(entityPath + "/" + id).get();
-  if (!entitySnapshot.exists()) return null;
-
-  const entity = asRecord(entitySnapshot.val());
-  const ownerId = entityPath === "orders" ? asString(entity.clientId) : asString(entity.passengerId);
-  if (ownerId !== uid) {
-    throw new HttpsError("already-exists", "This checkout key is already in use.");
-  }
-
-  const paymentSnapshot = await db.ref("payments/" + id).get();
-  const payment = asRecord(paymentSnapshot.val());
-  const amount = entityPath === "orders"
-    ? asNumber(entity.totalPrice, "stored total")
-    : asNumber(entity.fare, "stored fare");
-  return buildPaymentResponse(entityPath === "orders" ? "ORDER" : "TRIP", id, payment, amount);
-}
-
 async function loadOrderCatalog(
   uid: string,
   orderType: OrderType,
@@ -1510,6 +1364,7 @@ export const createOrder = onCall(
   async (request) => {
     const uid = requireUid(request);
     const data = asRecord(request.data);
+    const paymentMethod = parsePaymentMethod(data.paymentMethod);
     const quoteId = asString(data.quoteId);
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(quoteId)) {
       throw new HttpsError("invalid-argument", "A valid order quote ID is required.");
@@ -1521,13 +1376,21 @@ export const createOrder = onCall(
       if (asString(existing.clientId) !== uid) {
         throw new HttpsError("already-exists", "This idempotency key has already been used.");
       }
+      if (asString(existing.paymentMethod).toUpperCase() !== paymentMethod) {
+        throw new HttpsError("failed-precondition", "This checkout key was already used with a different payment method.");
+      }
+      const existingPayment = asRecord((await db.ref("payments/" + orderId).get()).val());
       return {
         orderId,
+        paymentId: asString(existingPayment.providerReference) || asString(existing.paymentId),
+        paymentStatus: asString(existing.paymentStatus) || "UNPAID",
+        amountCentavos: Number(existing.totalPriceCentavos ?? 0),
         totalCentavos: Number(existing.totalPriceCentavos ?? 0),
         amount: Number(existing.totalPrice ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
         distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
+        checkoutUrl: asString(existingPayment.checkoutUrl) || null,
         reused: true,
       };
     }
@@ -1603,6 +1466,9 @@ export const createOrder = onCall(
         const value = asRecord(refreshedOrder.val());
         return {
           orderId,
+          paymentId: asString(asRecord((await db.ref("payments/" + orderId).get()).val()).providerReference) || asString(value.paymentId),
+          paymentStatus: asString(value.paymentStatus) || "UNPAID",
+          amountCentavos: Number(value.totalPriceCentavos ?? 0),
           totalCentavos: Number(value.totalPriceCentavos ?? 0),
           amount: Number(value.totalPrice ?? 0),
           pricingVersion: Number(value.pricingVersion ?? 0),
@@ -1645,8 +1511,8 @@ export const createOrder = onCall(
       pricingQuoteId: quoteId,
       pricingSnapshot: snapshot,
       breakdown: quote.breakdown,
-      // Quote-first orders are created for GCash checkout; keep them hidden from merchants until capture.
-      status: "AWAITING_PAYMENT",
+      // GCash orders remain hidden until capture; cash orders are immediately available to merchants.
+      status: paymentMethod === "CASH" ? "PLACED" : "AWAITING_PAYMENT",
       deliveryId: "",
       deliveryName: "",
       deliveryPhone: "",
@@ -1657,437 +1523,49 @@ export const createOrder = onCall(
       dropoffLat: Number(quote.dropoffLat),
       dropoffLng: Number(quote.dropoffLng),
       createdAtTimestamp: timestamp,
-      paymentMethod: "",
+      paymentMethod,
       paymentStatus: "UNPAID",
-      paymentId: "",
+      paymentId: paymentMethod === "CASH" ? "cash_" + orderId : "",
     };
-    await orderRef.set(order);
+    const payment = {
+      entityType: "ORDER",
+      entityId: orderId,
+      clientId: uid,
+      merchantId: order.merchantId,
+      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
+      providerReference: paymentMethod === "CASH" ? "cash_" + orderId : "",
+      channelCode: paymentMethod,
+      status: "UNPAID",
+      amount: phpFromCents(totalCentavos),
+      amountCentavos: totalCentavos,
+      breakdown: quote.breakdown,
+      pricingVersion: pricingConfig.version,
+      currency: "PHP",
+      checkoutUrl: "",
+      createdAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    };
+    const updates: Record<string, unknown> = {};
+    updates["orders/" + orderId] = order;
+    updates["payments/" + orderId] = payment;
+    await db.ref().update(updates);
 
-    logger.info("Server created order from locked pricing quote", { orderId, quoteId, uid, pricingVersion: pricingConfig.version });
+    logger.info("Server created order from locked pricing quote", { orderId, quoteId, uid, pricingVersion: pricingConfig.version, paymentMethod });
     return {
       orderId,
+      paymentId: asString(payment.providerReference),
+      paymentStatus: "UNPAID",
       totalCentavos,
+      amountCentavos: totalCentavos,
       amount: phpFromCents(totalCentavos),
       distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
       pricingVersion: pricingConfig.version,
       breakdown: quote.breakdown,
+      checkoutUrl: null,
       reused: false,
     };
   }
 );
-
-export const createOrderPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY, GOOGLE_ROUTES_API_KEY] },
-  async (request) => {
-    const uid = requireUid(request);
-    const data = asRecord(request.data);
-    const id = parseIdempotencyKey(data.idempotencyKey);
-    const orderTypeValue = asString(data.orderType).toUpperCase();
-    if (orderTypeValue !== "FOOD" && orderTypeValue !== "RETAIL") {
-      throw new HttpsError("invalid-argument", "Unsupported order type.");
-    }
-    const orderType = orderTypeValue as OrderType;
-    const sourceId = asString(data.sourceId);
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(sourceId)) {
-      throw new HttpsError("invalid-argument", "A valid source ID is required.");
-    }
-
-    const existing = await returnExistingCheckout("orders", id, uid);
-    if (existing) return existing;
-
-    const paymentMethod = parsePaymentMethod(data.paymentMethod);
-    const requestedItems = normalizeCatalogItems(data.items);
-    const dropoffLocation = asString(data.dropoffLocation);
-    const dropoffLat = asNumber(data.dropoffLat, "drop-off latitude");
-    const dropoffLng = asNumber(data.dropoffLng, "drop-off longitude");
-    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
-    if (!dropoffLocation) throw new HttpsError("invalid-argument", "A drop-off address is required.");
-
-    const catalog = await loadOrderCatalog(uid, orderType, sourceId, requestedItems);
-    validateCoordinates(catalog.pickupLat, catalog.pickupLng, "Merchant pickup");
-    const pricingQuoteId = asString(data.pricingQuoteId);
-    let config: PricingConfiguration;
-    let route: RouteResult;
-    let deliveryFeeCentavos: number;
-    let savedPricingSnapshot: Record<string, unknown>;
-
-    if (pricingQuoteId) {
-      const quote = await loadOwnedPricingQuote(
-        uid, pricingQuoteId, "DELIVERY",
-        catalog.pickupLat, catalog.pickupLng, dropoffLat, dropoffLng
-      );
-      config = normalizePricingConfiguration(quote.pricingConfiguration);
-      route = {
-        provider: "GOOGLE_ROUTES_API",
-        distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
-        duration: asString(quote.routeDuration),
-        travelMode: "DRIVE",
-        encodedPolyline: asString(quote.routePolyline),
-      };
-      deliveryFeeCentavos = nonNegativeInteger(quote.deliveryFeeCentavos, "quoted delivery fee");
-      savedPricingSnapshot = asRecord(quote.pricingSnapshot);
-    } else {
-      config = await getCurrentPricingConfiguration();
-      route = await calculateGoogleRoute(catalog.pickupLat, catalog.pickupLng, dropoffLat, dropoffLng);
-      deliveryFeeCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
-      savedPricingSnapshot = pricingSnapshot(config, orderType === "FOOD" ? "FOOD_DELIVERY" : "GOODS_DELIVERY", route);
-    }
-
-    const subtotalCentavos = catalog.items.reduce(
-      (sum, item) => sum + centsFromPhp(item.basePrice, "catalog item price") * item.quantity,
-      0
-    );
-    if (!Number.isSafeInteger(subtotalCentavos) || subtotalCentavos <= 0) {
-      throw new HttpsError("failed-precondition", "The server-calculated item subtotal is invalid.");
-    }
-    const categoryChargeCentavos = orderType === "FOOD"
-      ? config.additionalCharges.foodCentavos
-      : config.additionalCharges.goodsCentavos;
-    const additionalChargesCentavos =
-      categoryChargeCentavos + config.additionalCharges.deliveryCentavos;
-    const totalCentavos = subtotalCentavos + deliveryFeeCentavos + additionalChargesCentavos;
-    if (!Number.isSafeInteger(totalCentavos) || totalCentavos <= 0) {
-      throw new HttpsError("failed-precondition", "The server-calculated order total is invalid.");
-    }
-
-    const itemCommissionBps = orderType === "FOOD"
-      ? config.commissions.foodBps
-      : config.commissions.goodsBps;
-    const merchantCommissionCentavos = commissionCentavos(subtotalCentavos, itemCommissionBps);
-    const deliveryCommissionCentavos = commissionCentavos(deliveryFeeCentavos, config.commissions.deliveryBps);
-    const merchantShareCentavos = subtotalCentavos - merchantCommissionCentavos;
-    const courierShareCentavos = deliveryFeeCentavos - deliveryCommissionCentavos;
-    const platformShareCentavos =
-      merchantCommissionCentavos + deliveryCommissionCentavos + additionalChargesCentavos;
-
-    const subtotal = phpFromCents(subtotalCentavos);
-    const deliveryFee = phpFromCents(deliveryFeeCentavos);
-    const totalPrice = phpFromCents(totalCentavos);
-    const breakdown = {
-      subtotal: subtotalCentavos,
-      deliveryFee: deliveryFeeCentavos,
-      serviceFee: additionalChargesCentavos,
-      discount: 0,
-      tax: 0,
-      total: totalCentavos,
-      merchantShare: merchantShareCentavos,
-      courierShare: courierShareCentavos,
-      driverShare: 0,
-      platformShare: platformShareCentavos,
-      gatewayFee: 0,
-      merchantCommission: merchantCommissionCentavos,
-      deliveryCommission: deliveryCommissionCentavos,
-      rideCommission: 0,
-    };
-    savedPricingSnapshot = {
-      ...savedPricingSnapshot,
-      category: orderType === "FOOD" ? "FOOD_DELIVERY" : "GOODS_DELIVERY",
-      commissionRatesBps: {
-        merchant: itemCommissionBps,
-        delivery: config.commissions.deliveryBps,
-      },
-      additionalChargesCentavos,
-      cancellationFees: config.cancellationFees,
-      refundPolicy: config.refundPolicy,
-    };
-
-    const timestamp = Date.now();
-    let providerReference = "cash_" + id;
-    let paymentStatus = "UNPAID";
-    let checkoutUrl = "";
-    let orderStatus = "PLACED";
-
-    if (paymentMethod === "GCASH") {
-      const xendit = await createXenditGcashRequest({
-        referenceId: "order_" + id,
-        amount: totalPrice,
-        description: catalog.sourceName + " order",
-        entityType: "ORDER",
-        entityId: id,
-        clientId: uid,
-        idempotencyKey: id,
-      });
-      providerReference = xendit.paymentId;
-      checkoutUrl = xendit.checkoutUrl;
-      paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
-      orderStatus = paymentStatus === "PAID" ? "PLACED" : ["FAILED", "CANCELLED", "EXPIRED"].includes(paymentStatus) ? "CANCELLED" : "AWAITING_PAYMENT";
-    }
-
-    const order = {
-      id,
-      clientId: uid,
-      orderType,
-      sourceId,
-      sourceName: catalog.sourceName,
-      merchantId: catalog.merchantId,
-      items: catalog.items,
-      subtotal,
-      deliveryFee,
-      totalPrice,
-      subtotalCentavos,
-      deliveryFeeCentavos,
-      totalPriceCentavos: totalCentavos,
-      distanceMeters: route.distanceMeters,
-      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
-      routeDuration: route.duration,
-      routeTravelMode: route.travelMode,
-      routePolyline: route.encodedPolyline,
-      pricingVersion: config.version,
-      pricingQuoteId: pricingQuoteId || null,
-      pricingSnapshot: savedPricingSnapshot,
-      breakdown,
-      status: orderStatus,
-      deliveryId: "",
-      deliveryName: "",
-      deliveryPhone: "",
-      pickupLocation: catalog.pickupLocation,
-      pickupLat: catalog.pickupLat,
-      pickupLng: catalog.pickupLng,
-      dropoffLocation,
-      dropoffLat,
-      dropoffLng,
-      createdAtTimestamp: timestamp,
-      paymentMethod,
-      paymentStatus,
-      paymentId: providerReference,
-    };
-    const payment = {
-      entityType: "ORDER",
-      entityId: id,
-      clientId: uid,
-      merchantId: catalog.merchantId,
-      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
-      providerReference,
-      channelCode: paymentMethod,
-      status: paymentStatus,
-      amount: totalPrice,
-      amountCentavos: totalCentavos,
-      breakdown,
-      pricingVersion: config.version,
-      currency: "PHP",
-      checkoutUrl,
-      createdAtTimestamp: timestamp,
-      updatedAtTimestamp: timestamp,
-    };
-
-    const updates: Record<string, unknown> = {};
-    updates["orders/" + id] = order;
-    updates["payments/" + id] = payment;
-    await db.ref().update(updates);
-
-    return {
-      orderId: id,
-      paymentId: providerReference,
-      paymentStatus,
-      amount: totalPrice,
-      amountCentavos: totalCentavos,
-      breakdown,
-      distanceMeters: route.distanceMeters,
-      pricingVersion: config.version,
-      checkoutUrl: checkoutUrl || null,
-    };
-  }
-);
-
-export const createTripPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY, GOOGLE_ROUTES_API_KEY] },
-  async (request) => {
-    const uid = requireUid(request);
-    const data = asRecord(request.data);
-    const id = parseIdempotencyKey(data.idempotencyKey);
-    const existing = await returnExistingCheckout("trips", id, uid);
-    if (existing) return existing;
-
-    const paymentMethod = parsePaymentMethod(data.paymentMethod);
-    const serviceType = (asString(data.serviceType) || "ride").toLowerCase();
-    if (!isSupportedRideType(serviceType)) {
-      throw new HttpsError("invalid-argument", "Unsupported ride service type.");
-    }
-    const targetDriverId = asString(data.targetDriverId);
-    await validateTargetDriverForRide(targetDriverId, serviceType);
-
-    const pickupAddress = asString(data.pickupLocation);
-    const dropoffAddress = asString(data.dropoffLocation);
-    const pickupLat = asNumber(data.pickupLat, "pickup latitude");
-    const pickupLng = asNumber(data.pickupLng, "pickup longitude");
-    const dropoffLat = asNumber(data.dropoffLat, "drop-off latitude");
-    const dropoffLng = asNumber(data.dropoffLng, "drop-off longitude");
-    validateCoordinates(pickupLat, pickupLng, "Pickup");
-    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
-    if (!pickupAddress || !dropoffAddress) {
-      throw new HttpsError("invalid-argument", "Pickup and drop-off addresses are required.");
-    }
-
-    const pricingQuoteId = asString(data.pricingQuoteId);
-    let config: PricingConfiguration;
-    let route: RouteResult;
-    let fareCentavos: number;
-    let optionalChargesCentavos = 0;
-    let savedPricingSnapshot: Record<string, unknown>;
-    let rideRule: RidePricingRule | null;
-
-    if (pricingQuoteId) {
-      const quote = await loadOwnedPricingQuote(
-        uid, pricingQuoteId, "RIDE",
-        pickupLat, pickupLng, dropoffLat, dropoffLng, serviceType
-      );
-      config = normalizePricingConfiguration(quote.pricingConfiguration);
-      route = {
-        provider: "GOOGLE_ROUTES_API",
-        distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
-        duration: asString(quote.routeDuration),
-        travelMode: resolveRouteTravelMode(serviceType),
-        encodedPolyline: asString(quote.routePolyline),
-      };
-      fareCentavos = nonNegativeInteger(quote.fareCentavos, "quoted ride fare");
-      savedPricingSnapshot = asRecord(quote.pricingSnapshot);
-      rideRule = resolveRidePricingRule(config, serviceType);
-    } else {
-      config = await getCurrentPricingConfiguration();
-      rideRule = resolveRidePricingRule(config, serviceType);
-      if (!rideRule) {
-        throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
-      }
-      route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng, serviceType);
-      const fare = calculateRideFareCentavos(route.distanceMeters, rideRule, config.additionalCharges.ridesCentavos);
-      fareCentavos = fare.fareCentavos;
-      optionalChargesCentavos = fare.optionalChargesCentavos;
-      savedPricingSnapshot = pricingSnapshot(config, "RIDES", route, {
-        serviceType,
-        optionalChargesCentavos,
-      });
-    }
-
-    if (!rideRule) {
-      throw new HttpsError("failed-precondition", "Ride pricing snapshot is missing this service type.");
-    }
-    if (pricingQuoteId) {
-      optionalChargesCentavos = Number(asRecord(savedPricingSnapshot).optionalChargesCentavos ?? 0);
-    }
-    if (fareCentavos <= 0) {
-      throw new HttpsError("failed-precondition", "The server-calculated ride fare must be greater than zero.");
-    }
-
-    const rideCommissionCentavos = commissionCentavos(fareCentavos, config.commissions.ridesBps);
-    const driverShareCentavos = fareCentavos - rideCommissionCentavos;
-    const rideBreakdown = {
-      subtotal: fareCentavos - optionalChargesCentavos,
-      deliveryFee: 0,
-      serviceFee: optionalChargesCentavos,
-      discount: 0,
-      tax: 0,
-      total: fareCentavos,
-      merchantShare: 0,
-      courierShare: 0,
-      driverShare: driverShareCentavos,
-      platformShare: rideCommissionCentavos,
-      gatewayFee: 0,
-      merchantCommission: 0,
-      deliveryCommission: 0,
-      rideCommission: rideCommissionCentavos,
-    };
-    savedPricingSnapshot = {
-      ...savedPricingSnapshot,
-      category: "RIDES",
-      serviceType,
-      commissionRatesBps: { rides: config.commissions.ridesBps },
-      cancellationFees: config.cancellationFees,
-      refundPolicy: config.refundPolicy,
-    };
-    const fareAmount = phpFromCents(fareCentavos);
-
-    const timestamp = Date.now();
-    let providerReference = "cash_" + id;
-    let paymentStatus = "UNPAID";
-    let checkoutUrl = "";
-    let tripStatus = "REQUESTED";
-
-    if (paymentMethod === "GCASH") {
-      const xendit = await createXenditGcashRequest({
-        referenceId: "trip_" + id,
-        amount: fareAmount,
-        description: "Labmda ride",
-        entityType: "TRIP",
-        entityId: id,
-        clientId: uid,
-        idempotencyKey: id,
-      });
-      providerReference = xendit.paymentId;
-      checkoutUrl = xendit.checkoutUrl;
-      paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
-      tripStatus = paymentStatus === "PAID" ? "REQUESTED" : ["FAILED", "CANCELLED", "EXPIRED"].includes(paymentStatus) ? "CANCELLED" : "AWAITING_PAYMENT";
-    }
-
-    const trip = {
-      id,
-      passengerId: uid,
-      passengerName: asString(data.passengerName) || "Passenger",
-      passengerPhone: asString(data.passengerPhone),
-      pickupLocation: pickupAddress,
-      dropoffLocation: dropoffAddress,
-      pickupLat,
-      pickupLng,
-      dropoffLat,
-      dropoffLng,
-      fare: fareAmount,
-      fareCentavos,
-      distanceMeters: route.distanceMeters,
-      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
-      routeDuration: route.duration,
-      routeTravelMode: route.travelMode,
-      routePolyline: route.encodedPolyline,
-      pricingVersion: config.version,
-      pricingQuoteId: pricingQuoteId || null,
-      pricingSnapshot: savedPricingSnapshot,
-      breakdown: rideBreakdown,
-      serviceType: serviceType.toUpperCase(),
-      driverId: targetDriverId,
-      status: tripStatus,
-      paymentMethod,
-      paymentStatus,
-      paymentId: providerReference,
-      createdAtTimestamp: timestamp,
-    };
-    const payment = {
-      entityType: "TRIP",
-      entityId: id,
-      clientId: uid,
-      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
-      providerReference,
-      channelCode: paymentMethod,
-      status: paymentStatus,
-      amount: fareAmount,
-      amountCentavos: fareCentavos,
-      breakdown: rideBreakdown,
-      pricingVersion: config.version,
-      currency: "PHP",
-      checkoutUrl,
-      createdAtTimestamp: timestamp,
-      updatedAtTimestamp: timestamp,
-    };
-
-    const updates: Record<string, unknown> = {};
-    updates["trips/" + id] = trip;
-    updates["payments/" + id] = payment;
-    await db.ref().update(updates);
-
-    return {
-      tripId: id,
-      paymentId: providerReference,
-      paymentStatus,
-      fare: fareAmount,
-      fareCentavos,
-      amount: fareAmount,
-      amountCentavos: fareCentavos,
-      distanceMeters: route.distanceMeters,
-      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
-      pricingVersion: config.version,
-      breakdown: rideBreakdown,
-      checkoutUrl: checkoutUrl || null,
-    };
-  }
-);
-
 
 /**
  * Creates a trip from a server-issued quote. The caller cannot submit or alter the fare,
@@ -2098,6 +1576,7 @@ export const createTrip = onCall(
   async (request) => {
     const uid = requireUid(request);
     const data = asRecord(request.data);
+    const paymentMethod = parsePaymentMethod(data.paymentMethod);
     const quoteId = asString(data.quoteId);
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(quoteId)) {
       throw new HttpsError("invalid-argument", "A valid ride quote ID is required.");
@@ -2109,13 +1588,22 @@ export const createTrip = onCall(
       if (asString(existing.passengerId) !== uid) {
         throw new HttpsError("already-exists", "This idempotency key has already been used.");
       }
+      if (asString(existing.paymentMethod).toUpperCase() !== paymentMethod) {
+        throw new HttpsError("failed-precondition", "This checkout key was already used with a different payment method.");
+      }
+      const existingPayment = asRecord((await db.ref("payments/" + tripId).get()).val());
       return {
         tripId,
+        paymentId: asString(existingPayment.providerReference) || asString(existing.paymentId),
+        paymentStatus: asString(existing.paymentStatus) || "UNPAID",
         fareCentavos: Number(existing.fareCentavos ?? 0),
+        amountCentavos: Number(existing.fareCentavos ?? 0),
         fare: Number(existing.fare ?? 0),
+        amount: Number(existing.fare ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
         distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
+        checkoutUrl: asString(existingPayment.checkoutUrl) || null,
         reused: true,
       };
     }
@@ -2199,11 +1687,16 @@ export const createTrip = onCall(
         const saved = asRecord(refreshed.val());
         return {
           tripId,
+          paymentId: asString(asRecord((await db.ref("payments/" + tripId).get()).val()).providerReference) || asString(saved.paymentId),
+          paymentStatus: asString(saved.paymentStatus) || "UNPAID",
           fareCentavos: Number(saved.fareCentavos ?? 0),
+          amountCentavos: Number(saved.fareCentavos ?? 0),
           fare: Number(saved.fare ?? 0),
+          amount: Number(saved.fare ?? 0),
           pricingVersion: Number(saved.pricingVersion ?? 0),
           distanceMeters: Number(saved.distanceMeters ?? 0),
           breakdown: saved.breakdown ?? null,
+          checkoutUrl: null,
           reused: true,
         };
       }
@@ -2239,25 +1732,49 @@ export const createTrip = onCall(
       breakdown: rideBreakdown,
       serviceType: serviceType.toUpperCase(),
       driverId: targetDriverId,
-      // The quote-first flow creates the entity before GCash checkout. Keep it
-      // invisible to drivers until the payment callable confirms capture.
-      status: "AWAITING_PAYMENT",
-      paymentMethod: "",
+      // GCash trips remain hidden until capture; cash trips can be dispatched immediately.
+      status: paymentMethod === "CASH" ? "REQUESTED" : "AWAITING_PAYMENT",
+      paymentMethod,
       paymentStatus: "UNPAID",
-      paymentId: "",
+      paymentId: paymentMethod === "CASH" ? "cash_" + tripId : "",
       createdAtTimestamp: timestamp,
     };
-    await db.ref("trips/" + tripId).set(trip);
+    const payment = {
+      entityType: "TRIP",
+      entityId: tripId,
+      clientId: uid,
+      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
+      providerReference: paymentMethod === "CASH" ? "cash_" + tripId : "",
+      channelCode: paymentMethod,
+      status: "UNPAID",
+      amount: fare,
+      amountCentavos: fareCentavos,
+      breakdown: rideBreakdown,
+      pricingVersion: config.version,
+      currency: "PHP",
+      checkoutUrl: "",
+      createdAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    };
+    const updates: Record<string, unknown> = {};
+    updates["trips/" + tripId] = trip;
+    updates["payments/" + tripId] = payment;
+    await db.ref().update(updates);
 
-    logger.info("Server created trip from locked pricing quote", { tripId, quoteId, uid, pricingVersion: config.version });
+    logger.info("Server created trip from locked pricing quote", { tripId, quoteId, uid, pricingVersion: config.version, paymentMethod });
     return {
       tripId,
+      paymentId: asString(payment.providerReference),
+      paymentStatus: "UNPAID",
       fareCentavos,
+      amountCentavos: fareCentavos,
       fare,
+      amount: fare,
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       pricingVersion: config.version,
       breakdown: rideBreakdown,
+      checkoutUrl: null,
       reused: false,
     };
   }
@@ -2645,924 +2162,6 @@ function validCallbackToken(received: string, expected: string): boolean {
   const receivedHash = createHash("sha256").update(received).digest();
   const expectedHash = createHash("sha256").update(expected).digest();
   return timingSafeEqual(receivedHash, expectedHash);
-}
-
-export const xenditWebhook = onRequest(
-  { region: REGION, secrets: [XENDIT_WEBHOOK_TOKEN] },
-  async (request, response) => {
-    if (request.method !== "POST") {
-      response.status(405).send("Method not allowed");
-      return;
-    }
-
-    const receivedToken = asString(request.get("x-callback-token"));
-    if (!validCallbackToken(receivedToken, XENDIT_WEBHOOK_TOKEN.value())) {
-      response.status(401).send("Invalid callback token");
-      return;
-    }
-
-    const body = asRecord(request.body);
-    const data = asRecord(body.data);
-    const referenceId = asString(data.reference_id) || asString(body.reference_id);
-    const status = (asString(data.status) || asString(body.status)).toUpperCase();
-    const match = /^(order|trip)_([A-Za-z0-9_-]{12,80})$/.exec(referenceId);
-
-    if (!match) {
-      // Acknowledge unrelated Xendit events so the integration does not retry them forever.
-      response.status(200).send("Ignored");
-      return;
-    }
-
-    const entityType = match[1];
-    const entityId = match[2];
-    const paymentSnapshot = await db.ref("payments/" + entityId).get();
-    if (!paymentSnapshot.exists()) {
-      logger.warn("Payment webhook arrived before the payment record existed", { referenceId, status });
-      response.status(503).send("Payment record not ready");
-      return;
-    }
-
-    const payment = asRecord(paymentSnapshot.val());
-    const providerReference = asString(data.payment_request_id);
-    if (
-      providerReference &&
-      asString(payment.providerReference) &&
-      providerReference !== asString(payment.providerReference)
-    ) {
-      logger.error("Xendit payment reference did not match the stored payment", { referenceId });
-      response.status(400).send("Payment reference mismatch");
-      return;
-    }
-
-    const eventAmount = Number(data.request_amount);
-    const expectedAmount = Number(payment.amount);
-    const eventCurrency = asString(data.currency).toUpperCase();
-    const expectedCurrency = asString(payment.currency).toUpperCase();
-    if (
-      !Number.isFinite(eventAmount) ||
-      !Number.isFinite(expectedAmount) ||
-      roundMoney(eventAmount) !== roundMoney(expectedAmount) ||
-      eventCurrency !== expectedCurrency
-    ) {
-      logger.error("Xendit webhook amount or currency did not match the stored payment", {
-        referenceId,
-        eventAmount,
-        eventCurrency,
-      });
-      response.status(400).send("Payment amount or currency mismatch");
-      return;
-    }
-
-    const providerUpdatedAt = asString(data.updated);
-    const incomingUpdatedAt = Date.parse(providerUpdatedAt);
-    const previousUpdatedAt = Date.parse(asString(payment.providerUpdatedAt));
-    if (
-      Number.isFinite(incomingUpdatedAt) &&
-      Number.isFinite(previousUpdatedAt) &&
-      incomingUpdatedAt < previousUpdatedAt
-    ) {
-      response.status(200).send("Older payment event ignored");
-      return;
-    }
-
-    const succeeded = ["SUCCEEDED", "COMPLETED", "PAID"].includes(status);
-    const failed = ["FAILED", "EXPIRED", "CANCELED", "CANCELLED"].includes(status);
-    if (!succeeded && !failed) {
-      response.status(200).send("No terminal payment update");
-      return;
-    }
-
-    const paymentStatus = succeeded
-      ? "PAID"
-      : status === "EXPIRED"
-        ? "EXPIRED"
-        : ["CANCELED", "CANCELLED"].includes(status)
-          ? "CANCELLED"
-          : "FAILED";
-    const updates: Record<string, unknown> = {};
-    updates["payments/" + entityId + "/status"] = paymentStatus;
-    updates["payments/" + entityId + "/updatedAtTimestamp"] = Date.now();
-    updates["payments/" + entityId + "/providerUpdatedAt"] = providerUpdatedAt;
-    updates["payments/" + entityId + "/webhookEvent"] = asString(body.event);
-
-    if (entityType === "order") {
-      updates["orders/" + entityId + "/paymentStatus"] = paymentStatus;
-      updates["orders/" + entityId + "/status"] = succeeded ? "PLACED" : "CANCELLED";
-    } else {
-      updates["trips/" + entityId + "/paymentStatus"] = paymentStatus;
-      updates["trips/" + entityId + "/status"] = succeeded ? "REQUESTED" : "CANCELLED";
-    }
-
-    await db.ref().update(updates);
-    response.status(200).send("OK");
-  }
-);
-
-
-// -----------------------------------------------------------------------------
-// Xendit GCash lifecycle. A successful payment is recognized only from a
-// provider-authenticated payment.capture event or a server-to-server status read.
-// GCash uses automatic checkout collection; there is no card-style authorization
-// hold or later capture step.
-// -----------------------------------------------------------------------------
-
-type GcashEntityType = "ORDER" | "TRIP";
-type GcashTerminalStatus = "PAID" | "FAILED" | "CANCELLED" | "EXPIRED";
-
-function parseGcashEntityType(value: unknown): GcashEntityType {
-  const type = asString(value).toUpperCase();
-  if (type === "ORDER" || type === "TRIP") return type;
-  throw new HttpsError("invalid-argument", "entityType must be ORDER or TRIP.");
-}
-
-function paymentEntityPath(entityType: GcashEntityType): "orders" | "trips" {
-  return entityType === "ORDER" ? "orders" : "trips";
-}
-
-function paymentOwnerId(entityType: GcashEntityType, entity: Record<string, unknown>): string {
-  return asString(entityType === "ORDER" ? entity.clientId : entity.passengerId);
-}
-
-function paymentAmountCentavos(entityType: GcashEntityType, entity: Record<string, unknown>): number {
-  const rawCentavos = entityType === "ORDER" ? entity.totalPriceCentavos : entity.fareCentavos;
-  const amount = rawCentavos !== undefined && rawCentavos !== null
-    ? nonNegativeInteger(rawCentavos, "server-calculated payment amount")
-    : centsFromPhp(
-      asNumber(entityType === "ORDER" ? entity.totalPrice : entity.fare, "server-calculated payment amount"),
-      "server-calculated payment amount"
-    );
-  if (!Number.isSafeInteger(amount) || amount <= 0) {
-    throw new HttpsError("failed-precondition", "The server-calculated payment amount is invalid.");
-  }
-  // Xendit's published GCash limits are PHP 1.00 through PHP 100,000.00.
-  if (amount < 100 || amount > 10_000_000) {
-    throw new HttpsError("failed-precondition", "GCash payments must be between PHP 1.00 and PHP 100,000.00.");
-  }
-  return amount;
-}
-
-function toGcashPaymentResponse(
-  entityType: GcashEntityType,
-  entityId: string,
-  payment: Record<string, unknown>
-): Record<string, unknown> {
-  return {
-    entityId,
-    [entityType === "ORDER" ? "orderId" : "tripId"]: entityId,
-    paymentId: asString(payment.providerReference),
-    providerPaymentId: asString(payment.providerPaymentId) || null,
-    paymentStatus: asString(payment.status) || "PENDING",
-    amount: Number(payment.amount ?? 0),
-    amountCentavos: Number(payment.amountCentavos ?? 0),
-    checkoutUrl: asString(payment.checkoutUrl) || null,
-    webCheckoutUrl: asString(payment.webCheckoutUrl) || null,
-    checkoutActionDescriptor: asString(payment.checkoutActionDescriptor) || null,
-    expiresAtTimestamp: Number(payment.expiresAtTimestamp ?? 0),
-  };
-}
-
-function mapProviderPaymentStatus(statusValue: unknown): GcashTerminalStatus | null {
-  const status = asString(statusValue).toUpperCase();
-  if (["SUCCEEDED", "COMPLETED", "PAID"].includes(status)) return "PAID";
-  if (status === "FAILED") return "FAILED";
-  if (status === "EXPIRED") return "EXPIRED";
-  if (["CANCELED", "CANCELLED"].includes(status)) return "CANCELLED";
-  return null;
-}
-
-function centsFromProviderAmount(value: unknown): number | null {
-  if (value === undefined || value === null || value === "") return null;
-  const amount = Number(value);
-  if (!Number.isFinite(amount) || amount < 0) return null;
-  const centavos = Math.round(amount * 100);
-  return Number.isSafeInteger(centavos) ? centavos : null;
-}
-
-function xenditHeaders(secret: string, idempotencyKey?: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
-    "Content-Type": "application/json",
-    "api-version": "2024-11-11",
-  };
-  if (idempotencyKey) headers["Idempotency-key"] = idempotencyKey;
-  return headers;
-}
-
-async function applyXenditPaymentStatus(args: {
-  entityType: GcashEntityType;
-  entityId: string;
-  paymentRequestId: string;
-  referenceId: string;
-  status: GcashTerminalStatus;
-  providerPaymentId?: string;
-  providerUpdatedAt?: string;
-  failureCode?: string;
-}): Promise<boolean> {
-  const paymentRef = db.ref("payments/" + args.entityId);
-  const transaction = await paymentRef.transaction((rawValue) => {
-    const current = asRecord(rawValue);
-    if (
-      asString(current.provider) !== "XENDIT" ||
-      asString(current.providerReference) !== args.paymentRequestId ||
-      asString(current.referenceId) !== args.referenceId
-    ) {
-      return;
-    }
-
-    const incomingTime = Date.parse(args.providerUpdatedAt ?? "");
-    const previousTime = Date.parse(asString(current.providerUpdatedAt));
-    if (
-      Number.isFinite(incomingTime) &&
-      Number.isFinite(previousTime) &&
-      incomingTime < previousTime
-    ) {
-      return;
-    }
-
-    const previousStatus = asString(current.status).toUpperCase();
-    // A delayed failure/expiry callback must never reverse a confirmed capture.
-    if (
-      ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].includes(previousStatus) &&
-      args.status !== "PAID"
-    ) {
-      return current;
-    }
-
-    const activeAttemptKey = asString(current.activeAttemptKey);
-    const attempts = asRecord(current.attempts);
-    const activeAttempt = asRecord(attempts[activeAttemptKey]);
-    const nextAttempt = activeAttemptKey
-      ? {
-          ...attempts,
-          [activeAttemptKey]: {
-            ...activeAttempt,
-            status: args.status,
-            providerPaymentId: args.providerPaymentId || asString(activeAttempt.providerPaymentId),
-            providerUpdatedAt: args.providerUpdatedAt || asString(activeAttempt.providerUpdatedAt),
-            updatedAtTimestamp: Date.now(),
-          },
-        }
-      : attempts;
-
-    return {
-      ...current,
-      status: args.status,
-      providerPaymentId: args.providerPaymentId || asString(current.providerPaymentId),
-      providerUpdatedAt: args.providerUpdatedAt || asString(current.providerUpdatedAt),
-      paidAtTimestamp: args.status === "PAID"
-        ? Number(current.paidAtTimestamp ?? 0) || (Date.parse(args.providerUpdatedAt ?? "") || Date.now())
-        : Number(current.paidAtTimestamp ?? 0),
-      failureCode: args.status === "FAILED" ? args.failureCode || asString(current.failureCode) : "",
-      attempts: nextAttempt,
-      updatedAtTimestamp: Date.now(),
-    };
-  });
-
-  if (!transaction.committed || !transaction.snapshot.exists()) return false;
-
-  const saved = asRecord(transaction.snapshot.val());
-  const entityPath = paymentEntityPath(args.entityType);
-  const savedStatus = asString(saved.status).toUpperCase();
-  const entityRef = db.ref(entityPath + "/" + args.entityId);
-  await entityRef.transaction((rawValue) => {
-    if (!rawValue || typeof rawValue !== "object") return;
-    const entity = asRecord(rawValue);
-    const currentStatus = asString(entity.status).toUpperCase();
-    const nextEntity: Record<string, unknown> = {
-      ...entity,
-      paymentStatus: savedStatus,
-      paymentId: asString(saved.providerReference),
-    };
-
-    if (savedStatus === "PAID") {
-      // Do not rewind a ride/order that has already legitimately progressed.
-      // Legacy REQUESTED/PLACED GCash records are normalized only when unassigned.
-      const unassigned = args.entityType === "TRIP"
-        ? !asString(entity.driverId)
-        : !asString(entity.deliveryId);
-      if (
-        currentStatus === "AWAITING_PAYMENT" ||
-        unassigned && (currentStatus === "REQUESTED" || currentStatus === "PLACED")
-      ) {
-        nextEntity.status = args.entityType === "ORDER" ? "PLACED" : "REQUESTED";
-      }
-    } else if (["FAILED", "CANCELLED", "EXPIRED"].includes(savedStatus)) {
-      if ([
-        "AWAITING_PAYMENT", "REQUESTED", "PLACED", "ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY",
-      ].includes(currentStatus)) {
-        nextEntity.status = "CANCELLED";
-        if (args.entityType === "TRIP") {
-          nextEntity.driverId = "";
-          nextEntity.driverName = "";
-          nextEntity.driverPhone = "";
-        } else {
-          nextEntity.deliveryId = "";
-          nextEntity.deliveryName = "";
-          nextEntity.deliveryPhone = "";
-        }
-      }
-    }
-    return nextEntity;
-  });
-
-  if (["PAID", "FAILED", "CANCELLED", "EXPIRED"].includes(savedStatus)) {
-    await db.ref("paymentReconciliationQueue/" + args.entityId).remove();
-  }
-  return true;
-}
-
-async function applyXenditRefundStatus(args: {
-  entityId: string;
-  refundAttemptId: string;
-  referenceId: string;
-  providerRefundId: string;
-  providerPaymentId: string;
-  status: "SUCCEEDED" | "FAILED" | "PENDING";
-  amountCentavos: number;
-  providerUpdatedAt?: string;
-  failureCode?: string;
-}): Promise<boolean> {
-  const paymentRef = db.ref("payments/" + args.entityId);
-  const transaction = await paymentRef.transaction((rawValue) => {
-    const current = asRecord(rawValue);
-    const refunds = asRecord(current.refunds);
-    const refund = asRecord(refunds[args.refundAttemptId]);
-    if (
-      asString(current.provider) !== "XENDIT" ||
-      asString(current.providerPaymentId) !== args.providerPaymentId ||
-      asString(refund.referenceId) !== args.referenceId ||
-      Number(refund.amountCentavos) !== args.amountCentavos ||
-      (asString(refund.providerRefundId) &&
-        asString(refund.providerRefundId) !== args.providerRefundId)
-    ) {
-      return;
-    }
-
-    const incomingTime = Date.parse(args.providerUpdatedAt ?? "");
-    const previousTime = Date.parse(asString(refund.providerUpdatedAt));
-    if (
-      Number.isFinite(incomingTime) &&
-      Number.isFinite(previousTime) &&
-      incomingTime < previousTime
-    ) {
-      return;
-    }
-    const previousStatus = asString(refund.status).toUpperCase();
-    if (["SUCCEEDED", "FAILED"].includes(previousStatus)) {
-      if (previousStatus !== args.status || refund.balanceApplied === true) return current;
-    }
-
-    const totalCentavos = nonNegativeInteger(current.amountCentavos, "stored payment amount");
-    const refundedCentavos = nonNegativeInteger(current.refundedCentavos ?? 0, "refunded amount");
-    const pendingCentavos = nonNegativeInteger(current.pendingRefundCentavos ?? 0, "pending refund amount");
-    const nextPending = Math.max(0, pendingCentavos - args.amountCentavos);
-    const nextRefunded = args.status === "SUCCEEDED"
-      ? refundedCentavos + args.amountCentavos
-      : refundedCentavos;
-    const refundRecord = {
-      ...refund,
-      providerRefundId: args.providerRefundId,
-      status: args.status,
-      providerUpdatedAt: args.providerUpdatedAt || asString(refund.providerUpdatedAt),
-      failureCode: args.status === "FAILED" ? args.failureCode || "" : "",
-      balanceApplied: args.status === "SUCCEEDED" || args.status === "FAILED",
-      updatedAtTimestamp: Date.now(),
-    };
-    const nextPaymentStatus = args.status === "SUCCEEDED"
-      ? nextRefunded >= totalCentavos ? "REFUNDED" : "PARTIALLY_REFUNDED"
-      : asString(current.status);
-
-    return {
-      ...current,
-      refunds: { ...refunds, [args.refundAttemptId]: refundRecord },
-      pendingRefundCentavos: nextPending,
-      refundedCentavos: nextRefunded,
-      refundStatus: nextPending > 0 ? "PENDING" : args.status,
-      status: nextPaymentStatus,
-      updatedAtTimestamp: Date.now(),
-    };
-  });
-
-  if (!transaction.committed || !transaction.snapshot.exists()) {
-    const latest = asRecord((await paymentRef.get()).val());
-    const latestRefund = asRecord(asRecord(latest.refunds)[args.refundAttemptId]);
-    if (args.status !== "SUCCEEDED" || asString(latestRefund.status).toUpperCase() !== "SUCCEEDED") return false;
-    await reconcileRefundedPaymentEarnings(args.entityId, args.refundAttemptId);
-    return true;
-  }
-  const saved = asRecord(transaction.snapshot.val());
-  const refundQueueKey = args.entityId + "_" + args.refundAttemptId;
-  await db.ref("refundReconciliationQueue/" + refundQueueKey).remove();
-  if (["REFUNDED", "PARTIALLY_REFUNDED"].includes(asString(saved.status))) {
-    const entityType = asString(saved.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
-    await db.ref(paymentEntityPath(entityType as GcashEntityType) + "/" + args.entityId + "/paymentStatus")
-      .set(asString(saved.status));
-  }
-  if (args.status === "SUCCEEDED") {
-    await reconcileRefundedPaymentEarnings(args.entityId, args.refundAttemptId);
-  }
-  return true;
-}
-
-export const createGcashPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY] },
-  async (request) => {
-    const uid = requireUid(request);
-    const data = asRecord(request.data);
-    const entityType = parseGcashEntityType(data.entityType);
-    const entityId = asString(data.entityId);
-    if (!/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
-      throw new HttpsError("invalid-argument", "A valid order or trip ID is required.");
-    }
-    const clientIdempotencyKey = parseIdempotencyKey(data.idempotencyKey);
-    const attemptKey = createHash("sha256")
-      .update(uid + "|" + entityType + "|" + entityId + "|" + clientIdempotencyKey)
-      .digest("hex")
-      .slice(0, 32);
-
-    const entityPath = paymentEntityPath(entityType);
-    const entitySnapshot = await db.ref(entityPath + "/" + entityId).get();
-    if (!entitySnapshot.exists()) {
-      throw new HttpsError("not-found", "The order or trip was not found.");
-    }
-    const entity = asRecord(entitySnapshot.val());
-    if (paymentOwnerId(entityType, entity) !== uid) {
-      throw new HttpsError("permission-denied", "This payment does not belong to the signed-in customer.");
-    }
-    const amountCentavos = paymentAmountCentavos(entityType, entity);
-    const amount = phpFromCents(amountCentavos);
-    const paymentRef = db.ref("payments/" + entityId);
-    const existingSnapshot = await paymentRef.get();
-    const existingPayment = asRecord(existingSnapshot.val());
-
-    if (asString(entity.paymentStatus).toUpperCase() === "PAID" ||
-      asString(existingPayment.status).toUpperCase() === "PAID") {
-      return Object.keys(existingPayment).length > 0
-        ? toGcashPaymentResponse(entityType, entityId, existingPayment)
-        : {
-            entityId,
-            [entityType === "ORDER" ? "orderId" : "tripId"]: entityId,
-            paymentId: asString(entity.paymentId),
-            paymentStatus: "PAID",
-            amount,
-            amountCentavos,
-            checkoutUrl: null,
-            webCheckoutUrl: null,
-            checkoutActionDescriptor: null,
-            expiresAtTimestamp: 0,
-          };
-    }
-    if (
-      asString(existingPayment.status).toUpperCase() === "PENDING" &&
-      asString(existingPayment.checkoutUrl) &&
-      Number(existingPayment.expiresAtTimestamp) > Date.now()
-    ) {
-      return toGcashPaymentResponse(entityType, entityId, existingPayment);
-    }
-    if (
-      ["CREATING", "INITIATION_FAILED"].includes(asString(existingPayment.status).toUpperCase()) &&
-      asString(existingPayment.activeAttemptKey) !== attemptKey
-    ) {
-      throw new HttpsError("failed-precondition", "A GCash payment request is already being created. Retry with the same checkout request key.");
-    }
-
-    const secret = XENDIT_SECRET_KEY.value();
-    if (!secret) {
-      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
-    }
-
-    const referenceId = "labmda_" + entityType.toLowerCase() + "_" + entityId + "_" + attemptKey;
-    const providerIdempotencyKey = "labmda_gcash_" + entityType.toLowerCase() + "_" + entityId + "_" + attemptKey;
-    const now = Date.now();
-    const reservation = await paymentRef.transaction((rawValue) => {
-      const current = asRecord(rawValue);
-      const status = asString(current.status).toUpperCase();
-      if (status === "PAID" || status === "PENDING" && Number(current.expiresAtTimestamp) > now) {
-        return;
-      }
-      if (
-        ["CREATING", "INITIATION_FAILED"].includes(status) &&
-        asString(current.activeAttemptKey) !== attemptKey
-      ) {
-        return;
-      }
-      const attempts = asRecord(current.attempts);
-      const currentAttempt = asRecord(attempts[attemptKey]);
-      return {
-        ...current,
-        entityType,
-        entityId,
-        clientId: uid,
-        provider: "XENDIT",
-        channelCode: "GCASH",
-        referenceId,
-        status: "CREATING",
-        activeAttemptKey: attemptKey,
-        amount,
-        amountCentavos,
-        currency: "PHP",
-        breakdown: entity.breakdown ?? current.breakdown ?? null,
-        pricingVersion: Number(entity.pricingVersion ?? current.pricingVersion ?? 0),
-        createdAtTimestamp: Number(current.createdAtTimestamp ?? now),
-        updatedAtTimestamp: now,
-        attempts: {
-          ...attempts,
-          [attemptKey]: {
-            ...currentAttempt,
-            attemptKey,
-            status: "CREATING",
-            referenceId,
-            idempotencyKey: providerIdempotencyKey,
-            amount,
-            amountCentavos,
-            createdAtTimestamp: Number(currentAttempt.createdAtTimestamp ?? now),
-            updatedAtTimestamp: now,
-          },
-        },
-      };
-    });
-
-    if (!reservation.committed) {
-      const latestSnapshot = await paymentRef.get();
-      const latest = asRecord(latestSnapshot.val());
-      if (asString(latest.status).toUpperCase() === "PAID") {
-        return toGcashPaymentResponse(entityType, entityId, latest);
-      }
-      if (
-        asString(latest.status).toUpperCase() === "PENDING" &&
-        asString(latest.checkoutUrl)
-      ) {
-        return toGcashPaymentResponse(entityType, entityId, latest);
-      }
-      throw new HttpsError("failed-precondition", "This payment already has an active GCash checkout. Reuse its original idempotency key.");
-    }
-
-    // Close the visibility/claim window before making the external Xendit request.
-    // If the provider call fails, the catch block below cancels the unpaid entity.
-    const entityPendingUpdates: Record<string, unknown> = {};
-    entityPendingUpdates[entityPath + "/" + entityId + "/paymentMethod"] = "GCASH";
-    entityPendingUpdates[entityPath + "/" + entityId + "/paymentStatus"] = "CREATING";
-    entityPendingUpdates[entityPath + "/" + entityId + "/status"] = "AWAITING_PAYMENT";
-    await db.ref().update(entityPendingUpdates);
-
-    try {
-      const provider = await createXenditGcashRequest({
-        referenceId,
-        amount,
-        description: (entityType === "ORDER" ? "Labmda order " : "Labmda ride ") + entityId,
-        entityType,
-        entityId,
-        clientId: uid,
-        idempotencyKey: providerIdempotencyKey,
-      });
-      const timestamp = Date.now();
-      const status = mapProviderPaymentStatus(provider.status) ?? "PENDING";
-      const expiresAtTimestamp = timestamp + 15 * 60 * 1000;
-      const merchantId = entityType === "ORDER" ? asString(entity.merchantId) : "";
-      const payment = {
-        entityType,
-        entityId,
-        clientId: uid,
-        merchantId,
-        provider: "XENDIT",
-        channelCode: "GCASH",
-        providerReference: provider.paymentId,
-        providerPaymentId: "",
-        referenceId,
-        status,
-        amount,
-        amountCentavos,
-        currency: "PHP",
-        breakdown: entity.breakdown ?? null,
-        pricingVersion: Number(entity.pricingVersion ?? 0),
-        checkoutUrl: provider.checkoutUrl,
-        webCheckoutUrl: provider.webCheckoutUrl,
-        checkoutActionDescriptor: provider.checkoutActionDescriptor,
-        expiresAtTimestamp,
-        activeAttemptKey: attemptKey,
-        createdAtTimestamp: Number(asRecord(reservation.snapshot.val()).createdAtTimestamp ?? timestamp),
-        updatedAtTimestamp: timestamp,
-        attempts: {
-          ...asRecord(asRecord(reservation.snapshot.val()).attempts),
-          [attemptKey]: {
-            attemptKey,
-            referenceId,
-            providerReference: provider.paymentId,
-            providerPaymentId: "",
-            status,
-            amount,
-            amountCentavos,
-            checkoutUrl: provider.checkoutUrl,
-            webCheckoutUrl: provider.webCheckoutUrl,
-            checkoutActionDescriptor: provider.checkoutActionDescriptor,
-            expiresAtTimestamp,
-            createdAtTimestamp: timestamp,
-            updatedAtTimestamp: timestamp,
-          },
-        },
-      };
-
-      const updates: Record<string, unknown> = {};
-      updates["payments/" + entityId] = payment;
-      updates[entityPath + "/" + entityId + "/paymentMethod"] = "GCASH";
-      updates[entityPath + "/" + entityId + "/paymentStatus"] = status;
-      updates[entityPath + "/" + entityId + "/paymentId"] = provider.paymentId;
-      updates[entityPath + "/" + entityId + "/status"] =
-        status === "PAID"
-          ? entityType === "ORDER" ? "PLACED" : "REQUESTED"
-          : ["FAILED", "CANCELLED", "EXPIRED"].includes(status)
-            ? "CANCELLED"
-            : "AWAITING_PAYMENT";
-      if (["PENDING", "CREATING"].includes(status)) {
-        updates["paymentReconciliationQueue/" + entityId] = {
-          dueAtTimestamp: timestamp + 2 * 60 * 1000,
-          createdAtTimestamp: timestamp,
-          attempts: 0,
-        };
-      }
-      await db.ref().update(updates);
-      logger.info("Created Xendit GCash payment request", {
-        entityType,
-        entityId,
-        paymentRequestId: provider.paymentId,
-        amountCentavos,
-      });
-      return toGcashPaymentResponse(entityType, entityId, payment);
-    } catch (error) {
-      const failureTimestamp = Date.now();
-      const failure = {
-        status: "INITIATION_FAILED",
-        failureStage: "PAYMENT_REQUEST_CREATION",
-        updatedAtTimestamp: failureTimestamp,
-      };
-      const updates: Record<string, unknown> = {};
-      updates["payments/" + entityId + "/status"] = failure.status;
-      updates["payments/" + entityId + "/failureStage"] = failure.failureStage;
-      updates["payments/" + entityId + "/updatedAtTimestamp"] = failureTimestamp;
-      updates["payments/" + entityId + "/attempts/" + attemptKey + "/status"] = failure.status;
-      updates["payments/" + entityId + "/attempts/" + attemptKey + "/updatedAtTimestamp"] = failureTimestamp;
-      updates[entityPath + "/" + entityId + "/paymentStatus"] = failure.status;
-      updates[entityPath + "/" + entityId + "/status"] = "CANCELLED";
-      await db.ref().update(updates);
-      logger.error("Could not create Xendit GCash payment request", { entityType, entityId, error });
-      if (error instanceof HttpsError) throw error;
-      throw new HttpsError("unavailable", "GCash checkout could not be started. Retry the same checkout request.");
-    }
-  }
-);
-
-export const refundPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY] },
-  async (request) => {
-    const adminUid = requireAdmin(request);
-    const data = asRecord(request.data);
-    const entityType = parseGcashEntityType(data.entityType);
-    const entityId = asString(data.entityId);
-    if (!/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
-      throw new HttpsError("invalid-argument", "A valid order or trip ID is required.");
-    }
-    const idempotencyKey = parseIdempotencyKey(data.idempotencyKey);
-    const refundAttemptId = createHash("sha256")
-      .update(adminUid + "|" + entityType + "|" + entityId + "|" + idempotencyKey)
-      .digest("hex")
-      .slice(0, 32);
-    const reasonValue = asString(data.reason).toUpperCase() || "REQUESTED_BY_CUSTOMER";
-    const validReasons = ["FRAUDULENT", "DUPLICATE", "REQUESTED_BY_CUSTOMER", "CANCELLATION", "OTHERS"];
-    if (!validReasons.includes(reasonValue)) {
-      throw new HttpsError("invalid-argument", "Unsupported refund reason.");
-    }
-    const requestedAmount = data.amountCentavos === undefined || data.amountCentavos === null
-      ? null
-      : nonNegativeInteger(data.amountCentavos, "refund amount in centavos");
-
-    const paymentRef = db.ref("payments/" + entityId);
-    const existingSnapshot = await paymentRef.get();
-    if (!existingSnapshot.exists()) {
-      throw new HttpsError("not-found", "The payment record was not found.");
-    }
-    const existingPayment = asRecord(existingSnapshot.val());
-    const existingRefund = asRecord(asRecord(existingPayment.refunds)[refundAttemptId]);
-    if (
-      existingRefund.providerRefundId &&
-      ["PENDING", "SUCCEEDED", "FAILED"].includes(asString(existingRefund.status))
-    ) {
-      return {
-        entityId,
-        refundId: asString(existingRefund.providerRefundId),
-        refundStatus: asString(existingRefund.status),
-        amountCentavos: Number(existingRefund.amountCentavos ?? 0),
-      };
-    }
-    if (
-      asString(existingPayment.provider) !== "XENDIT" ||
-      !asString(existingPayment.providerPaymentId)
-    ) {
-      throw new HttpsError("failed-precondition", "Refunds require a provider-confirmed Xendit payment ID.");
-    }
-    const paidAtTimestamp = Number(existingPayment.paidAtTimestamp ?? 0);
-    const gcashRefundWindowMs = 180 * 24 * 60 * 60 * 1000;
-    if (paidAtTimestamp > 0 && Date.now() - paidAtTimestamp > gcashRefundWindowMs) {
-      throw new HttpsError("failed-precondition", "The Xendit GCash refund window of 180 days has elapsed.");
-    }
-
-    const secret = XENDIT_SECRET_KEY.value();
-    if (!secret) {
-      throw new HttpsError("failed-precondition", "The Xendit secret key is not configured.");
-    }
-
-    let reservedAmountCentavos = 0;
-    let reservationError = "";
-    const referenceId = "refund_" + entityId + "_" + refundAttemptId;
-    const reservation = await paymentRef.transaction((rawValue) => {
-      const current = asRecord(rawValue);
-      if (asString(current.provider) !== "XENDIT" || !asString(current.providerPaymentId)) {
-        reservationError = "Refunds require a provider-confirmed Xendit payment ID.";
-        return;
-      }
-      if (!["PAID", "PARTIALLY_REFUNDED"].includes(asString(current.status).toUpperCase())) {
-        reservationError = "Only a paid, not-fully-refunded payment can be refunded.";
-        return;
-      }
-
-      const refunds = asRecord(current.refunds);
-      const saved = asRecord(refunds[refundAttemptId]);
-      if (Object.keys(saved).length > 0) {
-        reservedAmountCentavos = Number(saved.amountCentavos ?? 0);
-        return current;
-      }
-
-      const total = nonNegativeInteger(current.amountCentavos, "payment amount");
-      const refunded = nonNegativeInteger(current.refundedCentavos ?? 0, "already-refunded amount");
-      const pending = nonNegativeInteger(current.pendingRefundCentavos ?? 0, "pending refund amount");
-      const available = total - refunded - pending;
-      reservedAmountCentavos = requestedAmount ?? available;
-      if (reservedAmountCentavos <= 0 || reservedAmountCentavos > available) {
-        reservationError = "The requested refund is greater than the remaining refundable balance.";
-        return;
-      }
-
-      const timestamp = Date.now();
-      return {
-        ...current,
-        pendingRefundCentavos: pending + reservedAmountCentavos,
-        refundStatus: "PENDING",
-        refunds: {
-          ...refunds,
-          [refundAttemptId]: {
-            refundAttemptId,
-            referenceId,
-            providerPaymentId: asString(current.providerPaymentId),
-            status: "CREATING",
-            amountCentavos: reservedAmountCentavos,
-            amount: phpFromCents(reservedAmountCentavos),
-            currency: "PHP",
-            reason: reasonValue,
-            createdBy: adminUid,
-            createdAtTimestamp: timestamp,
-            updatedAtTimestamp: timestamp,
-          },
-        },
-        updatedAtTimestamp: timestamp,
-      };
-    });
-
-    if (!reservation.committed || reservationError) {
-      throw new HttpsError("failed-precondition", reservationError || "The refund could not be reserved.");
-    }
-
-    const savedAfterReservation = asRecord(reservation.snapshot.val());
-    const savedRefund = asRecord(asRecord(savedAfterReservation.refunds)[refundAttemptId]);
-    if (asString(savedRefund.providerRefundId)) {
-      return {
-        entityId,
-        refundId: asString(savedRefund.providerRefundId),
-        refundStatus: asString(savedRefund.status),
-        amountCentavos: Number(savedRefund.amountCentavos ?? 0),
-      };
-    }
-
-    const providerPaymentId = asString(savedAfterReservation.providerPaymentId);
-    const providerIdempotencyKey = "labmda_refund_" + entityId + "_" + refundAttemptId;
-    const refundAmount = phpFromCents(reservedAmountCentavos);
-
-    try {
-      const response = await fetch("https://api.xendit.co/v3/refunds", {
-        method: "POST",
-        headers: xenditHeaders(secret, providerIdempotencyKey),
-        body: JSON.stringify({
-          reference_id: referenceId,
-          payment_id: providerPaymentId,
-          amount: refundAmount,
-          reason: reasonValue,
-          metadata: { entity_type: entityType, entity_id: entityId },
-        }),
-      });
-      const providerBody = asRecord(await response.json().catch(() => ({})));
-      if (!response.ok) {
-        logger.error("Xendit refund request failed", { entityId, status: response.status, response: providerBody });
-        // An explicit provider rejection is terminal. Release the reservation so the
-        // administrator's remaining refundable balance is not stranded.
-        await applyXenditRefundStatus({
-          entityId,
-          refundAttemptId,
-          referenceId,
-          providerRefundId: "",
-          providerPaymentId,
-          status: "FAILED",
-          amountCentavos: reservedAmountCentavos,
-          providerUpdatedAt: new Date().toISOString(),
-          failureCode: asString(providerBody.error_code) || "REFUND_REQUEST_REJECTED",
-        });
-        throw new HttpsError("unavailable", "Xendit rejected the refund. Review the reason and retry with a new refund request key.");
-      }
-
-      const providerRefundId = asString(providerBody.refund_id) || asString(providerBody.id);
-      const providerStatus = asString(providerBody.status).toUpperCase();
-      if (!providerRefundId) {
-        throw new HttpsError("unavailable", "Xendit did not return a refund ID.");
-      }
-      const refundStatus: "SUCCEEDED" | "FAILED" | "PENDING" =
-        providerStatus === "SUCCEEDED" ? "SUCCEEDED" :
-          providerStatus === "FAILED" ? "FAILED" : "PENDING";
-      // Store the provider ID first, but do not mark terminal status before the
-      // transactional balance update below. The webhook can race this response.
-      await paymentRef.child("refunds").child(refundAttemptId).update({
-        providerRefundId,
-        updatedAtTimestamp: Date.now(),
-      });
-
-      if (refundStatus === "PENDING") {
-        await paymentRef.child("refunds").child(refundAttemptId).transaction((rawValue) => {
-          const current = asRecord(rawValue);
-          if (["SUCCEEDED", "FAILED"].includes(asString(current.status).toUpperCase())) {
-            return current;
-          }
-          return {
-            ...current,
-            status: "PENDING",
-            updatedAtTimestamp: Date.now(),
-          };
-        });
-        const latestRefund = asRecord((await paymentRef.child("refunds").child(refundAttemptId).get()).val());
-        if (!["SUCCEEDED", "FAILED"].includes(asString(latestRefund.status).toUpperCase())) {
-          await db.ref("refundReconciliationQueue/" + entityId + "_" + refundAttemptId).set({
-            entityId,
-            refundAttemptId,
-            providerRefundId,
-            referenceId,
-            dueAtTimestamp: Date.now() + 2 * 60 * 1000,
-            attempts: 0,
-          });
-        }
-      } else {
-        await applyXenditRefundStatus({
-          entityId,
-          refundAttemptId,
-          referenceId,
-          providerRefundId,
-          providerPaymentId,
-          status: refundStatus,
-          amountCentavos: reservedAmountCentavos,
-          providerUpdatedAt: asString(providerBody.updated),
-          failureCode: asString(providerBody.failure_code),
-        });
-      }
-
-      return {
-        entityId,
-        refundId: providerRefundId,
-        refundStatus,
-        amountCentavos: reservedAmountCentavos,
-      };
-    } catch (error) {
-      logger.error("Could not create Xendit refund", { entityId, refundAttemptId, error });
-      if (error instanceof HttpsError) throw error;
-      throw new HttpsError("unavailable", "The refund request could not be completed. Retry using the same refund request key.");
-    }
-  }
-);
-
-
-type WebhookReservation = { key: string; status: "ACQUIRED" | "DUPLICATE" | "BUSY" };
-async function reserveWebhookEvent(provider: string, event: string, body: Record<string, unknown>): Promise<WebhookReservation> {
-  const data = asRecord(body.data);
-  const eventId = asString(body.id) || asString(body.event_id) || asString(body.webhook_id) || asString(data.id) || asString(data.event_id);
-  const key = createHash("sha256").update(provider + "|" + event + "|" + (eventId || JSON.stringify(body))).digest("hex");
-  const ref = db.ref("processedWebhookEvents/" + key);
-  const now = Date.now();
-  const tx = await ref.transaction((currentValue) => {
-    const current = asRecord(currentValue);
-    if (asString(current.status) === "PROCESSED") return;
-    if (asString(current.status) === "PROCESSING" && Number(current.leaseUntilTimestamp ?? 0) > now) return;
-    return { provider, event, status: "PROCESSING", attempts: Number(current.attempts ?? 0) + 1, receivedAtTimestamp: Number(current.receivedAtTimestamp ?? now) || now, updatedAtTimestamp: now, leaseUntilTimestamp: now + 120000 };
-  });
-  if (tx.committed) return { key, status: "ACQUIRED" };
-  const saved = asRecord(tx.snapshot.val());
-  return { key, status: asString(saved.status) === "PROCESSED" ? "DUPLICATE" : "BUSY" };
-}
-async function markWebhookEventProcessed(key: string): Promise<void> {
-  const now = Date.now();
-  await db.ref("processedWebhookEvents/" + key).update({ status: "PROCESSED", processedAtTimestamp: now, updatedAtTimestamp: now, leaseUntilTimestamp: 0 });
 }
 
 export const xenditPaymentWebhook = onRequest(
