@@ -111,7 +111,10 @@
       "$quoteId": {
         ".read": "auth != null && data.child('userId').val() === auth.uid",
         ".write": false
-      }
+      },
+      ".indexOn": [
+        "expiresAtTimestamp"
+      ]
     },
     "config": {
       ".read": "auth != null && auth.token.admin === true",
@@ -311,6 +314,10 @@
         ".read": "auth != null && (auth.token.admin === true || auth.uid === $restaurantId)",
         ".write": "auth != null && auth.token.admin === true"
       }
+    },
+    "quoteRateLimits": {
+      ".read": false,
+      ".write": false
     }
   }
 }
