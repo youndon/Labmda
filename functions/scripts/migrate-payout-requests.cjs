@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-const { applicationDefault, getApps, initializeApp } = require("firebase-admin/app");
-const { getDatabase } = require("firebase-admin/database");
 
 const ACTIVE = new Set(["PENDING_ADMIN_APPROVAL", "APPROVING"]);
 const TERMINAL = new Set(["PAID", "FAILED", "REVERSED", "REJECTED"]);
@@ -59,11 +57,13 @@ function mapLegacyRequest(requestId, legacy, existing, now = Date.now()) {
     createdAtTimestamp: Number(current.createdAtTimestamp || legacy.createdAtTimestamp || now),
     updatedAtTimestamp: Math.max(Number(current.updatedAtTimestamp || 0), Number(legacy.updatedAtTimestamp || 0), now)
   };
-  if (!text(current.status)) canonical.status = ACTIVE.has(requestStatus) ? requestStatus : requestStatus;
+  if (!text(current.status)) canonical.status = requestStatus;
   return canonical;
 }
 
 async function run() {
+  const { applicationDefault, getApps, initializeApp } = require("firebase-admin/app");
+  const { getDatabase } = require("firebase-admin/database");
   const args = new Set(process.argv.slice(2));
   const apply = args.has("--apply");
   if (!process.env.FIREBASE_DATABASE_URL) throw new Error("Set FIREBASE_DATABASE_URL to the intended Realtime Database URL.");
