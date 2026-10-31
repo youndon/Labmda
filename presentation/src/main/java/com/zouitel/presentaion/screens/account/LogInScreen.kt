@@ -89,18 +89,18 @@ class LogInScreen : Screen {
                         )
                         val authResult = Firebase.auth.signInWithCredential(credential)
                         val firebaseUser = authResult.user
+                            ?: throw IllegalStateException("Google sign-in returned no Firebase user.")
 
-                        if (firebaseUser != null && firebaseUser.uid.isNotBlank()) {
-                            screenModel.saveUserProfile(
-                                UserProfile().copy(
-                                    uid = firebaseUser.uid,
-                                    fullName = firebaseUser.displayName ?: "",
-                                    email = firebaseUser.email ?: "",
-                                    phoneNumber = firebaseUser.phoneNumber ?: "",
-                                    photoUrl = firebaseUser.photoURL
-                                )
+                        val profileResult = screenModel.saveUserProfile(
+                            UserProfile(
+                                uid = firebaseUser.uid,
+                                fullName = firebaseUser.displayName ?: "",
+                                email = firebaseUser.email,
+                                phoneNumber = firebaseUser.phoneNumber,
+                                photoUrl = firebaseUser.photoURL
                             )
-                        }
+                        )
+                        profileResult.e?.let { throw it }
 
                         onSignedIn()
                     } catch (e: Exception) {
@@ -316,8 +316,13 @@ class LogInScreen : Screen {
                                         }
 
                                         val gitLiveCredential = dev.gitlive.firebase.auth.PhoneAuthProvider().credential(id, otpCode)
-                                        signInWithGitLiveCredential(gitLiveCredential, coroutineScope, context,
-                                            onSignedIn) { isLoading = it }
+                                        signInWithGitLiveCredential(
+                                            gitLiveCredential,
+                                            coroutineScope,
+                                            context,
+                                            screenModel,
+                                            onSignedIn
+                                        ) { isLoading = it }
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -367,13 +372,26 @@ class LogInScreen : Screen {
         credential: AuthCredential,
         scope: CoroutineScope,
         context: android.content.Context,
+        screenModel: LogInScreenModel,
         onSignedIn: () -> Unit,
         setLoading: (Boolean) -> Unit
     ) {
         scope.launch {
             setLoading(true)
             try {
-                Firebase.auth.signInWithCredential(credential)
+                val authResult = Firebase.auth.signInWithCredential(credential)
+                val firebaseUser = authResult.user
+                    ?: throw IllegalStateException("Phone sign-in returned no Firebase user.")
+                val profileResult = screenModel.saveUserProfile(
+                    UserProfile(
+                        uid = firebaseUser.uid,
+                        fullName = firebaseUser.displayName ?: "",
+                        email = firebaseUser.email,
+                        phoneNumber = firebaseUser.phoneNumber,
+                        photoUrl = firebaseUser.photoURL
+                    )
+                )
+                profileResult.e?.let { throw it }
                 onSignedIn()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Invalid code, try again", Toast.LENGTH_SHORT).show()
@@ -394,7 +412,19 @@ class LogInScreen : Screen {
         scope.launch {
             setLoading(true)
             try {
-                FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                val firebaseUser = authResult.user
+                    ?: throw IllegalStateException("Phone sign-in returned no Firebase user.")
+                val profileResult = screenModel.saveUserProfile(
+                    UserProfile(
+                        uid = firebaseUser.uid,
+                        fullName = firebaseUser.displayName ?: "",
+                        email = firebaseUser.email,
+                        phoneNumber = firebaseUser.phoneNumber ?: credential.phoneNumber,
+                        photoUrl = firebaseUser.photoUrl?.toString()
+                    )
+                )
+                profileResult.e?.let { throw it }
                 onSignedIn()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Invalid code, try again", Toast.LENGTH_SHORT).show()
