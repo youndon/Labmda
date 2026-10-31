@@ -4,6 +4,7 @@ const {
   phpAmountToCentavos,
   matchesGcashPaymentTransaction,
   isSettledGcashPaymentTransaction,
+  calculateNetParticipantShares,
 } = require("../lib/xenditSettlement.js");
 
 const payment = {
@@ -77,4 +78,70 @@ test("rejects a transaction with a different payment request, reference, channel
     matchesGcashPaymentTransaction(payment, { ...transaction, currency: "USD" }),
     false
   );
+});
+
+
+test("subtracts only posted refunds from participant earnings", () => {
+  const net = calculateNetParticipantShares({
+    grossAmountCentavos: 100000,
+    merchantCentavos: 50000,
+    courierCentavos: 20000,
+    driverCentavos: 0,
+    platformCentavos: 30000,
+    refunds: {
+      refundA: {
+        amountCentavos: 10000,
+        status: "SUCCEEDED",
+        walletSettlementStatus: "POSTED",
+      },
+    },
+  });
+  assert.deepEqual(net, {
+    merchantCentavos: 45000,
+    courierCentavos: 18000,
+    driverCentavos: 0,
+    platformCentavos: 27000,
+    netAmountCentavos: 90000,
+    refundReconciliationPending: false,
+  });
+});
+
+test("blocks earnings release while a succeeded refund is not posted to the ledger", () => {
+  const net = calculateNetParticipantShares({
+    grossAmountCentavos: 100000,
+    merchantCentavos: 50000,
+    courierCentavos: 20000,
+    driverCentavos: 0,
+    platformCentavos: 30000,
+    refunds: {
+      refundA: {
+        amountCentavos: 10000,
+        status: "SUCCEEDED",
+        walletSettlementStatus: "PENDING",
+      },
+    },
+  });
+  assert.equal(net.refundReconciliationPending, true);
+});
+
+test("rejects refunds that exceed the original payment amount", () => {
+  assert.throws(() => calculateNetParticipantShares({
+    grossAmountCentavos: 100000,
+    merchantCentavos: 50000,
+    courierCentavos: 20000,
+    driverCentavos: 0,
+    platformCentavos: 30000,
+    refunds: {
+      refundA: {
+        amountCentavos: 60000,
+        status: "SUCCEEDED",
+        walletSettlementStatus: "POSTED",
+      },
+      refundB: {
+        amountCentavos: 50000,
+        status: "SUCCEEDED",
+        walletSettlementStatus: "POSTED",
+      },
+    },
+  }));
 });
