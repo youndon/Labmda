@@ -102,6 +102,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
         var rideQuote by remember { mutableStateOf<PricingQuoteResult?>(null) }
         var isQuotingRide by remember { mutableStateOf(false) }
+        var quoteRefreshKey by remember { mutableIntStateOf(0) }
         var rideQuoteError by remember { mutableStateOf<String?>(null) }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
@@ -195,7 +196,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             }
         }
 
-        LaunchedEffect(pickup, destination, vehicleType) {
+        LaunchedEffect(pickup, destination, vehicleType, quoteRefreshKey) {
             val p = pickup
             val d = destination
             rideQuote = null
@@ -401,11 +402,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                     hasPickup = pickup != null,
                                     destinationAddress = destinationAddress,
                                     hasDestination = destination != null,
-                                    distanceKm = distanceKm,
-                                    fare = fare,
                                     rideQuote = rideQuote,
                                     isQuotingRide = isQuotingRide,
                                     quoteError = rideQuoteError,
+                                    onRefreshQuote = { quoteRefreshKey++ },
                                     isSubmitting = paymentUiState.isSubmitting,
                                     vehicleType = vehicleType,
                                     selectedDriver = selectedDriver,
@@ -442,6 +442,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         quote = rideQuote,
                         isQuotingRide = isQuotingRide,
                         quoteError = rideQuoteError,
+                        onRefreshQuote = {
+                            quoteRefreshKey++
+                            showCheckout = false
+                        },
                         selectedMethod = paymentUiState.selectedMethod,
                         onMethodSelected = paymentScreenModel::selectMethod,
                         isSubmitting = paymentUiState.isSubmitting,
@@ -558,11 +562,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         hasPickup: Boolean,
         destinationAddress: String,
         hasDestination: Boolean,
-        distanceKm: Double,
-        fare: Double,
         rideQuote: PricingQuoteResult?,
         isQuotingRide: Boolean,
         quoteError: String?,
+        onRefreshQuote: () -> Unit,
         isSubmitting: Boolean,
         vehicleType: VehicleType,
         selectedDriver: UserProfile?,
@@ -680,6 +683,11 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 quoteError?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
+                if (rideQuote != null && rideQuote.expiresAtTimestamp <= System.currentTimeMillis()) {
+                    TextButton(onClick = onRefreshQuote, modifier = Modifier.fillMaxWidth()) {
+                        Text("Refresh expired quote")
+                    }
+                }
 
                 PayButton(
                     label = "Review ride",
@@ -700,6 +708,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         quote: PricingQuoteResult?,
         isQuotingRide: Boolean,
         quoteError: String?,
+        onRefreshQuote: () -> Unit,
         selectedMethod: com.zouitel.presentaion.model.PaymentMethod,
         onMethodSelected: (com.zouitel.presentaion.model.PaymentMethod) -> Unit,
         isSubmitting: Boolean,
@@ -764,6 +773,11 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                             style = MaterialTheme.typography.bodySmall,
                             color = if (quoteError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    if (quote != null && quote.expiresAtTimestamp <= System.currentTimeMillis()) {
+                        Button(onClick = onRefreshQuote, modifier = Modifier.fillMaxWidth()) {
+                            Text("Refresh quote")
+                        }
                     }
                 }
             }
