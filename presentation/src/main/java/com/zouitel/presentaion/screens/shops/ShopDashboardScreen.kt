@@ -25,7 +25,6 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import coil3.compose.AsyncImage
 import cafe.adriel.voyager.navigator.LocalNavigator
-import com.zouitel.presentaion.common.DriveTokenProvider
 import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.common.ImagePicker
 import com.zouitel.presentaion.screens.food.ImageUploadState
@@ -212,7 +211,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                 AddEditProductDialog(
                     product = selectedProductToEdit,
                     uploadState = imageUpload,
-                    onUploadImage = { image, token -> screenModel.uploadProductImage(image, token) },
+                    onUploadImage = { image -> screenModel.uploadProductImage(image) },
                     onUploadHandled = { screenModel.resetImageUpload() },
                     onDismiss = { showAddEditDialog = false },
                     onConfirm = { name, desc, price, cat, img, stock ->
@@ -258,7 +257,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
     private fun AddEditProductDialog(
         product: Product?,
         uploadState: ImageUploadState,
-        onUploadImage: (PickedImage, DriveTokenProvider) -> Unit,
+        onUploadImage: (PickedImage) -> Unit,
         onUploadHandled: () -> Unit,
         onDismiss: () -> Unit,
         onConfirm: (String, String, Double, String, String, Int) -> Unit
