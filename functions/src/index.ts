@@ -448,6 +448,7 @@ type RouteResult = {
   provider: "GOOGLE_ROUTES_API";
   distanceMeters: number;
   duration: string;
+  encodedPolyline: string;
 };
 
 const MAX_SAFE_CENTAVOS = Number.MAX_SAFE_INTEGER;
@@ -802,11 +803,21 @@ function calculateDeliveryFeeCentavos(distanceMeters: number, rule: DeliveryPric
   return Math.max(rule.minimumFeeCentavos, rounded);
 }
 
+function resolveRidePricingRule(config: PricingConfiguration, serviceType: string): RidePricingRule | null {
+  return config.rides[serviceType.toLowerCase()] ?? config.rides.ride ?? null;
+}
+
 function calculateRideFareCentavos(
   distanceMeters: number,
   rule: RidePricingRule,
   sharedRideChargeCentavos: number
-): { fareCentavos: number; optionalChargesCentavos: number } {
+): {
+  fareCentavos: number;
+  optionalChargesCentavos: number;
+  baseFareCentavos: number;
+  distanceChargeCentavos: number;
+  adjustmentCentavos: number;
+} {
   const perKm = roundPositiveRatio(
     BigInt(rule.pricePerKmCentavos) * BigInt(distanceMeters),
     1000n,
@@ -819,14 +830,15 @@ function calculateRideFareCentavos(
   if (!Number.isSafeInteger(optionalChargesCentavos)) {
     throw new HttpsError("failed-precondition", "Ride additional charges exceed the supported centavo range.");
   }
-  const rounded = roundCentavos(
-    rule.baseFareCentavos + perKm + optionalChargesCentavos,
-    rule.roundingIncrementCentavos,
-    rule.roundingMode
-  );
+  const unroundedTotal = rule.baseFareCentavos + perKm + optionalChargesCentavos;
+  const rounded = roundCentavos(unroundedTotal, rule.roundingIncrementCentavos, rule.roundingMode);
+  const fareCentavos = Math.max(rule.minimumFareCentavos, rounded);
   return {
-    fareCentavos: Math.max(rule.minimumFareCentavos, rounded),
+    fareCentavos,
     optionalChargesCentavos,
+    baseFareCentavos: rule.baseFareCentavos,
+    distanceChargeCentavos: perKm,
+    adjustmentCentavos: fareCentavos - unroundedTotal,
   };
 }
 
@@ -878,7 +890,7 @@ async function calculateGoogleRoute(
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline",
     },
     body: JSON.stringify({
       origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
@@ -905,10 +917,14 @@ async function calculateGoogleRoute(
   const firstRoute = asRecord(routes[0]);
   const distanceMeters = Number(firstRoute.distanceMeters);
   const duration = asString(firstRoute.duration);
+  const encodedPolyline = asString(asRecord(firstRoute.polyline).encodedPolyline);
   if (!Number.isSafeInteger(distanceMeters) || distanceMeters <= 0 || distanceMeters > 300000) {
     throw new HttpsError("failed-precondition", "The route service did not return a valid route distance.");
   }
-  return { provider: "GOOGLE_ROUTES_API", distanceMeters, duration };
+  if (!encodedPolyline) {
+    throw new HttpsError("failed-precondition", "The route service did not return road-route geometry.");
+  }
+  return { provider: "GOOGLE_ROUTES_API", distanceMeters, duration, encodedPolyline };
 }
 
 function closeCoordinate(left: number, right: number): boolean {
@@ -1087,7 +1103,7 @@ async function buildRouteQuote(
       if (!/^[a-z0-9_-]{2,24}$/.test(serviceType)) {
         throw new HttpsError("invalid-argument", "Invalid ride service type.");
       }
-      const rule = config.rides[serviceType];
+      const rule = resolveRidePricingRule(config, serviceType);
       if (!rule) {
         throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
       }
@@ -1098,6 +1114,13 @@ async function buildRouteQuote(
       snapshot = pricingSnapshot(config, "RIDES", route, {
         serviceType,
         optionalChargesCentavos: fare.optionalChargesCentavos,
+        fareBreakdown: {
+          baseFareCentavos: fare.baseFareCentavos,
+          distanceChargeCentavos: fare.distanceChargeCentavos,
+          additionalChargesCentavos: fare.optionalChargesCentavos,
+          adjustmentCentavos: fare.adjustmentCentavos,
+          totalCentavos: fare.fareCentavos,
+        },
       });
     }
 
@@ -1119,6 +1142,8 @@ async function buildRouteQuote(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routePolyline: route.encodedPolyline,
+      fareBreakdown: asRecord(snapshot.fareBreakdown),
       [feeKind]: feeKind === "deliveryFeeCentavos" ? deliveryFeeCentavos : amountCentavos,
       additionalChargesCentavos,
       amountCentavos,
@@ -1141,6 +1166,8 @@ async function buildRouteQuote(
       distanceMeters: route.distanceMeters,
       distanceKm: quote.distanceKm,
       routeDuration: route.duration,
+      routePolyline: route.encodedPolyline,
+      fareBreakdown: asRecord(snapshot.fareBreakdown),
       pricingVersion: config.version,
       expiresAtTimestamp: quote.expiresAtTimestamp,
     };
@@ -1565,6 +1592,7 @@ export const createOrderPayment = onCall(
         provider: "GOOGLE_ROUTES_API",
         distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
         duration: asString(quote.routeDuration),
+        encodedPolyline: asString(quote.routePolyline),
       };
       deliveryFeeCentavos = nonNegativeInteger(quote.deliveryFeeCentavos, "quoted delivery fee");
       savedPricingSnapshot = asRecord(quote.pricingSnapshot);
@@ -1672,6 +1700,7 @@ export const createOrderPayment = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routePolyline: route.encodedPolyline,
       pricingVersion: config.version,
       pricingQuoteId: pricingQuoteId || null,
       pricingSnapshot: savedPricingSnapshot,
@@ -1774,13 +1803,14 @@ export const createTripPayment = onCall(
         provider: "GOOGLE_ROUTES_API",
         distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
         duration: asString(quote.routeDuration),
+        encodedPolyline: asString(quote.routePolyline),
       };
       fareCentavos = nonNegativeInteger(quote.fareCentavos, "quoted ride fare");
       savedPricingSnapshot = asRecord(quote.pricingSnapshot);
-      rideRule = config.rides[serviceType];
+      rideRule = resolveRidePricingRule(config, serviceType);
     } else {
       config = await getCurrentPricingConfiguration();
-      rideRule = config.rides[serviceType];
+      rideRule = resolveRidePricingRule(config, serviceType);
       if (!rideRule) {
         throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
       }
@@ -1871,6 +1901,7 @@ export const createTripPayment = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routePolyline: route.encodedPolyline,
       pricingVersion: config.version,
       pricingQuoteId: pricingQuoteId || null,
       pricingSnapshot: savedPricingSnapshot,
@@ -1973,7 +2004,7 @@ export const createTrip = onCall(
     }
 
     const config = normalizePricingConfiguration(quote.pricingConfiguration);
-    const rideRule = config.rides[serviceType];
+    const rideRule = resolveRidePricingRule(config, serviceType);
     if (!rideRule) {
       throw new HttpsError("failed-precondition", "The quoted ride service no longer has a valid pricing snapshot.");
     }
@@ -1982,6 +2013,7 @@ export const createTrip = onCall(
       provider: "GOOGLE_ROUTES_API" as const,
       distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
       duration: asString(quote.routeDuration),
+      encodedPolyline: asString(quote.routePolyline),
     };
     const pricingSnapshotValue = asRecord(quote.pricingSnapshot);
     const optionalChargesCentavos = nonNegativeInteger(
@@ -2062,6 +2094,7 @@ export const createTrip = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routePolyline: route.encodedPolyline,
       pricingVersion: config.version,
       pricingQuoteId: quoteId,
       pricingSnapshot: pricingSnapshotValue,
@@ -2213,6 +2246,7 @@ export const claimTrip = onCall({ region: REGION }, async (request) => {
   const tripId = asString(asRecord(request.data).tripId);
   if (!/^[A-Za-z0-9_-]{12,80}$/.test(tripId)) throw new HttpsError("invalid-argument", "A valid trip ID is required.");
   const vehicle = asRecord(driver.vehicleInfo);
+  const driverVehicleType = asString(vehicle.type).toUpperCase();
   const vehicleName = [asString(vehicle.color), asString(vehicle.make), asString(vehicle.model)].filter(Boolean).join(" ");
   const plate = asString(vehicle.licensePlate);
   const ref = db.ref("trips/" + tripId);
@@ -2220,7 +2254,12 @@ export const claimTrip = onCall({ region: REGION }, async (request) => {
     if (!currentValue || typeof currentValue !== "object") return;
     const trip = asRecord(currentValue);
     const assigned = asString(trip.driverId);
-    if (asString(trip.status).toUpperCase() !== "REQUESTED" || (assigned && assigned !== uid)) return;
+    const requestedServiceType = asString(trip.serviceType).toUpperCase();
+    if (
+      asString(trip.status).toUpperCase() !== "REQUESTED" ||
+      (assigned && assigned !== uid) ||
+      (requestedServiceType && requestedServiceType !== "RIDE" && requestedServiceType !== driverVehicleType)
+    ) return;
     return { ...trip, driverId: uid, driverName: asString(profile.fullName) || "Driver", driverPhone: asString(profile.phoneNumber) || asString(profile.phone), vehicleDetails: [vehicleName, plate ? "(" + plate + ")" : ""].filter(Boolean).join(" "), status: "ACCEPTED" };
   });
   if (!tx.committed) throw new HttpsError("failed-precondition", "This ride request has already been accepted or is unavailable.");
