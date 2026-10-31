@@ -90,14 +90,18 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Payout account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text("GCash · " + wallet.payoutAccount.maskedAccountNumber.ifBlank { "Not added" })
-                        Text("Status: " + wallet.payoutAccount.status.replace('_', ' '))
+                        Text("Verification: " + wallet.payoutAccount.status.replace('_', ' '), fontWeight = FontWeight.SemiBold)
+                        if (wallet.payoutAccount.reviewNote.isNotBlank()) {
+                            Text("Administrator note: " + wallet.payoutAccount.reviewNote, color = MaterialTheme.colorScheme.error)
+                        }
                         Button(onClick = { navigator?.push(PayoutAccountScreen()) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Set up payout account")
+                            Text(if (wallet.payoutAccount.status == "VERIFIED") "View payout account" else "Set up / update payout account")
                         }
                         Button(
                             onClick = { screenModel.requestPayout() },
                             enabled = !state.isSubmitting && wallet.payoutAccount.status == "VERIFIED" &&
-                                wallet.availableCentavos >= 10_000L && wallet.pendingPayoutCentavos == 0L,
+                                wallet.availableCentavos >= 10_000L && wallet.pendingPayoutCentavos == 0L &&
+                                wallet.activePayoutRequest == null,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(if (state.isSubmitting) "Submitting…" else "Request payout")
@@ -107,7 +111,36 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
                     }
                 }
             }
-            item { Text("Recent payouts", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+            wallet.activePayoutRequest?.let { active ->
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Active payout request", fontWeight = FontWeight.Bold)
+                            Text("Request " + active.id.takeLast(8) + " · " + peso(active.amountCentavos).let { "₱$it" })
+                            Text("Status: " + active.status.replace('_', ' '))
+                            Text("Your requested amount is waiting for administrator review. Available earnings are not deducted until approval.")
+                        }
+                    }
+                }
+            }
+            item { Text("Payout request history", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+            if (wallet.payoutRequests.isEmpty()) {
+                item { Text("No payout requests yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            } else {
+                items(wallet.payoutRequests, key = { "request-" + it.id }) { request ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Request " + request.id.takeLast(8), fontWeight = FontWeight.Bold)
+                            Text("Amount: ₱" + peso(request.amountCentavos))
+                            Text("Status: " + request.status.replace('_', ' '))
+                            if (request.providerStatus.isNotBlank()) Text("Xendit status: " + request.providerStatus.replace('_', ' '))
+                            if (request.maskedAccountNumber.isNotBlank()) Text("Destination: " + request.maskedAccountNumber)
+                            if (request.rejectionNote.isNotBlank()) Text("Administrator note: " + request.rejectionNote, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+            item { Text("Payout transfer history", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
             if (wallet.payouts.isEmpty()) {
                 item { Text("No payouts recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             } else {
@@ -118,7 +151,8 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
                             Text("Amount: " + peso(payout.amountCentavos))
                             Text("Status: " + payout.status.replace('_', ' '))
                             if (payout.providerPayoutId.isNotBlank()) Text("Xendit reference: " + payout.providerPayoutId)
-                            if (payout.failureCode.isNotBlank()) Text("Failure: " + payout.failureCode, color = MaterialTheme.colorScheme.error)
+                            if (payout.failureCode.isNotBlank()) Text("Failure code: " + payout.failureCode, color = MaterialTheme.colorScheme.error)
+                            if (payout.failureMessage.isNotBlank()) Text("Failure details: " + payout.failureMessage, color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
