@@ -814,7 +814,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     }
                 }
             }
-            Text("This quote was calculated by Labmda from Google road distance and current administrator pricing. It is reserved for this route and ride type until it expires.",
+            Text("This quote was calculated by Labmda from Google road distance and current administrator pricing. It is reserved for this route and ride type until it expires. Route time is an estimate and does not include live traffic delays.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             PaymentMethodSelector(selectedMethod = selectedMethod, onMethodSelected = onMethodSelected, enabled = !isSubmitting)
             PayButton(
