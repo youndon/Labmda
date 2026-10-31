@@ -33,7 +33,11 @@ data class PaymentCreationResult(
 data class TrackingRouteResult(
     val distanceMeters: Long,
     val duration: String,
-    val encodedPolyline: String
+    val encodedPolyline: String,
+    val routeTo: String = "DROPOFF",
+    val deliveryStage: String = "",
+    val recipientName: String = "",
+    val recipientPhone: String = ""
 )
 
 /** Server quote for a food or goods order. Monetary fields are PHP centavos. */
@@ -164,16 +168,25 @@ class PaymentRepository {
     }
 
     /** Fetches a road route for live courier tracking; does not create a price quote. */
-    suspend fun getTrackingRoute(orderId: String): TrackingRouteResult {
+    suspend fun getTrackingRoute(orderId: String, audience: String = "CUSTOMER"): TrackingRouteResult {
         val response = functions.httpsCallable("getTrackingRoute")(
-            mapOf("orderId" to orderId)
+            mapOf("orderId" to orderId, "audience" to audience)
         )
         val result = response.data<Map<String, Any?>>()
         return TrackingRouteResult(
             distanceMeters = (result["distanceMeters"] as? Number)?.toLong() ?: 0L,
             duration = result["duration"] as? String ?: "",
-            encodedPolyline = result["encodedPolyline"] as? String ?: ""
+            encodedPolyline = result["encodedPolyline"] as? String ?: "",
+            routeTo = result["routeTo"] as? String ?: "DROPOFF",
+            deliveryStage = result["deliveryStage"] as? String ?: "",
+            recipientName = result["recipientName"] as? String ?: "",
+            recipientPhone = result["recipientPhone"] as? String ?: ""
         )
+    }
+
+    /** Confirm pickup through a server-authorized courier action. */
+    suspend fun markDeliveryPickedUp(orderId: String) {
+        functions.httpsCallable("markDeliveryPickedUp")(mapOf("orderId" to orderId))
     }
 
     /**
