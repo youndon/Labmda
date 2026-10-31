@@ -1118,11 +1118,34 @@ export const adminSetCommissionRules = onCall(
   }
 );
 
+const QUOTE_RATE_WINDOW_MS = 60 * 1000;
+const QUOTE_RATE_LIMIT = 10;
+
+/** Enforce a per-authenticated-user request budget before calling the billable Routes API. */
+async function enforceQuoteRateLimit(uid: string): Promise<void> {
+  const now = Date.now();
+  const ref = db.ref("quoteRateLimits/" + uid);
+  const transaction = await ref.transaction((rawValue) => {
+    const current = asRecord(rawValue);
+    const windowStartedAt = Number(current.windowStartedAt ?? 0);
+    const count = Number(current.count ?? 0);
+    if (!Number.isFinite(windowStartedAt) || now - windowStartedAt >= QUOTE_RATE_WINDOW_MS || now < windowStartedAt) {
+      return { windowStartedAt: now, count: 1, updatedAtTimestamp: now };
+    }
+    if (!Number.isSafeInteger(count) || count >= QUOTE_RATE_LIMIT) return;
+    return { windowStartedAt, count: count + 1, updatedAtTimestamp: now };
+  });
+  if (!transaction.committed) {
+    throw new HttpsError("resource-exhausted", "Too many ride or delivery quote requests. Please wait a moment and try again.");
+  }
+}
+
 async function buildRouteQuote(
   uid: string,
   data: Record<string, unknown>,
   forcedQuoteType?: "DELIVERY" | "RIDE"
 ): Promise<Record<string, unknown>> {
+    await enforceQuoteRateLimit(uid);
     const quoteType = forcedQuoteType ?? asString(data.quoteType).toUpperCase();
     if (quoteType !== "DELIVERY" && quoteType !== "RIDE") {
       throw new HttpsError("invalid-argument", "Quote type must be DELIVERY or RIDE.");
@@ -1233,13 +1256,34 @@ async function buildRouteQuote(
 }
 
 export const createPricingQuote = onCall(
-  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY], enforceAppCheck: true },
   async (request) => buildRouteQuote(requireUid(request), asRecord(request.data))
 );
 
 export const quoteTrip = onCall(
-  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY], enforceAppCheck: true },
   async (request) => buildRouteQuote(requireUid(request), asRecord(request.data), "RIDE")
+);
+
+/** Remove expired server-owned quotes in bounded batches so the quote node cannot grow indefinitely. */
+export const cleanupExpiredPricingQuotes = onSchedule(
+  { schedule: "every 15 minutes", timeZone: "Asia/Manila", region: REGION },
+  async () => {
+    const now = Date.now();
+    const expired = await db.ref("pricingQuotes")
+      .orderByChild("expiresAtTimestamp")
+      .endAt(now)
+      .limitToFirst(500)
+      .get();
+    const updates: Record<string, null> = {};
+    expired.forEach((child) => {
+      if (child.key) updates["pricingQuotes/" + child.key] = null;
+      return false;
+    });
+    const removedCount = Object.keys(updates).length;
+    if (removedCount > 0) await db.ref().update(updates);
+    logger.info("Expired pricing quotes cleaned up", { removedCount });
+  }
 );
 
 /** Returns a road route only for the signed-in customer of an active delivery order. */
