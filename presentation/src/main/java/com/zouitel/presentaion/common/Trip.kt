@@ -16,6 +16,9 @@ data class Trip(
     val dropoffLng: Double = 0.0,
     // Calculated in Cloud Functions from server-controlled pricing configuration.
     val fare: Double = 0.0,
+    val serviceType: String = "",
+    val routeDuration: String = "",
+    val routePolyline: String = "",
     val driverId: String = "",
     val driverName: String = "",
     val driverPhone: String = "",
