@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
 
