@@ -62,7 +62,8 @@ class ShopsScreenModel : ScreenModel {
                                 }.getOrDefault("PENDING")
                                 Shop(
                                     id = id,
-                                        name = runCatching { child.child("name").value<String>() }.getOrDefault(""),
+                                    ownerUid = ownerUid,
+                                    name = runCatching { child.child("name").value<String>() }.getOrDefault(""),
                                     description = runCatching { child.child("description").value<String>() }.getOrDefault(""),
                                     category = runCatching { child.child("category").value<String>() }.getOrDefault("General Store"),
                                     phone = runCatching { child.child("phone").value<String>() }.getOrDefault(""),
@@ -103,7 +104,6 @@ class ShopsScreenModel : ScreenModel {
 
                             val shop = Shop(
                                 id = id,
-                                ownerUid = ownerUid,
                                 name = name,
                                 description = description,
                                 category = category,
