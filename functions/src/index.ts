@@ -5539,6 +5539,23 @@ export const getMyWallet = onCall(
     const activePayoutRequest = activePayoutRequestSnapshot?.exists()
       ? asRecord(activePayoutRequestSnapshot.val())
       : null;
+    const payoutRequestSnapshot = await db.ref("payoutRequests").orderByChild("userId").equalTo(uid).limitToLast(25).get();
+    const payoutRequests: Record<string, unknown>[] = [];
+    payoutRequestSnapshot.forEach((child) => {
+      if (child.exists()) {
+        const payoutRequest = asRecord(child.val());
+        payoutRequests.push({
+          id: child.key,
+          amountCentavos: Number(payoutRequest.amountCentavos ?? 0),
+          status: asString(payoutRequest.status),
+          providerStatus: asString(payoutRequest.providerStatus),
+          createdAtTimestamp: Number(payoutRequest.createdAtTimestamp ?? 0),
+          updatedAtTimestamp: Number(payoutRequest.updatedAtTimestamp ?? 0),
+          maskedAccountNumber: asString(payoutRequest.maskedAccountNumber),
+        });
+      }
+      return false;
+    });
     const payoutSnapshot = await db.ref("payouts").orderByChild("userId").equalTo(uid).limitToLast(25).get();
     const payouts: Record<string, unknown>[] = [];
     payoutSnapshot.forEach((child) => {
@@ -5576,6 +5593,7 @@ export const getMyWallet = onCall(
         createdAtTimestamp: Number(activePayoutRequest.createdAtTimestamp ?? 0),
         updatedAtTimestamp: Number(activePayoutRequest.updatedAtTimestamp ?? 0),
       } : null,
+      payoutRequests: payoutRequests.sort((a, b) => Number(b.createdAtTimestamp) - Number(a.createdAtTimestamp)),
       payouts: payouts.sort((a, b) => Number(b.createdAtTimestamp) - Number(a.createdAtTimestamp)),
     };
   }
@@ -5822,16 +5840,33 @@ export const adminApprovePayoutRequest = onCall(
 
     try {
       const payout = await reserveAndSubmitPayout(uid, requestKey, false, amountCentavos, requestId);
-      const payoutStatus = asString(payout.status);
-      const requestStatus = payoutStatus === "SUCCEEDED" ? "PAID" : "PROCESSING";
+      const payoutStatus = asString(payout.status).toUpperCase();
+      const requestStatus = payoutStatus === "SUCCEEDED"
+        ? "PAID"
+        : ["FAILED", "REJECTED", "CANCELLED", "EXPIRED"].includes(payoutStatus)
+          ? "FAILED"
+          : payoutStatus === "REVERSED"
+            ? "REVERSED"
+            : "PROCESSING";
       await requestRef.update({
         status: requestStatus,
         payoutId: requestId,
         providerPayoutId: asString(payout.providerPayoutId),
+        providerStatus: payoutStatus,
         approvedBy: adminUid,
         approvedAtTimestamp: Date.now(),
         updatedAtTimestamp: Date.now(),
       });
+      if (requestStatus === "FAILED" || requestStatus === "REVERSED") {
+        await db.ref("wallets/" + uid).transaction((rawValue) => {
+          const currentWallet = asRecord(rawValue);
+          if (asString(currentWallet.activePayoutRequestId) !== requestId) return;
+          const nextWallet = { ...currentWallet };
+          delete nextWallet.activePayoutRequestId;
+          nextWallet.updatedAtTimestamp = Date.now();
+          return nextWallet;
+        });
+      }
       return {
         payoutRequestId: requestId,
         payoutId: requestId,
