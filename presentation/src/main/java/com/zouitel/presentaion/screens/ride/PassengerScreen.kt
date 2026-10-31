@@ -63,6 +63,7 @@ import com.zouitel.presentaion.payments.PaymentResultSheet
 import com.zouitel.presentaion.payments.PaymentScreenModel
 import org.koin.core.context.GlobalContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -205,6 +206,9 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 isQuotingRide = false
                 return@LaunchedEffect
             }
+            // Map taps and vehicle changes can arrive in quick succession. Wait for
+            // the selection to settle; LaunchedEffect cancellation drops superseded work.
+            delay(500)
             isQuotingRide = true
             try {
                 rideQuote = paymentRepository.quoteTrip(

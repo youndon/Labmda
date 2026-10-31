@@ -1,6 +1,9 @@
 package com.zouitel.labmda
 
 import android.app.Application
+import com.google.firebase.appcheck.FirebaseAppCheck
+import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
+import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -26,10 +29,16 @@ class LambdaApplication : Application(), KoinStartup, SingletonImageLoader.Facto
 
     override fun onCreate() {
         super.onCreate()
+        Firebase.initialize(this)
+        val appCheck = FirebaseAppCheck.getInstance()
+        if (BuildConfig.DEBUG) {
+            appCheck.installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
+        } else {
+            appCheck.installAppCheckProviderFactory(PlayIntegrityAppCheckProviderFactory.getInstance())
+        }
         KMPAuth.initialize {
             google("814762435029-63a565o3ub7d4ph32es0vugn5aoa79qs.apps.googleusercontent.com")
         }
-        Firebase.initialize(this)
     }
 
     // This configures the global ImageLoader and Caching behavior for Coil 3
