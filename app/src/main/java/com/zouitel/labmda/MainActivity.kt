@@ -4,6 +4,14 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
+import com.zouitel.presentaion.screens.account.AccountPreferencesStore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import org.koin.android.ext.android.inject
 import cafe.adriel.voyager.navigator.Navigator
 import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
@@ -14,6 +22,8 @@ import com.zouitel.presentaion.common.AppTheme
 import com.zouitel.presentaion.screens.account.LogInScreen
 
 class MainActivity : ComponentActivity() {
+    private val accountPreferencesStore: AccountPreferencesStore by inject()
+    private var darkModeEnabled by mutableStateOf(false)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -24,8 +34,13 @@ class MainActivity : ComponentActivity() {
         )
 
         enableEdgeToEdge()
+        lifecycleScope.launch {
+            accountPreferencesStore.preferences.collect { preferences ->
+                darkModeEnabled = preferences.darkModeEnabled
+            }
+        }
         setContent {
-            AppTheme {
+            AppTheme(darkTheme = darkModeEnabled) {
                 setSingletonImageLoaderFactory { context ->
                     ImageLoader.Builder(context)
                         .components { add(KtorNetworkFetcherFactory()) }
