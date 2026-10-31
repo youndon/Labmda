@@ -71,15 +71,6 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                 Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-            } else if (products.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No products added to your store yet. Tap + to add items.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(paddingValues),
