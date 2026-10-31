@@ -64,12 +64,14 @@ data class AdminPayoutRequestRow(
     val rejectionNote: String
 )
 data class AdminPayoutReviewRow(val userId:String,val status:String,val accountHolderName:String,val maskedAccountNumber:String,val reviewNote:String)
+data class AdminRefundRequestRow(val id:String,val entityType:String,val entityId:String,val customerId:String,val reason:String,val customerNote:String,val amountCentavos:Long,val status:String,val createdAtTimestamp:Long)
 data class AdminPaymentsDashboard(
     val payments:List<AdminPaymentRow> = emptyList(),
     val ledgerEntries:List<AdminLedgerRow> = emptyList(),
     val payouts:List<AdminPayoutRow> = emptyList(),
     val payoutRequests:List<AdminPayoutRequestRow> = emptyList(),
     val payoutAccountReviews:List<AdminPayoutReviewRow> = emptyList(),
+    val refundRequests:List<AdminRefundRequestRow> = emptyList(),
     val walletCount:Int=0,
     val availableCentavos:Long=0L,
     val pendingCentavos:Long=0L,
@@ -193,11 +195,14 @@ class WalletRepository {
         val reviews = rows(r["payoutAccountReviews"]).map {
             AdminPayoutReviewRow(it.s("userId"), it.s("status"), it.s("accountHolderName"), it.s("maskedAccountNumber"), it.s("reviewNote"))
         }
+        val refundRequests = rows(r["refundRequests"]).map {
+            AdminRefundRequestRow(it.s("requestId").ifBlank { it.s("id") }, it.s("entityType"), it.s("entityId"), it.s("customerId"), it.s("reason"), it.s("customerNote"), it.n("amountCentavos"), it.s("status"), it.n("createdAtTimestamp"))
+        }
         val wallets = rows(r["wallets"])
         val cash = rows(r["cashCollections"])
         return AdminPaymentsDashboard(
             payments = payments, ledgerEntries = ledger, payouts = payouts, payoutRequests = requests,
-            payoutAccountReviews = reviews, walletCount = wallets.size,
+            payoutAccountReviews = reviews, refundRequests = refundRequests, walletCount = wallets.size,
             availableCentavos = wallets.sumOf { it.n("availableCentavos") },
             pendingCentavos = wallets.sumOf { it.n("pendingCentavos") },
             cashOwedCentavos = wallets.sumOf { it.n("cashOwedCentavos") },
