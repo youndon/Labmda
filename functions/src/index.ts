@@ -2890,7 +2890,8 @@ export const requestPaymentRefund = onCall({ region: REGION }, async (request) =
   };
   const entityRequestRef = db.ref("refundRequestsByEntity/" + entityType + "_" + entityId);
   const reservation = await entityRequestRef.transaction((current) => {
-    if (current && typeof current === "object" && asString(asRecord(current).status) === "PENDING_REVIEW") return;
+    if (current && typeof current === "object" &&
+        ["PENDING_REVIEW", "REFUND_INITIATED"].includes(asString(asRecord(current).status))) return;
     return { requestId, customerId: uid, status: "PENDING_REVIEW", createdAtTimestamp: timestamp };
   });
   if (!reservation.committed) {
