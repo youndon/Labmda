@@ -164,7 +164,7 @@ class DeliveryDashboardScreen : Screen {
         var selectedTab by remember { mutableIntStateOf(0) }
         val selectedOrder = activeDeliveries.firstOrNull { it.id == selectedOrderId }
 
-        LaunchedEffect(selectedOrder?.id, courier) {
+        LaunchedEffect(selectedOrder?.id, selectedOrder?.deliveryStage, courier) {
             val orderId = selectedOrder?.id ?: return@LaunchedEffect
             while (true) {
                 screenModel.refreshCourierRoute(orderId)
