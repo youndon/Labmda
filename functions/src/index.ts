@@ -2484,6 +2484,9 @@ export const createGcashPayment = onCall(
     if (paymentOwnerId(entityType, entity) !== uid) {
       throw new HttpsError("permission-denied", "This payment does not belong to the signed-in customer.");
     }
+    if (asString(entity.paymentMethod).toUpperCase() !== "GCASH") {
+      throw new HttpsError("failed-precondition", "This order or trip was not created for GCash checkout.");
+    }
     const amountCentavos = paymentAmountCentavos(entityType, entity);
     const amount = phpFromCents(amountCentavos);
     const paymentRef = db.ref("payments/" + entityId);
