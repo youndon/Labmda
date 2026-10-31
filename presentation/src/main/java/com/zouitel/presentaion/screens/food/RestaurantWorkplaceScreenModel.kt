@@ -4,8 +4,7 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
-import com.zouitel.presentaion.common.DriveImageUploader
-import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.FirebaseImageUploader
 import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.Firebase
@@ -196,18 +195,17 @@ class RestaurantWorkplaceScreenModel(
     private var uploadJob: Job? = null
 
     /**
-     * Uploads the picked image to the signed-in user's Google Drive and exposes the link to
+     * Uploads the picked image to Firebase Storage and exposes the URL to
      * store/display via [imageUpload].
      */
-    fun uploadRestaurantImage(image: PickedImage, accessToken: DriveTokenProvider) {
+    fun uploadRestaurantImage(image: PickedImage) {
         if (_imageUpload.value is ImageUploadState.Uploading) return
         _imageUpload.value = ImageUploadState.Uploading
 
         uploadJob = screenModelScope.launch {
             try {
-                val url = DriveImageUploader.upload(
+                val url = FirebaseImageUploader.upload(
                     bytes = image.readBytes(),
-                    accessToken = accessToken(),
                     label = "restaurant-cover"
                 )
                 _imageUpload.value = ImageUploadState.Success(url)
