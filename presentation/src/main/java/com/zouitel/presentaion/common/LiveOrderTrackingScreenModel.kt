@@ -158,12 +158,7 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                 if (destination.dropoffLat == 0.0 && destination.dropoffLng == 0.0) return@collectLatest
                 _routeLoading.value = true
                 try {
-                    val route: TrackingRouteResult = paymentRepository.getTrackingRoute(
-                        pickupLat = location.latitude,
-                        pickupLng = location.longitude,
-                        dropoffLat = destination.dropoffLat,
-                        dropoffLng = destination.dropoffLng
-                    )
+                    val route: TrackingRouteResult = paymentRepository.getTrackingRoute(orderId)
                     _trackingRoute.value = OrderTrackingRoute(route.encodedPolyline, route.distanceMeters, route.duration)
                 } catch (_: Exception) {
                     // Retain the last valid road route if a refresh fails.
