@@ -1,40 +1,42 @@
 package com.zouitel.presentaion.screens.account
 
-import androidx.compose.foundation.clickable
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.screen.Screen
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
-import com.zouitel.presentaion.screens.MainScreen
 
 class SettingsScreen : Screen {
-
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val rootNavigator = navigator.parent ?: navigator
+        val model = koinScreenModel<AccountPreferencesScreenModel>()
+        val preferences by model.preferences.collectAsState()
+        var showLanguageDialog by remember { mutableStateOf(false) }
 
-        var isDriverMode by remember { mutableStateOf(true) }
-        var notificationsEnabled by remember { mutableStateOf(true) }
-        var darkModeEnabled by remember { mutableStateOf(false) }
+        LaunchedEffect(preferences.language) {
+            val locales = if (preferences.language == "system") {
+                LocaleListCompat.getEmptyLocaleList()
+            } else {
+                LocaleListCompat.forLanguageTags(preferences.language)
+            }
+            AppCompatDelegate.setApplicationLocales(locales)
+        }
 
         Scaffold(
             topBar = {
@@ -49,95 +51,96 @@ class SettingsScreen : Screen {
             }
         ) { innerPadding ->
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
                 contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // --- Preferences Group ---
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Preferences",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
+                    Text("Preferences", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+                item {
+                    SettingsCard {
+                        SettingsSwitchRow(
+                            icon = Icons.Filled.NotificationsNone,
+                            label = "Push Notifications",
+                            checked = preferences.notificationsEnabled,
+                            onCheckedChange = model::setNotificationsEnabled
                         )
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                        ) {
-                            Column {
-                                SettingsSwitchRow(
-                                    icon = Icons.Filled.DirectionsCar,
-                                    label = "Driver / Courier Mode",
-                                    checked = isDriverMode,
-                                    onCheckedChange = { newMode ->
-                                        isDriverMode = newMode
-                                        rootNavigator.replaceAll(MainScreen())
-                                    }
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                SettingsSwitchRow(
-                                    icon = Icons.Filled.NotificationsNone,
-                                    label = "Push Notifications",
-                                    checked = notificationsEnabled,
-                                    onCheckedChange = { notificationsEnabled = it }
-                                )
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                SettingsSwitchRow(
-                                    icon = Icons.Filled.DarkMode,
-                                    label = "Dark Mode Theme",
-                                    checked = darkModeEnabled,
-                                    onCheckedChange = { darkModeEnabled = it }
-                                )
-                            }
+                        HorizontalDivider()
+                        SettingsSwitchRow(
+                            icon = Icons.Filled.DarkMode,
+                            label = "Dark Mode Theme",
+                            checked = preferences.darkModeEnabled,
+                            onCheckedChange = model::setDarkModeEnabled
+                        )
+                    }
+                }
+                item {
+                    Text("General & Privacy", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                }
+                item {
+                    SettingsCard {
+                        SettingsNavigationRow(Icons.Filled.Language, "App Language", preferences.languageLabel()) {
+                            showLanguageDialog = true
+                        }
+                        HorizontalDivider()
+                        SettingsNavigationRow(Icons.Filled.Lock, "Privacy & Security", "Manage app permissions and account safety") {
+                            navigator.push(PrivacySecurityScreen())
+                        }
+                        HorizontalDivider()
+                        SettingsNavigationRow(Icons.Filled.Info, "About Labmda", "App version and information") {
+                            navigator.push(AboutAppScreen())
                         }
                     }
                 }
-
-                // --- General & Privacy Group ---
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "General & About",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                        ) {
-                            Column {
-                                GroupedSettingsRow(Icons.Filled.Lock, "Privacy & Security") { /* TODO */ }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                GroupedSettingsRow(Icons.Filled.Language, "App Language") { /* TODO */ }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                GroupedSettingsRow(Icons.Filled.Info, "About RideGo") { /* TODO */ }
-                            }
-                        }
-                    }
+                    Text(
+                        "Preferences are saved on this device. Some app text may remain in English until translated resources are added.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
+        }
+
+        if (showLanguageDialog) {
+            AlertDialog(
+                onDismissRequest = { showLanguageDialog = false },
+                title = { Text("App language") },
+                text = {
+                    Column {
+                        listOf("system" to "System default", "en" to "English").forEach { (code, label) ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable { model.setLanguage(code); showLanguageDialog = false }.padding(vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = preferences.language == code, onClick = {
+                                    model.setLanguage(code)
+                                    showLanguageDialog = false
+                                })
+                                Text(label, modifier = Modifier.padding(start = 10.dp))
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showLanguageDialog = false }) { Text("Close") } }
+            )
         }
     }
 }
 
+private fun AccountPreferences.languageLabel(): String = when (language) {
+    "en" -> "English"
+    else -> "System default"
+}
+
 @Composable
-private fun GroupedSettingsRow(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-    }
+private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) { Column(content = content) }
 }
 
 @Composable
@@ -147,15 +150,21 @@ private fun SettingsSwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(label, modifier = Modifier.weight(1f).padding(horizontal = 14.dp), style = MaterialTheme.typography.bodyMedium)
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(icon: ImageVector, label: String, subtitle: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
+        Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.Filled.ChevronRight, contentDescription = null)
     }
 }
