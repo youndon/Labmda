@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -153,7 +154,7 @@ internal fun MarketplaceEmptyState(
     message: String
 ) {
     Column(
-        modifier = Modifier.padding(horizontal = 28.dp, vertical = 44.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 44.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
