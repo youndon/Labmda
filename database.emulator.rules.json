@@ -280,6 +280,17 @@
         ".read": "auth != null && (auth.uid === $uid || auth.token.admin === true)",
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "payoutRequests": {
+      ".read": "auth != null && (auth.token.admin === true || (query.orderByChild === 'userId' && query.equalTo === auth.uid))",
+      ".write": false,
+      ".indexOn": [
+        "userId"
+      ],
+      "$requestId": {
+        ".read": "auth != null && (auth.token.admin === true || data.child('userId').val() === auth.uid)",
+        ".write": false
+      }
     }
   }
 }
