@@ -39,6 +39,9 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
     private val _passengerInfo = MutableStateFlow(PassengerInfo())
     val passengerInfo: StateFlow<PassengerInfo> = _passengerInfo.asStateFlow()
 
+    private val _refundNotice = MutableStateFlow<String?>(null)
+    val refundNotice: StateFlow<String?> = _refundNotice.asStateFlow()
+
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -224,7 +227,16 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
 
     fun cancelTrip(tripId: String) {
         screenModelScope.launch {
-            serviceActions.transitionTripStatus(tripId, "CANCELLED")
+            runCatching { serviceActions.transitionTripStatus(tripId, "CANCELLED") }
+                .onFailure { _refundNotice.value = it.message ?: "Could not cancel this trip." }
+        }
+    }
+
+    fun requestRefund(tripId: String) {
+        screenModelScope.launch {
+            runCatching { serviceActions.requestPaymentRefund("TRIP", tripId, UUID.randomUUID().toString()) }
+                .onSuccess { _refundNotice.value = "Refund request submitted for administrator review. Your trip has not been cancelled." }
+                .onFailure { _refundNotice.value = it.message ?: "Could not submit refund request." }
         }
     }
 }

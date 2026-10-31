@@ -140,6 +140,33 @@ class AdminPaymentsScreen : Screen {
                     }
                 }
 
+                Text("Customer GCash refund requests", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (dashboard.refundRequests.isEmpty()) {
+                    Text("No customer refund requests are waiting for review.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                dashboard.refundRequests.forEach { refund ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(refund.entityType + " · " + refund.entityId, fontWeight = FontWeight.Bold)
+                            Text("Customer: " + refund.customerId)
+                            Text("Requested amount: ₱" + peso(refund.amountCentavos))
+                            Text("Reason: " + refund.reason.replace('_', ' '))
+                            if (refund.customerNote.isNotBlank()) Text("Customer note: " + refund.customerNote)
+                            Text("Status: " + refund.status.replace('_', ' '))
+                            OutlinedButton(
+                                onClick = { model.refund(refund.entityType, refund.entityId) },
+                                enabled = !state.isSubmitting,
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("Start Xendit refund") }
+                            Text(
+                                "This starts the provider refund. The request itself does not cancel the order or trip.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
                 Text("Payout transfer history", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 if (dashboard.payouts.isEmpty()) Text("No payout transfers recorded.")
                 dashboard.payouts.forEach { payout ->

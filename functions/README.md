@@ -664,3 +664,12 @@ case have been confirmed.
 specific marketplace model is approved for the Labmda account, and the dedicated security and
 end-to-end testing phases have passed. Public API documentation confirms technical endpoints;
 it cannot confirm the commercial approval or permissions on an individual Xendit account.
+
+
+## Customer GCash refund requests
+
+Customers can call `requestPaymentRefund` for their own Xendit GCash order or ride after the payment is confirmed as `PAID` (or `PARTIALLY_REFUNDED`). The callable verifies Firebase Auth ownership, the entity payment method, and the server-owned Xendit payment record. It creates a `refundRequests/{requestId}` record in `PENDING_REVIEW`; it does not cancel the order/trip and does not contact Xendit.
+
+A single active request is allowed per payment. Administrators can review pending requests in the Admin Payments screen and start the provider refund through the existing admin-only `refundPayment` callable. Starting the provider refund moves the request to `REFUND_INITIATED`; the Xendit refund webhook/reconciliation remains authoritative for the final refund result.
+
+Paid GCash orders and trips cannot be cancelled through `transitionOrderStatus` or `transitionTripStatus`. The cancellation guard checks both the entity payment status and the server-owned payment record so a stale entity status cannot bypass it.

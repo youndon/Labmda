@@ -2118,7 +2118,13 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
       await requireApprovedMerchant(uid, order);
       from = ["PLACED", "ACCEPTED", "PREPARING"];
     } else throw new HttpsError("permission-denied", "Only the customer or assigned merchant can cancel this order.");
-    if (method === "GCASH" && paymentStatus === "PAID") throw new HttpsError("failed-precondition", "A paid GCash order must go through the administrator refund process before cancellation.");
+    if (method === "GCASH") {
+      const payment = asRecord((await db.ref("payments/" + orderId).get()).val());
+      if (paymentStatus === "PAID" || asString(payment.status).toUpperCase() === "PAID" ||
+          asString(payment.status).toUpperCase() === "PARTIALLY_REFUNDED") {
+        throw new HttpsError("failed-precondition", "A paid GCash order cannot be cancelled. Submit a refund request for administrator review.");
+      }
+    }
   } else if (["ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY"].includes(next)) {
     if (asString(order.sourceId) !== uid && asString(order.merchantId) !== uid) throw new HttpsError("permission-denied", "Only this order's merchant can update its preparation status.");
     await requireApprovedMerchant(uid, order);
@@ -2250,7 +2256,13 @@ export const transitionTripStatus = onCall({ region: REGION }, async (request) =
   if (next === "CANCELLED") {
     if (asString(trip.passengerId) !== uid) throw new HttpsError("permission-denied", "Only the passenger can cancel this ride.");
     from = ["REQUESTED", "ACCEPTED"];
-    if (asString(trip.paymentStatus).toUpperCase() === "PAID") throw new HttpsError("failed-precondition", "A paid GCash ride must go through the administrator refund process before cancellation.");
+    if (asString(trip.paymentMethod).toUpperCase() === "GCASH") {
+      const payment = asRecord((await db.ref("payments/" + tripId).get()).val());
+      if (asString(trip.paymentStatus).toUpperCase() === "PAID" ||
+          ["PAID", "PARTIALLY_REFUNDED"].includes(asString(payment.status).toUpperCase())) {
+        throw new HttpsError("failed-precondition", "A paid GCash ride cannot be cancelled. Submit a refund request for administrator review.");
+      }
+    }
   } else if (next === "ARRIVED" || next === "IN_PROGRESS") {
     if (asString(trip.driverId) !== uid) throw new HttpsError("permission-denied", "Only the assigned driver can update this ride.");
     await requireApprovedDriver(uid);
@@ -2829,6 +2841,85 @@ export const createGcashPayment = onCall(
   }
 );
 
+export const requestPaymentRefund = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  const data = asRecord(request.data);
+  const entityType = parseGcashEntityType(data.entityType);
+  const entityId = asString(data.entityId);
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(entityId)) {
+    throw new HttpsError("invalid-argument", "A valid order or trip ID is required.");
+  }
+  const idempotencyKey = parseIdempotencyKey(data.idempotencyKey);
+  const reason = asString(data.reason).toUpperCase() || "REQUESTED_BY_CUSTOMER";
+  const allowedReasons = ["REQUESTED_BY_CUSTOMER", "ORDER_NOT_RECEIVED", "WRONG_ITEMS", "DAMAGED_ITEMS", "DUPLICATE_PAYMENT", "OTHER"];
+  if (!allowedReasons.includes(reason)) throw new HttpsError("invalid-argument", "Choose a supported refund reason.");
+  const entityPath = entityType === "ORDER" ? "orders/" : "trips/";
+  const entitySnapshot = await db.ref(entityPath + entityId).get();
+  if (!entitySnapshot.exists()) throw new HttpsError("not-found", "The order or trip was not found.");
+  const entity = asRecord(entitySnapshot.val());
+  const ownerId = entityType === "ORDER" ? asString(entity.clientId) : asString(entity.passengerId);
+  if (ownerId !== uid) throw new HttpsError("permission-denied", "Only the customer who paid for this order or ride can request its refund.");
+  if (asString(entity.paymentMethod).toUpperCase() !== "GCASH") {
+    throw new HttpsError("failed-precondition", "Refund requests are available only for GCash payments.");
+  }
+  const paymentSnapshot = await db.ref("payments/" + entityId).get();
+  if (!paymentSnapshot.exists()) throw new HttpsError("failed-precondition", "The payment record is missing.");
+  const payment = asRecord(paymentSnapshot.val());
+  if (asString(payment.provider).toUpperCase() !== "XENDIT" ||
+      !["PAID", "PARTIALLY_REFUNDED"].includes(asString(payment.status).toUpperCase()) ||
+      !asString(payment.providerPaymentId)) {
+    throw new HttpsError("failed-precondition", "Only a confirmed, refundable GCash payment can be submitted for review.");
+  }
+  const requestId = createHash("sha256").update(uid + "|" + entityType + "|" + entityId + "|" + idempotencyKey).digest("hex").slice(0, 32);
+  const requestRef = db.ref("refundRequests/" + requestId);
+  const existing = await requestRef.get();
+  if (existing.exists()) {
+    const saved = asRecord(existing.val());
+    if (asString(saved.customerId) !== uid) throw new HttpsError("permission-denied", "This refund request key is already in use.");
+    return { requestId, status: asString(saved.status), reused: true };
+  }
+  const timestamp = Date.now();
+  const record = {
+    requestId, entityType, entityId, customerId: uid,
+    paymentProvider: "XENDIT",
+    providerPaymentId: asString(payment.providerPaymentId),
+    amountCentavos: Number(payment.amountCentavos ?? 0),
+    refundedCentavos: Number(payment.refundedCentavos ?? 0),
+    currency: "PHP", reason, customerNote: asString(data.note).slice(0, 1000),
+    status: "PENDING_REVIEW", createdAtTimestamp: timestamp, updatedAtTimestamp: timestamp,
+  };
+  const entityRequestRef = db.ref("refundRequestsByEntity/" + entityType + "_" + entityId);
+  const reservation = await entityRequestRef.transaction((current) => {
+    if (current && typeof current === "object" &&
+        ["PENDING_REVIEW", "REFUND_INITIATED"].includes(asString(asRecord(current).status))) return;
+    return { requestId, customerId: uid, status: "PENDING_REVIEW", createdAtTimestamp: timestamp };
+  });
+  if (!reservation.committed) {
+    const active = asRecord(reservation.snapshot.val());
+    if (asString(active.customerId) !== uid) throw new HttpsError("failed-precondition", "A refund request for this payment is already under review.");
+    return { requestId: asString(active.requestId), status: asString(active.status), reused: true };
+  }
+  await requestRef.set(record);
+  await db.ref("refundRequestsByUser/" + uid + "/" + requestId).set({
+    entityType, entityId, status: "PENDING_REVIEW", createdAtTimestamp: timestamp,
+  });
+  return { requestId, status: "PENDING_REVIEW", reused: false };
+});
+
+async function markCustomerRefundRequest(entityType: GcashEntityType, entityId: string, refundId: string, refundStatus: string): Promise<void> {
+  const indexSnapshot = await db.ref("refundRequestsByEntity/" + entityType + "_" + entityId).get();
+  const requestId = asString(asRecord(indexSnapshot.val()).requestId);
+  if (!requestId) return;
+  await db.ref("refundRequests/" + requestId).update({
+    status: "REFUND_INITIATED", providerRefundId: refundId,
+    providerRefundStatus: refundStatus, updatedAtTimestamp: Date.now(),
+  });
+  const saved = asRecord((await db.ref("refundRequests/" + requestId).get()).val());
+  await db.ref("refundRequestsByUser/" + asString(saved.customerId) + "/" + requestId).update({
+    status: "REFUND_INITIATED", updatedAtTimestamp: Date.now(),
+  });
+}
+
 export const refundPayment = onCall(
   { region: REGION, secrets: [XENDIT_SECRET_KEY] },
   async (request) => {
@@ -2864,6 +2955,7 @@ export const refundPayment = onCall(
       existingRefund.providerRefundId &&
       ["PENDING", "SUCCEEDED", "FAILED"].includes(asString(existingRefund.status))
     ) {
+      await markCustomerRefundRequest(entityType, entityId, asString(existingRefund.providerRefundId), asString(existingRefund.status));
       return {
         entityId,
         refundId: asString(existingRefund.providerRefundId),
@@ -2951,6 +3043,7 @@ export const refundPayment = onCall(
     const savedAfterReservation = asRecord(reservation.snapshot.val());
     const savedRefund = asRecord(asRecord(savedAfterReservation.refunds)[refundAttemptId]);
     if (asString(savedRefund.providerRefundId)) {
+      await markCustomerRefundRequest(entityType, entityId, asString(savedRefund.providerRefundId), asString(savedRefund.status));
       return {
         entityId,
         refundId: asString(savedRefund.providerRefundId),
@@ -3046,6 +3139,7 @@ export const refundPayment = onCall(
         });
       }
 
+      await markCustomerRefundRequest(entityType, entityId, providerRefundId, refundStatus);
       return {
         entityId,
         refundId: providerRefundId,
@@ -6264,7 +6358,7 @@ export const getAdminPaymentDashboard = onCall(
   { region: REGION },
   async (request) => {
     requireAdmin(request);
-    const [payments, ledger, payouts, payoutRequests, wallets, accountReviews, cashCollections] = await Promise.all([
+    const [payments, ledger, payouts, payoutRequests, wallets, accountReviews, cashCollections, refundRequests] = await Promise.all([
       db.ref("payments").limitToLast(100).get(),
       db.ref("ledger").limitToLast(100).get(),
       db.ref("payouts").limitToLast(100).get(),
@@ -6272,6 +6366,7 @@ export const getAdminPaymentDashboard = onCall(
       db.ref("wallets").limitToLast(100).get(),
       db.ref("payoutAccountReviews").limitToLast(100).get(),
       db.ref("cashCollections").limitToLast(100).get(),
+      db.ref("refundRequests").orderByChild("status").equalTo("PENDING_REVIEW").limitToLast(100).get(),
     ]);
     const values = (snapshot: DataSnapshot): Record<string, unknown>[] => {
       const output: Record<string, unknown>[] = [];
@@ -6298,6 +6393,7 @@ export const getAdminPaymentDashboard = onCall(
       })),
       payoutAccountReviews: values(accountReviews),
       cashCollections: values(cashCollections),
+      refundRequests: values(refundRequests),
     };
   }
 );
