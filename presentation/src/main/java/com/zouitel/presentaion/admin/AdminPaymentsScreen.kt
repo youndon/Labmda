@@ -24,17 +24,23 @@ class AdminPaymentsScreen : Screen {
         val state by model.state.collectAsState()
         val dashboard = state.dashboard
         var reviewNote by remember { mutableStateOf("") }
+        var rejectionNote by remember { mutableStateOf("") }
+
         Scaffold(topBar = {
             TopAppBar(
                 title = { Text("Payments, Wallets & Payouts", fontWeight = FontWeight.Bold) },
                 navigationIcon = { IconButton(onClick = { navigator?.pop() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } }
             )
         }) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
                 if (state.isLoading) CircularProgressIndicator()
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
                 OutlinedButton(onClick = model::refresh, modifier = Modifier.fillMaxWidth()) { Text("Refresh") }
+
                 Text("Wallet snapshot totals", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 Metric("Wallets", dashboard.walletCount.toString())
                 Metric("Available earnings", "₱" + peso(dashboard.availableCentavos))
@@ -45,7 +51,63 @@ class AdminPaymentsScreen : Screen {
                 Metric("Recorded GCash commissions", "₱" + peso(dashboard.platformCommissionCentavos))
                 Metric("Refund recovery outstanding", "₱" + peso(dashboard.refundDebtCentavos))
 
-                Text("Payout-account reviews", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Pending payout requests", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                val pendingRequests = dashboard.payoutRequests.filter { it.status == "PENDING_ADMIN_APPROVAL" }
+                if (pendingRequests.isEmpty()) {
+                    Text("No payout requests are waiting for approval.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    pendingRequests.forEach { payout ->
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Request " + payout.id, fontWeight = FontWeight.Bold)
+                                Text("Participant: " + payout.userId)
+                                Text("Requested: ₱" + peso(payout.amountCentavos))
+                                Text("Destination: " + payout.accountChannelCode + " · " + payout.maskedAccountNumber)
+                                Text("Submitted: " + payout.createdAtTimestamp.toString())
+                                OutlinedTextField(
+                                    rejectionNote,
+                                    { rejectionNote = it },
+                                    label = { Text("Rejection note (optional)") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !state.isSubmitting
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { model.approvePayoutRequest(payout.id) },
+                                        enabled = !state.isSubmitting,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text(if (state.isSubmitting) "Working…" else "Approve & send") }
+                                    OutlinedButton(
+                                        onClick = { model.rejectPayoutRequest(payout.id, rejectionNote) },
+                                        enabled = !state.isSubmitting,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("Reject") }
+                                }
+                                Text(
+                                    "Approval submits the requested amount to Xendit. Verify the recipient and amount before approving.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Text("Payout request history", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (dashboard.payoutRequests.isEmpty()) Text("No payout requests recorded.")
+                dashboard.payoutRequests.filter { it.status != "PENDING_ADMIN_APPROVAL" }.forEach { payout ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Request " + payout.id, fontWeight = FontWeight.Bold)
+                            Text("Participant: " + payout.userId)
+                            Text("₱" + peso(payout.amountCentavos) + " · " + payout.status.replace('_', ' '))
+                            if (payout.maskedAccountNumber.isNotBlank()) Text("Destination: " + payout.maskedAccountNumber)
+                            if (payout.rejectionNote.isNotBlank()) Text("Admin note: " + payout.rejectionNote, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+
+                Text("Payout-account verification", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 if (dashboard.payoutAccountReviews.isEmpty()) Text("No payout accounts queued for review.")
                 dashboard.payoutAccountReviews.forEach { item ->
                     Card(Modifier.fillMaxWidth()) {
@@ -55,17 +117,31 @@ class AdminPaymentsScreen : Screen {
                             Text("Status: " + item.status.replace('_', ' '))
                             if (item.reviewNote.isNotBlank()) Text(item.reviewNote)
                             if (item.status == "PENDING_REVIEW") {
-                                OutlinedTextField(reviewNote, { reviewNote = it }, label = { Text("Review note") }, modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(
+                                    reviewNote, { reviewNote = it },
+                                    label = { Text("Verification note") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !state.isSubmitting
+                                )
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(onClick = { model.review(item.userId, true, reviewNote) }, enabled = !state.isSubmitting, modifier = Modifier.weight(1f)) { Text("Verify") }
-                                    OutlinedButton(onClick = { model.review(item.userId, false, reviewNote) }, enabled = !state.isSubmitting, modifier = Modifier.weight(1f)) { Text("Reject") }
+                                    Button(
+                                        onClick = { model.review(item.userId, true, reviewNote) },
+                                        enabled = !state.isSubmitting,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("Verify") }
+                                    OutlinedButton(
+                                        onClick = { model.review(item.userId, false, reviewNote) },
+                                        enabled = !state.isSubmitting,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("Reject") }
                                 }
                             }
                         }
                     }
                 }
 
-                Text("Payout records", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Payout transfer history", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (dashboard.payouts.isEmpty()) Text("No payout transfers recorded.")
                 dashboard.payouts.forEach { payout ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -74,7 +150,8 @@ class AdminPaymentsScreen : Screen {
                             Text(payout.maskedAccountNumber + " · ₱" + peso(payout.amountCentavos))
                             Text("Provider status: " + payout.status.replace('_', ' '))
                             if (payout.providerPayoutId.isNotBlank()) Text("Xendit ID: " + payout.providerPayoutId)
-                            if (payout.failureCode.isNotBlank()) Text(payout.failureCode, color = MaterialTheme.colorScheme.error)
+                            if (payout.failureCode.isNotBlank()) Text("Failure code: " + payout.failureCode, color = MaterialTheme.colorScheme.error)
+                            if (payout.failureMessage.isNotBlank()) Text("Failure details: " + payout.failureMessage, color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -102,9 +179,11 @@ class AdminPaymentsScreen : Screen {
                             }
                             if (payment.refundStatus.isNotBlank()) Text("Refund state: " + payment.refundStatus.replace('_', ' '))
                             if (payment.provider == "XENDIT" && payment.status in setOf("PAID", "PARTIALLY_REFUNDED")) {
-                                OutlinedButton(onClick = { model.refund(payment.entityType, payment.id) }, enabled = !state.isSubmitting, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Request remaining refund")
-                                }
+                                OutlinedButton(
+                                    onClick = { model.refund(payment.entityType, payment.id) },
+                                    enabled = !state.isSubmitting,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Request remaining refund") }
                             }
                         }
                     }
