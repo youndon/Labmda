@@ -31,6 +31,7 @@ class ShopActivitiesScreen : Screen {
         val screenModel = rememberScreenModel { ShopActivitiesScreenModel() }
         val activities by screenModel.activities.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val refundNotice by screenModel.refundNotice.collectAsState()
 
         Scaffold(
             topBar = {
@@ -63,11 +64,13 @@ class ShopActivitiesScreen : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    item { refundNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary) } }
                     items(activities, key = { it.id }) { order ->
                         ClientActivityCard(
                             order = order,
                             onTrackOrder = { navigator?.push(LiveOrderTrackingScreen(order.id)) },
-                            onCancelOrder = { screenModel.cancelShopOrder(order.id) }
+                            onCancelOrder = { screenModel.cancelShopOrder(order.id) },
+                            onRequestRefund = { screenModel.requestRefund(order.id) }
                         )
                     }
                 }
@@ -76,7 +79,7 @@ class ShopActivitiesScreen : Screen {
     }
 
     @Composable
-    private fun ClientActivityCard(order: Order, onTrackOrder: () -> Unit, onCancelOrder: () -> Unit) {
+    private fun ClientActivityCard(order: Order, onTrackOrder: () -> Unit, onCancelOrder: () -> Unit, onRequestRefund: () -> Unit) {
         val formattedDate = remember(order.createdAtTimestamp) {
             val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
             sdf.format(Date(order.createdAtTimestamp))
@@ -140,7 +143,16 @@ class ShopActivitiesScreen : Screen {
                         Text("Track Status", fontWeight = FontWeight.Bold)
                     }
 
-                    if (order.status == OrderStatus.PLACED) {
+                    if (order.paymentMethod.equals("GCASH", ignoreCase = true) &&
+                        order.paymentStatus.equals("PAID", ignoreCase = true) &&
+                        order.status != OrderStatus.CANCELLED) {
+                        OutlinedButton(
+                            onClick = onRequestRefund,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) { Text("Request refund", fontWeight = FontWeight.Bold) }
+                    }
+                    if (order.status == OrderStatus.PLACED && !order.paymentStatus.equals("PAID", ignoreCase = true)) {
                         OutlinedButton(
                             onClick = onCancelOrder,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
