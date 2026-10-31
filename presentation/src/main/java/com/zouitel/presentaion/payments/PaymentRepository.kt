@@ -246,9 +246,7 @@ class PaymentRepository {
                     distanceChargeCentavos = (values["distanceChargeCentavos"] as? Number)?.toLong() ?: 0L,
                     additionalChargesCentavos = (values["additionalChargesCentavos"] as? Number)?.toLong() ?: 0L,
                     adjustmentCentavos = (values["adjustmentCentavos"] as? Number)?.toLong() ?: 0L,
-                    totalCentavos = (values["totalCentavos"] as? Number)?.toLong()
-                        ?: (values["totalCentavos"] as? Number)?.toLong()
-                        ?: 0L
+                    totalCentavos = (values["totalCentavos"] as? Number)?.toLong() ?: 0L
                 )
             }
         )
