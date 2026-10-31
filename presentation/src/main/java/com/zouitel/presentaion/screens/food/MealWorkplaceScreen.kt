@@ -95,9 +95,7 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
                     ImagePicker(
                         imageUrl = imageUrl,
                         uploadState = imageUpload,
-                        onImagePicked = { image, token ->
-                            screenModel.uploadMealImage(image, token)
-                        },
+                        onImagePicked = { image -> screenModel.uploadMealImage(image) },
                         emptyLabel = "Add a meal photo",
                         contentDescription = "Meal photo"
                     )
