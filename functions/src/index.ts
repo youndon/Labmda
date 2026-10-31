@@ -2518,21 +2518,51 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
   if (next === "ACCEPTED") {
     // Claim the order before touching inventory so concurrent merchant actions cannot
     // reserve the same stock twice. ACCEPTING is recoverable if the function is retried.
-    const claim = await ref.child("status").transaction((value) => {
-      const status = asString(value).toUpperCase();
-      return status === "PLACED" || status === "ACCEPTING" ? "ACCEPTING" : undefined;
+    const claimToken = Date.now().toString(36) + "_" + uid;
+    const claim = await ref.transaction((rawValue) => {
+      if (!rawValue || typeof rawValue !== "object") return;
+      const latest = asRecord(rawValue);
+      const latestStatus = asString(latest.status).toUpperCase();
+      const leaseStartedAt = Number(latest.stockReservationStartedAt ?? 0);
+      const staleAcceptingLease = latestStatus === "ACCEPTING" &&
+        leaseStartedAt > 0 && Date.now() - leaseStartedAt > 5 * 60 * 1000;
+      if (latestStatus !== "PLACED" && !staleAcceptingLease) return;
+      return {
+        ...latest,
+        status: "ACCEPTING",
+        stockReservationStartedAt: Date.now(),
+        stockReservationToken: claimToken,
+      };
     });
-    if (!claim.committed) throw new HttpsError("aborted", "The order changed before stock could be reserved. Refresh and retry.");
+    if (!claim.committed) throw new HttpsError("aborted", "This order is already being accepted. Refresh and try again.");
     try {
       await reserveShopOrderStock(orderId, order);
     } catch (error) {
-      await ref.child("status").transaction((value) => asString(value).toUpperCase() === "ACCEPTING" ? "PLACED" : undefined);
+      await ref.transaction((rawValue) => {
+        if (!rawValue || typeof rawValue !== "object") return;
+        const latest = asRecord(rawValue);
+        if (asString(latest.stockReservationToken) !== claimToken) return;
+        const restored = { ...latest, status: "PLACED" };
+        delete restored.stockReservationStartedAt;
+        delete restored.stockReservationToken;
+        return restored;
+      });
       throw error;
     }
-    const accepted = await ref.child("status").transaction((value) => asString(value).toUpperCase() === "ACCEPTING" ? "ACCEPTED" : undefined);
+    const accepted = await ref.transaction((rawValue) => {
+      if (!rawValue || typeof rawValue !== "object") return;
+      const latest = asRecord(rawValue);
+      if (
+        asString(latest.status).toUpperCase() !== "ACCEPTING" ||
+        asString(latest.stockReservationToken) !== claimToken
+      ) return;
+      const saved = { ...latest, status: "ACCEPTED" };
+      delete saved.stockReservationStartedAt;
+      delete saved.stockReservationToken;
+      return saved;
+    });
     if (!accepted.committed) {
-      await releaseShopOrderStock(orderId, order);
-      throw new HttpsError("aborted", "The order changed while stock was being reserved. The reservation was released.");
+      throw new HttpsError("aborted", "The order changed while stock was being reserved. Refresh before retrying.");
     }
     return { orderId, previousStatus: current, status: "ACCEPTED" };
   }
