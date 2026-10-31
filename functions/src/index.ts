@@ -2337,7 +2337,7 @@ export const releaseDeliveryOrder = onCall({ region: REGION }, async (request) =
   const tx = await ref.transaction((currentValue) => {
     if (!currentValue || typeof currentValue !== "object") return;
     const order = asRecord(currentValue);
-    if (asString(order.deliveryId) !== uid || asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || asString(order.cashCollectionStatus).toUpperCase() === "COLLECTED") return;
+    if (asString(order.deliveryId) !== uid || asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || asString(order.cashCollectionStatus).toUpperCase() === "COLLECTED" || asString(order.deliveryStage).toUpperCase() === "PICKED_UP") return;
     return { ...order, deliveryId: "", deliveryName: "", deliveryPhone: "", deliveryStage: "" };
   });
   if (!tx.committed) throw new HttpsError("failed-precondition", "This delivery cannot be released.");
