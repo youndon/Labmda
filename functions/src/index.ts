@@ -2905,6 +2905,20 @@ export const requestPaymentRefund = onCall({ region: REGION }, async (request) =
   return { requestId, status: "PENDING_REVIEW", reused: false };
 });
 
+async function markCustomerRefundRequest(entityType: GcashEntityType, entityId: string, refundId: string, refundStatus: string): Promise<void> {
+  const indexSnapshot = await db.ref("refundRequestsByEntity/" + entityType + "_" + entityId).get();
+  const requestId = asString(asRecord(indexSnapshot.val()).requestId);
+  if (!requestId) return;
+  await db.ref("refundRequests/" + requestId).update({
+    status: "REFUND_INITIATED", providerRefundId: refundId,
+    providerRefundStatus: refundStatus, updatedAtTimestamp: Date.now(),
+  });
+  const saved = asRecord((await db.ref("refundRequests/" + requestId).get()).val());
+  await db.ref("refundRequestsByUser/" + asString(saved.customerId) + "/" + requestId).update({
+    status: "REFUND_INITIATED", updatedAtTimestamp: Date.now(),
+  });
+}
+
 export const refundPayment = onCall(
   { region: REGION, secrets: [XENDIT_SECRET_KEY] },
   async (request) => {
@@ -2940,6 +2954,7 @@ export const refundPayment = onCall(
       existingRefund.providerRefundId &&
       ["PENDING", "SUCCEEDED", "FAILED"].includes(asString(existingRefund.status))
     ) {
+      await markCustomerRefundRequest(entityType, entityId, asString(existingRefund.providerRefundId), asString(existingRefund.status));
       return {
         entityId,
         refundId: asString(existingRefund.providerRefundId),
@@ -3027,6 +3042,7 @@ export const refundPayment = onCall(
     const savedAfterReservation = asRecord(reservation.snapshot.val());
     const savedRefund = asRecord(asRecord(savedAfterReservation.refunds)[refundAttemptId]);
     if (asString(savedRefund.providerRefundId)) {
+      await markCustomerRefundRequest(entityType, entityId, asString(savedRefund.providerRefundId), asString(savedRefund.status));
       return {
         entityId,
         refundId: asString(savedRefund.providerRefundId),
@@ -3122,6 +3138,7 @@ export const refundPayment = onCall(
         });
       }
 
+      await markCustomerRefundRequest(entityType, entityId, providerRefundId, refundStatus);
       return {
         entityId,
         refundId: providerRefundId,
