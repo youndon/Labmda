@@ -7,7 +7,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,7 +25,7 @@ class NotificationPreferencesScreen : Screen {
         val model = koinScreenModel<AccountPreferencesScreenModel>()
         val preferences by model.preferences.collectAsState()
         val navigator = LocalNavigator.currentOrThrow
-        Scaffold(topBar = { SupportTopBar("Notifications", navigator::pop) }) { padding ->
+        Scaffold(topBar = { SupportTopBar("Notifications", { navigator.pop() }) }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(20.dp)) {
                 PreferenceCard {
                     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
