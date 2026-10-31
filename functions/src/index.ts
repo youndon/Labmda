@@ -2135,6 +2135,9 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
     if (asString(order.deliveryId) !== uid) throw new HttpsError("permission-denied", "Only the assigned courier can complete this delivery.");
     await requireApprovedCourier(uid);
     from = ["OUT_FOR_DELIVERY"];
+    if (asString(order.deliveryStage).toUpperCase() !== "PICKED_UP") {
+      throw new HttpsError("failed-precondition", "The courier must confirm pickup before completing this delivery.");
+    }
     if (method === "CASH") throw new HttpsError("failed-precondition", "Cash delivery completion must use confirmCashCollected.");
     const payment = asRecord((await db.ref("payments/" + orderId).get()).val());
     if (paymentStatus !== "PAID" || asString(payment.status).toUpperCase() !== "PAID") throw new HttpsError("failed-precondition", "The server has not confirmed this order's payment.");
@@ -3990,8 +3993,14 @@ export const confirmCashCollected = onCall(
     if (assignedCollector !== uid) {
       throw new HttpsError("permission-denied", "Only the assigned courier or ride driver can confirm this cash collection.");
     }
-    if (entityType === "ORDER") await requireApprovedCourier(uid);
-    else await requireApprovedDriver(uid);
+    if (entityType === "ORDER") {
+      await requireApprovedCourier(uid);
+      if (asString(entity.deliveryStage).toUpperCase() !== "PICKED_UP") {
+        throw new HttpsError("failed-precondition", "The courier must confirm pickup before confirming cash collection.");
+      }
+    } else {
+      await requireApprovedDriver(uid);
+    }
     const expectedStatus = entityType === "ORDER"
       ? ["OUT_FOR_DELIVERY", "DELIVERED"]
       : ["IN_PROGRESS", "COMPLETED"];
