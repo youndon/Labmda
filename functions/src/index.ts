@@ -4507,13 +4507,6 @@ async function ensureMarketplaceLedgerEntry(
   });
 }
 
-  void db.ref("walletPayoutQueue/" + uid).set({
-    userId: uid,
-    dueAtTimestamp: Date.now(),
-    updatedAtTimestamp: Date.now(),
-  }).catch((error) => logger.warn("Could not queue wallet payout", { uid, error }));
-}
-
 function payoutAccountSummary(account: Record<string, unknown>): Record<string, unknown> {
   return {
     status: asString(account.status) || "NOT_CONFIGURED",
@@ -4621,8 +4614,6 @@ async function applyCashRemittanceWalletEffects(
       merchantSettlementLedgerEntryId: releaseEntryId,
       merchantSettledAtTimestamp: Date.now(),
     });
-    const wallet = asRecord((await db.ref("wallets/" + merchantId).get()).val());
-
   }
 }
 
