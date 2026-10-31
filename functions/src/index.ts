@@ -444,10 +444,13 @@ type PricingConfiguration = {
   };
 };
 
+type RouteTravelMode = "DRIVE" | "BICYCLE" | "TWO_WHEELER";
+
 type RouteResult = {
   provider: "GOOGLE_ROUTES_API";
   distanceMeters: number;
   duration: string;
+  travelMode: RouteTravelMode;
   encodedPolyline: string;
 };
 
@@ -871,6 +874,7 @@ function pricingSnapshot(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       duration: route.duration,
+      travelMode: route.travelMode,
     },
     calculatedAtTimestamp: Date.now(),
     ...extra,
@@ -881,7 +885,8 @@ async function calculateGoogleRoute(
   originLat: number,
   originLng: number,
   destinationLat: number,
-  destinationLng: number
+  destinationLng: number,
+  serviceType = "car"
 ): Promise<RouteResult> {
   if (
     (originLat === 0 && originLng === 0) ||
@@ -898,6 +903,18 @@ async function calculateGoogleRoute(
     throw new HttpsError("failed-precondition", "The Google Routes API key is not configured in Firebase Functions secrets.");
   }
 
+  const travelMode = resolveRouteTravelMode(serviceType);
+  const routeRequest: Record<string, unknown> = {
+    origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
+    destination: { location: { latLng: { latitude: destinationLat, longitude: destinationLng } } },
+    travelMode,
+    computeAlternativeRoutes: false,
+    languageCode: "en",
+    units: "METRIC",
+  };
+  // Routing preference is set only for DRIVE; non-car modes do not accept it.
+  if (travelMode === "DRIVE") routeRequest.routingPreference = "TRAFFIC_UNAWARE";
+
   const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
     headers: {
@@ -905,15 +922,7 @@ async function calculateGoogleRoute(
       "X-Goog-Api-Key": apiKey,
       "X-Goog-FieldMask": "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline",
     },
-    body: JSON.stringify({
-      origin: { location: { latLng: { latitude: originLat, longitude: originLng } } },
-      destination: { location: { latLng: { latitude: destinationLat, longitude: destinationLng } } },
-      travelMode: "DRIVE",
-      routingPreference: "TRAFFIC_UNAWARE",
-      computeAlternativeRoutes: false,
-      languageCode: "en",
-      units: "METRIC",
-    }),
+    body: JSON.stringify(routeRequest),
   });
 
   const body = asRecord(await response.json().catch(() => ({})));
@@ -937,11 +946,25 @@ async function calculateGoogleRoute(
   if (!encodedPolyline) {
     throw new HttpsError("failed-precondition", "The route service did not return road-route geometry.");
   }
-  return { provider: "GOOGLE_ROUTES_API", distanceMeters, duration, encodedPolyline };
+  return { provider: "GOOGLE_ROUTES_API", distanceMeters, duration, travelMode, encodedPolyline };
 }
 
 function closeCoordinate(left: number, right: number): boolean {
   return Math.abs(left - right) <= 0.00005;
+}
+
+function resolveRouteTravelMode(serviceType: string): RouteTravelMode {
+  switch (serviceType.toLowerCase()) {
+    case "bike":
+    case "e_bike":
+      return "BICYCLE";
+    case "scooter":
+    case "motorcycle":
+      return "TWO_WHEELER";
+    // Truck-specific routing needs dimensions/weight not stored on driver profiles yet.
+    default:
+      return "DRIVE";
+  }
 }
 
 async function loadOwnedPricingQuote(
