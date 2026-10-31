@@ -11,11 +11,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,6 +32,8 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import org.koin.core.context.GlobalContext
 import cafe.adriel.voyager.navigator.LocalNavigator
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MerchantEarningsScreen : Screen {
@@ -76,23 +76,22 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
             if (state.isLoading) item { CircularProgressIndicator() }
             state.error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             state.message?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.primary) } }
-            item {
-                WalletAmountCard("Available earnings", wallet.availableCentavos, "Can be paid to a verified GCash account")
-            }
-            item { WalletAmountCard("Pending earnings", wallet.pendingCentavos, "Released after the service has been completed") }
+            item { WalletAmountCard("Available earnings", wallet.availableCentavos, "Eligible for payout to your verified GCash account") }
+            item { WalletAmountCard("Pending earnings", wallet.pendingCentavos, "Released after service completion and confirmed Xendit settlement") }
             item { WalletAmountCard("Cash owed to Labmda", wallet.cashOwedCentavos, "Cash collected by you that must be remitted") }
-            item { WalletAmountCard("Cash earnings held by you", wallet.cashEarningsCentavos, "Your share from cash collected in person") }
-            item { WalletAmountCard("Refund recovery owed", wallet.refundDebtCentavos, "Deducted from future earnings before another payout is enabled") }
-            item { WalletAmountCard("Payout in progress", wallet.pendingPayoutCentavos, "Reserved while Xendit processes a payout") }
-            item { WalletAmountCard("Total paid out", wallet.paidOutCentavos, "Confirmed successful wallet payouts") }
+            item { WalletAmountCard("Cash earnings held by you", wallet.cashEarningsCentavos, "Your share from cash collected in person; not paid out a second time") }
+            item { WalletAmountCard("Refund recovery owed", wallet.refundDebtCentavos, "Future earnings may be used to recover this balance before payout") }
+            item { WalletAmountCard("Payout in progress", wallet.pendingPayoutCentavos, "Reserved while the transfer is being processed") }
+            item { WalletAmountCard("Total paid out", wallet.paidOutCentavos, "Transfers confirmed successful by the payout process") }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Payout account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("GCash · " + wallet.payoutAccount.maskedAccountNumber.ifBlank { "Not added" })
-                        Text("Verification: " + wallet.payoutAccount.status.replace('_', ' '), fontWeight = FontWeight.SemiBold)
+                        Text("GCash payout account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(wallet.payoutAccount.maskedAccountNumber.ifBlank { "No GCash destination added" })
+                        PayoutStatusText(wallet.payoutAccount.status, payoutAccountExplanation(wallet.payoutAccount.status))
                         if (wallet.payoutAccount.reviewNote.isNotBlank()) {
-                            Text("Administrator note: " + wallet.payoutAccount.reviewNote, color = MaterialTheme.colorScheme.error)
+                            Text("Review note: " + wallet.payoutAccount.reviewNote,
+                                color = if (wallet.payoutAccount.status == "REJECTED") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Button(onClick = { navigator?.push(PayoutAccountScreen()) }, modifier = Modifier.fillMaxWidth()) {
                             Text(if (wallet.payoutAccount.status == "VERIFIED") "View payout account" else "Set up / update payout account")
@@ -101,12 +100,11 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
                             onClick = { screenModel.requestPayout() },
                             enabled = !state.isSubmitting && wallet.payoutAccount.status == "VERIFIED" &&
                                 wallet.availableCentavos >= 10_000L && wallet.pendingPayoutCentavos == 0L &&
-                                wallet.activePayoutRequest == null,
+                                wallet.refundDebtCentavos == 0L && wallet.activePayoutRequest == null,
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(if (state.isSubmitting) "Submitting…" else "Request payout")
-                        }
-                        Text("Manual payout minimum PHP 100. Automatic payouts start at PHP 500. A verified recipient account is required.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ) { Text(if (state.isSubmitting) "Submitting…" else "Request payout") }
+                        Text("Manual payout minimum: ₱100. Automatic payouts start at ₱500. A verified GCash destination is required.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         OutlinedButton(onClick = { screenModel.refresh() }, modifier = Modifier.fillMaxWidth()) { Text("Refresh wallet") }
                     }
                 }
@@ -114,11 +112,13 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
             wallet.activePayoutRequest?.let { active ->
                 item {
                     Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Active payout request", fontWeight = FontWeight.Bold)
-                            Text("Request " + active.id.takeLast(8) + " · " + peso(active.amountCentavos).let { "₱$it" })
-                            Text("Status: " + active.status.replace('_', ' '))
-                            Text("Your requested amount is waiting for administrator review. Available earnings are not deducted until approval.")
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Payout request in progress", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                            Text("Request " + active.id.takeLast(8) + " · ₱" + peso(active.amountCentavos))
+                            PayoutStatusText(active.status, payoutRequestExplanation(active.status))
+                            PayoutProgress(active.status)
+                            Text("Your available balance is reserved only after the request is approved and submitted for transfer.",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -129,13 +129,15 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
             } else {
                 items(wallet.payoutRequests, key = { "request-" + it.id }) { request ->
                     Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Text("Request " + request.id.takeLast(8), fontWeight = FontWeight.Bold)
                             Text("Amount: ₱" + peso(request.amountCentavos))
-                            Text("Status: " + request.status.replace('_', ' '))
-                            if (request.providerStatus.isNotBlank()) Text("Xendit status: " + request.providerStatus.replace('_', ' '))
+                            PayoutStatusText(request.status, payoutRequestExplanation(request.status))
+                            if (request.providerStatus.isNotBlank()) Text("Xendit: " + request.providerStatus.replace('_', ' '))
                             if (request.maskedAccountNumber.isNotBlank()) Text("Destination: " + request.maskedAccountNumber)
-                            if (request.rejectionNote.isNotBlank()) Text("Administrator note: " + request.rejectionNote, color = MaterialTheme.colorScheme.error)
+                            if (request.createdAtTimestamp > 0L) Text("Requested: " + payoutDate(request.createdAtTimestamp), style = MaterialTheme.typography.bodySmall)
+                            if (request.updatedAtTimestamp > 0L) Text("Updated: " + payoutDate(request.updatedAtTimestamp), style = MaterialTheme.typography.bodySmall)
+                            if (request.rejectionNote.isNotBlank()) Text("Review note: " + request.rejectionNote, color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -146,17 +148,23 @@ private fun WalletDashboard(screenModel: WalletScreenModel, title: String, subti
             } else {
                 items(wallet.payouts, key = { it.id }) { payout ->
                     Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Text("Payout " + payout.id.takeLast(8), fontWeight = FontWeight.Bold)
-                            Text("Amount: " + peso(payout.amountCentavos))
-                            Text("Status: " + payout.status.replace('_', ' '))
-                            if (payout.providerPayoutId.isNotBlank()) Text("Xendit reference: " + payout.providerPayoutId)
-                            if (payout.failureCode.isNotBlank()) Text("Failure code: " + payout.failureCode, color = MaterialTheme.colorScheme.error)
-                            if (payout.failureMessage.isNotBlank()) Text("Failure details: " + payout.failureMessage, color = MaterialTheme.colorScheme.error)
+                            Text("Amount: ₱" + peso(payout.amountCentavos))
+                            PayoutStatusText(payout.status, payoutTransferExplanation(payout.status))
+                            if (payout.createdAtTimestamp > 0L) Text("Created: " + payoutDate(payout.createdAtTimestamp), style = MaterialTheme.typography.bodySmall)
+                            if (payout.maskedAccountNumber.isNotBlank()) Text("Destination: " + payout.maskedAccountNumber)
+                            if (payout.providerPayoutId.isNotBlank()) Text("Xendit reference: " + payout.providerPayoutId, style = MaterialTheme.typography.bodySmall)
+                            if (payout.failureCode.isNotBlank()) Text("Failure code: " + payout.failureCode, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            if (payout.failureMessage.isNotBlank()) {
+                                Text(payout.failureMessage, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                Text(payoutFailureNextStep(payout.failureCode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
             }
+            item { Spacer(Modifier.padding(bottom = 8.dp)) }
         }
     }
 }
@@ -173,5 +181,73 @@ private fun WalletAmountCard(title: String, centavos: Long, detail: String) {
         }
     }
 }
+
+@Composable
+private fun PayoutStatusText(status: String, explanation: String) {
+    val normalized = status.uppercase()
+    val color = when (normalized) {
+        "SUCCEEDED", "VERIFIED" -> MaterialTheme.colorScheme.primary
+        "FAILED", "REJECTED", "CANCELLED", "EXPIRED" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.tertiary
+    }
+    Text(normalized.ifBlank { "UNKNOWN" }.replace('_', ' '), color = color, fontWeight = FontWeight.SemiBold)
+    Text(explanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun PayoutProgress(status: String) {
+    val normalized = status.uppercase()
+    val stages = listOf("REQUESTED", "APPROVED", "PROCESSING", "SUCCEEDED")
+    val current = when {
+        normalized in setOf("PENDING", "PENDING_ADMIN_APPROVAL", "REQUESTED") -> 0
+        normalized in setOf("APPROVED", "SUBMITTED", "ACCEPTED") -> 1
+        normalized in setOf("PROCESSING", "PENDING_PROVIDER") -> 2
+        normalized == "SUCCEEDED" -> 3
+        else -> -1
+    }
+    if (current >= 0) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            stages.forEachIndexed { index, stage ->
+                Text(
+                    if (index <= current) "● $stage" else "○ $stage",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (index <= current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+private fun payoutAccountExplanation(status: String) = when (status.uppercase()) {
+    "VERIFIED" -> "This GCash destination passed Labmda's review and can be selected for payout."
+    "PENDING_REVIEW" -> "Your details were submitted. Payout requests are unavailable until the account is approved."
+    "REJECTED" -> "The account needs changes. Read the review note and submit corrected details."
+    else -> "Add your GCash details and submit them for administrator review."
+}
+private fun payoutRequestExplanation(status: String) = when (status.uppercase()) {
+    "PENDING_ADMIN_APPROVAL", "PENDING" -> "Waiting for Labmda administrator review. Your available earnings are not reserved yet."
+    "APPROVED", "SUBMITTED", "PROCESSING" -> "Approved and being processed for transfer. Check the payout history for the provider result."
+    "REJECTED" -> "The request was declined. Review the administrator note before submitting another request."
+    "FAILED" -> "The transfer could not be completed. Review the failure details and contact support if the issue persists."
+    "SUCCEEDED" -> "The transfer was confirmed successful."
+    "CANCELLED", "EXPIRED" -> "This request is no longer active."
+    else -> "The request status is being updated. Refresh for the latest information."
+}
+private fun payoutTransferExplanation(status: String) = when (status.uppercase()) {
+    "PENDING", "PROCESSING" -> "Xendit is processing this transfer. It is not confirmed as received yet."
+    "SUCCEEDED" -> "The payout provider confirmed this transfer as successful."
+    "FAILED" -> "The transfer failed. The reserved amount should return to your available balance after server reconciliation."
+    "CANCELLED" -> "This transfer was cancelled."
+    "ON_HOLD" -> "The transfer is on hold for additional review."
+    else -> "The payout status is not yet final."
+}
+private fun payoutFailureNextStep(code: String) = when {
+    code.contains("ACCOUNT", true) || code.contains("INVALID", true) -> "Check that the GCash account is active and the recipient details match."
+    code.contains("LIMIT", true) -> "The provider limit may have been reached. Contact support before retrying."
+    code.contains("COMPLIANCE", true) -> "The provider requires additional review. Contact Labmda support."
+    else -> "Do not submit repeated payout requests. Refresh the wallet and contact Labmda support if the status does not change."
+}
+private fun payoutDate(timestamp: Long): String =
+    SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault()).format(Date(timestamp))
 
 internal fun peso(centavos: Long): String = String.format(Locale.US, "%.2f", centavos / 100.0)
