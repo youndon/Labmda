@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.payment
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,7 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -40,17 +43,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class PaymentActivityItem(
-    val id: String,
-    val entityType: String,
-    val provider: String,
-    val channelCode: String,
-    val status: String,
-    val amount: Double,
-    val currency: String,
-    val createdAtTimestamp: Long
-)
-
 class PaymentCenterScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
@@ -59,6 +51,7 @@ class PaymentCenterScreen : Screen {
         val screenModel = rememberScreenModel { PaymentCenterScreenModel() }
         val payments by screenModel.payments.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val error by screenModel.error.collectAsState()
 
         Scaffold(
             topBar = {
@@ -77,23 +70,17 @@ class PaymentCenterScreen : Screen {
                     modifier = Modifier.fillMaxSize().padding(padding),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
-                ) {
-                    CircularProgressIndicator()
-                }
+                ) { CircularProgressIndicator() }
                 payments.isEmpty() -> Column(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        Icons.Default.ReceiptLong,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
+                    Icon(Icons.Default.ReceiptLong, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.height(12.dp))
-                    Text("No payment activity yet", style = MaterialTheme.typography.titleMedium)
+                    Text(if (error == null) "No payment activity yet" else "Payment activity unavailable", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Your GCash and cash order or ride payments will appear here.",
+                        error ?: "Your GCash and cash order or ride payments will appear here.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -103,9 +90,14 @@ class PaymentCenterScreen : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(payments, key = { it.id }) { payment ->
-                        PaymentActivityCard(payment)
+                    item {
+                        Text(
+                            "Tap a transaction to view its payment, refund and settlement details.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
+                    items(payments, key = { it.id }) { payment -> PaymentActivityCard(payment) }
                 }
             }
         }
@@ -114,16 +106,17 @@ class PaymentCenterScreen : Screen {
 
 @Composable
 private fun PaymentActivityCard(payment: PaymentActivityItem) {
-    val amount = String.format(Locale.US, "%.2f", payment.amount)
+    var expanded by remember(payment.id) { mutableStateOf(false) }
     val date = rememberPaymentDate(payment.createdAtTimestamp)
+    val amount = String.format(Locale.US, "%.2f", payment.amountCentavos / 100.0)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -137,22 +130,80 @@ private fun PaymentActivityCard(payment: PaymentActivityItem) {
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "\${payment.currency} $amount",
+                    "₱$amount",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
             }
-            Text(
-                "\${payment.channelCode.ifBlank { payment.provider }} · \${payment.status.replace('_', ' ')}",
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(payment.channelCode.ifBlank { payment.provider.ifBlank { "Payment" } }, style = MaterialTheme.typography.bodyMedium)
+                PaymentStatusLabel(payment.status)
+            }
             Text(date, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
-                "Reference: \${payment.id.takeLast(12)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                if (expanded) "Hide transaction details ▲" else "View transaction details ▼",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary
             )
+            if (expanded) {
+                Text("Transaction reference: ${payment.id}", style = MaterialTheme.typography.bodySmall)
+                Text("Provider: ${payment.provider.ifBlank { "Not available" }}", style = MaterialTheme.typography.bodySmall)
+                Text("Last updated: ${rememberPaymentDate(payment.updatedAtTimestamp)}", style = MaterialTheme.typography.bodySmall)
+                if (payment.failureCode.isNotBlank()) {
+                    Text("Payment issue: ${paymentFailureExplanation(payment.failureCode)}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    Text("Provider code: ${payment.failureCode}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (payment.refundedCentavos > 0L || payment.pendingRefundCentavos > 0L || payment.refunds.isNotEmpty()) {
+                    Text("Refunds", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    if (payment.refundedCentavos > 0L) Text("Refunded: ₱${String.format(Locale.US, "%.2f", payment.refundedCentavos / 100.0)}")
+                    if (payment.pendingRefundCentavos > 0L) Text("Refund pending: ₱${String.format(Locale.US, "%.2f", payment.pendingRefundCentavos / 100.0)}")
+                    if (payment.refundStatus.isNotBlank()) Text("Refund status: ${payment.refundStatus.replace('_', ' ')}")
+                    payment.refunds.forEach { refund ->
+                        Text(
+                            "Refund ${refund.id.takeLast(10)} · ₱${String.format(Locale.US, "%.2f", refund.amountCentavos / 100.0)} · ${refund.status.replace('_', ' ')}",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (refund.failureCode.isNotBlank()) Text("Refund issue: ${paymentFailureExplanation(refund.failureCode)}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        when (refund.walletSettlementStatus.uppercase()) {
+                            "POSTED" -> Text("Wallet accounting: refund entry posted", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            "PENDING", "PROCESSING", "FAILED" -> Text("Wallet accounting: ${refund.walletSettlementStatus.replace('_', ' ')}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                if (payment.settlementStatus.isNotBlank()) {
+                    Text("Xendit settlement: ${payment.settlementStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall)
+                }
+                if (payment.earningsSettlementStatus.isNotBlank() || payment.earningsPendingStatus.isNotBlank()) {
+                    Text(
+                        "Earnings reconciliation: ${(payment.earningsSettlementStatus.ifBlank { payment.earningsPendingStatus }).replace('_', ' ')}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun PaymentStatusLabel(status: String) {
+    val normalized = status.uppercase()
+    val color = when (normalized) {
+        "PAID", "COLLECTED", "REFUNDED" -> MaterialTheme.colorScheme.primary
+        "FAILED", "CANCELLED", "EXPIRED", "INITIATION_FAILED" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.tertiary
+    }
+    Text(normalized.replace('_', ' '), color = color, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelMedium)
+}
+
+private fun paymentFailureExplanation(code: String): String {
+    val normalized = code.uppercase()
+    return when {
+        normalized.contains("INSUFFICIENT") -> "The payment provider reported insufficient funds. Check your GCash balance and try again."
+        normalized.contains("EXPIRED") -> "The payment request expired before it was completed. Start a new checkout."
+        normalized.contains("CANCEL") -> "The payment was cancelled before completion."
+        normalized.contains("ACCOUNT") -> "The destination or payment account could not be verified. Review the account details."
+        normalized.contains("LIMIT") -> "The provider limit was reached. Try a smaller amount or contact support."
+        else -> "The payment provider could not complete this transaction. Check the provider app and try again later."
     }
 }
 
