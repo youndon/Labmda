@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_language">Wika ng App</string>
+    <string name="app_language_dialog_title">Wika ng app</string>
+    <string name="language_system_default">Sundin ang wika ng device</string>
+    <string name="close">Isara</string>
+</resources>

@@ -17,7 +17,7 @@ import java.io.IOException
 data class AccountPreferences(
     val notificationsEnabled: Boolean = true,
     val darkModeEnabled: Boolean? = null,
-    val language: String = "system"
+    val language: String = "en"
 )
 
 class AccountPreferencesStore(context: Context) {
@@ -33,7 +33,7 @@ class AccountPreferencesStore(context: Context) {
             AccountPreferences(
                 notificationsEnabled = values[NOTIFICATIONS_ENABLED] ?: true,
                 darkModeEnabled = values[DARK_MODE_ENABLED],
-                language = values[LANGUAGE] ?: "system"
+                language = values[LANGUAGE] ?: "en"
             )
         }
 
