@@ -1,0 +1,16 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Public reads are required for customer-facing restaurant, meal, shop and product images.
+    match /merchant-media/{ownerUid}/{category}/{fileName} {
+      allow read: if true;
+      allow create, update: if request.auth != null
+        && request.auth.uid == ownerUid
+        && category in ['restaurant', 'meal', 'shop', 'product']
+        && request.resource.size > 0
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|png|webp|gif)');
+      allow delete: if request.auth != null && request.auth.uid == ownerUid;
+    }
+  }
+}
