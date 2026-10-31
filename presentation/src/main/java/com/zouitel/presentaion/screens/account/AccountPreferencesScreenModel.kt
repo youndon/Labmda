@@ -19,7 +19,7 @@ class AccountPreferencesScreenModel(
         screenModelScope.launch { store.setNotificationsEnabled(enabled) }
     }
 
-    fun setDarkModeEnabled(enabled: Boolean) {
+    fun setDarkModeEnabled(enabled: Boolean?) {
         screenModelScope.launch { store.setDarkModeEnabled(enabled) }
     }
 
