@@ -3,6 +3,7 @@ package com.zouitel.presentaion.screens.account
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -76,7 +77,7 @@ class SettingsScreen : Screen {
                         SettingsSwitchRow(
                             icon = Icons.Filled.DarkMode,
                             label = "Dark Mode Theme",
-                            checked = preferences.darkModeEnabled,
+                            checked = preferences.darkModeEnabled ?: isSystemInDarkTheme(),
                             onCheckedChange = model::setDarkModeEnabled
                         )
                     }
