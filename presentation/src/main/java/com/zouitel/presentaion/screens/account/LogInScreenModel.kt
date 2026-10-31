@@ -14,8 +14,14 @@ class LogInScreenModel(
             // Creates a path like: /users/{uid}
             val userNode = usersRef.child("users").child(userProfile.uid)
 
-            // RTDB uses setValue() for serialized classes
-            userNode.updateChildren(mapOf("uid" to userProfile.uid, "fullName" to userProfile.fullName, "email" to userProfile.email, "phoneNumber" to userProfile.phoneNumber, "photoUrl" to userProfile.photoUrl))
+            // Merge only values actually supplied by the provider. Google does not expose
+            // a phone number, so an empty provider field must never erase a saved phone.
+            val updates = mutableMapOf<String, Any>("uid" to userProfile.uid)
+            userProfile.fullName.takeIf { it.isNotBlank() }?.let { updates["fullName"] = it }
+            userProfile.email?.takeIf { it.isNotBlank() }?.let { updates["email"] = it }
+            userProfile.phoneNumber?.takeIf { it.isNotBlank() }?.let { updates["phoneNumber"] = it }
+            userProfile.photoUrl?.takeIf { it.isNotBlank() }?.let { updates["photoUrl"] = it }
+            userNode.updateChildren(updates)
 
             result.data = Unit
         } catch (e: Exception) {
