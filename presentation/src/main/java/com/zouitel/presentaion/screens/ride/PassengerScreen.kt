@@ -767,6 +767,19 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     if (quote != null) {
                         FareDetailRow("Road distance", "${"%.1f".format(quote.distanceKm)} km")
                         FareDetailRow("Estimated route time", formatRouteEta(quote.routeDuration))
+                        when (vehicleType) {
+                            VehicleType.BIKE -> Text(
+                                "Bicycle routing is in beta and may not include every suitable cycling path.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            VehicleType.E_BIKE, VehicleType.SCOOTER, VehicleType.MOTORCYCLE -> Text(
+                                "Motorcycle routing is in beta and may not always select the most suitable two-wheeler path.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            else -> Unit
+                        }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         quote.fareBreakdown?.let { breakdown ->
                             FareDetailRow("Base fare", formatPhp(breakdown.baseFareCentavos))
