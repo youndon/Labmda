@@ -52,11 +52,13 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.model.VehicleInfo
 import com.zouitel.presentaion.model.VehicleType
 import com.zouitel.presentaion.payments.PayButton
 import com.zouitel.presentaion.payments.PaymentEventEffect
 import com.zouitel.presentaion.payments.PaymentMethodSelector
 import com.zouitel.presentaion.payments.PaymentRepository
+import com.zouitel.presentaion.payments.PricingQuoteResult
 import com.zouitel.presentaion.payments.PaymentResultSheet
 import com.zouitel.presentaion.payments.PaymentScreenModel
 import org.koin.core.context.GlobalContext
@@ -64,10 +66,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
-
-private const val BASE_FARE = 2.0
-private const val PER_KM_FARE = 1.2
-private const val MIN_FARE = 4.0
+import kotlin.coroutines.cancellation.CancellationException
 
 private val ACTIVE_STATUSES = setOf("AWAITING_PAYMENT", "REQUESTED", "ACCEPTED", "IN_PROGRESS")
 
@@ -101,6 +100,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         var pickupAddress by remember { mutableStateOf("") }
         var destinationAddress by remember { mutableStateOf("") }
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
+        var rideQuote by remember { mutableStateOf<PricingQuoteResult?>(null) }
+        var isQuotingRide by remember { mutableStateOf(false) }
+        var quoteRefreshKey by remember { mutableIntStateOf(0) }
+        var rideQuoteError by remember { mutableStateOf<String?>(null) }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember(openHistoryOnStart) { mutableStateOf(openHistoryOnStart) }
@@ -123,7 +126,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
 
         val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
         var tappedDriverId by remember { mutableStateOf<String?>(null) }
-        val tappedDriver = onlineDrivers.firstOrNull { it.uid == tappedDriverId }
+        val compatibleDrivers = onlineDrivers.filter {
+            it.driverService?.vehicleInfo?.type == vehicleType
+        }
+        val tappedDriver = compatibleDrivers.firstOrNull { it.uid == tappedDriverId }
 
         fun locateMe() {
             if (!hasLocationPermission) {
@@ -190,14 +196,62 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             }
         }
 
-        val activeTrip = trips.firstOrNull { it.status in ACTIVE_STATUSES }
-        val distanceKm = if (pickup != null && destination != null) distanceKm(pickup!!, destination!!) else 0.0
-        val fare = estimateFare(distanceKm)
+        LaunchedEffect(pickup, destination, vehicleType, quoteRefreshKey) {
+            val p = pickup
+            val d = destination
+            rideQuote = null
+            rideQuoteError = null
+            if (p == null || d == null) {
+                isQuotingRide = false
+                return@LaunchedEffect
+            }
+            isQuotingRide = true
+            try {
+                rideQuote = paymentRepository.quoteTrip(
+                    pickupLat = p.latitude,
+                    pickupLng = p.longitude,
+                    dropoffLat = d.latitude,
+                    dropoffLng = d.longitude,
+                    serviceType = vehicleType.name.lowercase(Locale.ROOT)
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                rideQuoteError = error.message ?: "Could not calculate the road route and fare."
+            } finally {
+                isQuotingRide = false
+            }
+        }
 
-        fun submitTrip(name: String, phone: String, driver: UserProfile?) {
+        val activeTrip = trips.firstOrNull { it.status in ACTIVE_STATUSES }
+        val distanceKm = rideQuote?.distanceKm ?: 0.0
+        val fare = rideQuote?.amount ?: 0.0
+        val displayedRoutePolyline = if (activeTrip != null) activeTrip.routePolyline else rideQuote?.routePolyline.orEmpty()
+        val displayedRoutePoints = remember(displayedRoutePolyline) {
+            decodeRoutePolyline(displayedRoutePolyline)
+        }
+
+        LaunchedEffect(displayedRoutePoints) {
+            if (displayedRoutePoints.size >= 2) {
+                val bounds = LatLngBounds.Builder()
+                displayedRoutePoints.forEach { bounds.include(it) }
+                runCatching {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngBounds(bounds.build(), 140),
+                        800
+                    )
+                }
+            }
+        }
+
+        fun submitTrip(name: String, phone: String, driver: UserProfile?, quote: PricingQuoteResult?) {
             val p = pickup
             val d = destination
             if (p == null || d == null) return
+            if (quote == null || quote.expiresAtTimestamp <= System.currentTimeMillis()) {
+                scope.launch { snackbarHostState.showSnackbar("Your ride quote is missing or expired. Please wait for a fresh quote.") }
+                return
+            }
             paymentScreenModel.checkoutStarted()
             screenModel.requestTrip(
                 pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
@@ -209,6 +263,8 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 passengerName = name,
                 passengerPhone = phone,
                 targetDriver = driver,
+                serviceType = vehicleType.name.lowercase(Locale.ROOT),
+                pricingQuoteId = quote.quoteId,
                 paymentMethod = paymentUiState.selectedMethod.name,
                 onSuccess = { result ->
                     paymentScreenModel.checkoutCreated(result)
@@ -265,16 +321,16 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                             icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
                         )
                     }
-                    if (shownPickup != null && shownDestination != null) {
+                    if (displayedRoutePoints.size >= 2) {
                         Polyline(
-                            points = listOf(shownPickup, shownDestination),
+                            points = displayedRoutePoints,
                             color = routeColor,
                             width = 8f
                         )
                     }
 
                     if (activeTrip == null) {
-                        onlineDrivers.forEach { driver ->
+                        compatibleDrivers.forEach { driver ->
                             val loc = driver.driverService?.currentLocation ?: return@forEach
                             if (loc.latitude == 0.0 && loc.longitude == 0.0) return@forEach
                             key(driver.uid) {
@@ -359,8 +415,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                     hasPickup = pickup != null,
                                     destinationAddress = destinationAddress,
                                     hasDestination = destination != null,
-                                    distanceKm = distanceKm,
-                                    fare = fare,
+                                    rideQuote = rideQuote,
+                                    isQuotingRide = isQuotingRide,
+                                    quoteError = rideQuoteError,
+                                    onRefreshQuote = { quoteRefreshKey++ },
                                     isSubmitting = paymentUiState.isSubmitting,
                                     vehicleType = vehicleType,
                                     selectedDriver = selectedDriver,
@@ -369,6 +427,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                     onVehicleTypeChange = {
                                         vehicleType = it
                                         selectedDriver = null
+                                        tappedDriverId = null
                                     },
                                     onSelectDriver = { selectedDriver = it },
                                     onClearDestination = {
@@ -393,14 +452,24 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         pickupAddress = pickupAddress,
                         destinationAddress = destinationAddress,
                         vehicleType = vehicleType,
-                        distanceKm = distanceKm,
-                        indicativeFare = fare,
+                        quote = rideQuote,
+                        isQuotingRide = isQuotingRide,
+                        quoteError = rideQuoteError,
+                        onRefreshQuote = {
+                            quoteRefreshKey++
+                            showCheckout = false
+                        },
                         selectedMethod = paymentUiState.selectedMethod,
                         onMethodSelected = paymentScreenModel::selectMethod,
                         isSubmitting = paymentUiState.isSubmitting,
                         onConfirm = {
-                            showCheckout = false
-                            submitTrip(checkoutName, checkoutPhone, selectedDriver)
+                            val quote = rideQuote
+                            if (quote != null && quote.expiresAtTimestamp > System.currentTimeMillis()) {
+                                showCheckout = false
+                                submitTrip(checkoutName, checkoutPhone, selectedDriver, quote)
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Quote expired. Wait for a new server quote before confirming.") }
+                            }
                         }
                     )
                 }
@@ -419,10 +488,16 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         destinationAddress = destinationAddress,
                         distanceKm = distanceKm,
                         fare = fare,
-                        isSubmitting = paymentUiState.isSubmitting,
+                        isSubmitting = paymentUiState.isSubmitting || isQuotingRide,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
-                        onRequest = { name, phone -> submitTrip(name, phone, driver) }
+                        onRequest = { name, phone ->
+                            checkoutName = name
+                            checkoutPhone = phone
+                            selectedDriver = driver
+                            requestSheetDriver = null
+                            showCheckout = true
+                        }
                     )
                 }
             }
@@ -464,11 +539,17 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         destinationAddress = destinationAddress,
                         tripDistanceKm = distanceKm,
                         fare = fare,
-                        isSubmitting = paymentUiState.isSubmitting,
+                        isSubmitting = paymentUiState.isSubmitting || isQuotingRide,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
                         onPickDestination = { tappedDriverId = null },
-                        onRequest = { name, phone -> submitTrip(name, phone, tappedDriver) }
+                        onRequest = { name, phone ->
+                            checkoutName = name
+                            checkoutPhone = phone
+                            selectedDriver = tappedDriver
+                            tappedDriverId = null
+                            showCheckout = true
+                        }
                     )
                 }
             }
@@ -494,8 +575,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         hasPickup: Boolean,
         destinationAddress: String,
         hasDestination: Boolean,
-        distanceKm: Double,
-        fare: Double,
+        rideQuote: PricingQuoteResult?,
+        isQuotingRide: Boolean,
+        quoteError: String?,
+        onRefreshQuote: () -> Unit,
         isSubmitting: Boolean,
         vehicleType: VehicleType,
         selectedDriver: UserProfile?,
@@ -586,23 +669,46 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                if (isQuotingRide) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text("Calculating road route and fare…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                rideQuote?.let { quote ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Road route · ${"%.1f".format(quote.distanceKm)} km", style = MaterialTheme.typography.bodyMedium)
+                            Text("Estimated route time · ${formatRouteEta(quote.routeDuration)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("Server quote", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "₱${"%.2f".format(quote.amount)}",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+                quoteError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                if ((rideQuote != null && rideQuote.expiresAtTimestamp <= System.currentTimeMillis()) ||
+                    (rideQuote == null && quoteError != null)
                 ) {
-                    Text("Approx. ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "Preview ₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    TextButton(onClick = onRefreshQuote, modifier = Modifier.fillMaxWidth()) {
+                        Text("Refresh ride quote")
+                    }
                 }
 
                 PayButton(
                     label = "Review ride",
-                    enabled = name.isNotBlank() && distanceKm > 0.05,
-                    isLoading = isSubmitting,
+                    enabled = name.isNotBlank() && rideQuote != null &&
+                        rideQuote.expiresAtTimestamp > System.currentTimeMillis() && !isQuotingRide,
+                    isLoading = isSubmitting || isQuotingRide,
                     onClick = { onSubmit(name.trim(), phone.trim()) }
                 )
             }
@@ -614,8 +720,10 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         pickupAddress: String,
         destinationAddress: String,
         vehicleType: VehicleType,
-        distanceKm: Double,
-        indicativeFare: Double,
+        quote: PricingQuoteResult?,
+        isQuotingRide: Boolean,
+        quoteError: String?,
+        onRefreshQuote: () -> Unit,
         selectedMethod: com.zouitel.presentaion.model.PaymentMethod,
         onMethodSelected: (com.zouitel.presentaion.model.PaymentMethod) -> Unit,
         isSubmitting: Boolean,
@@ -656,25 +764,65 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         Spacer(Modifier.weight(1f))
                         Text(vehicleType.name.replace('_', ' '), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Map distance (approx.)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.weight(1f))
-                        Text("${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                    }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Indicative fare", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                            Text("Not the final amount", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (quote != null) {
+                        FareDetailRow("Road distance", "${"%.1f".format(quote.distanceKm)} km")
+                        FareDetailRow("Estimated route time", formatRouteEta(quote.routeDuration))
+                        when (vehicleType) {
+                            VehicleType.BIKE -> Text(
+                                "Bicycle routing is in beta and may not include every suitable cycling path.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            VehicleType.E_BIKE, VehicleType.SCOOTER, VehicleType.MOTORCYCLE -> Text(
+                                "Motorcycle routing is in beta and may not always select the most suitable two-wheeler path.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            VehicleType.TRUCK -> Text(
+                                "Truck-specific height and weight restrictions are not yet included in this route estimate.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            else -> Unit
                         }
-                        Text("₱${"%.2f".format(indicativeFare)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        quote.fareBreakdown?.let { breakdown ->
+                            FareDetailRow("Base fare", formatPhp(breakdown.baseFareCentavos))
+                            FareDetailRow("Distance charge", formatPhp(breakdown.distanceChargeCentavos))
+                            FareDetailRow("Additional charges", formatPhp(breakdown.additionalChargesCentavos))
+                            if (breakdown.adjustmentCentavos != 0L) {
+                                FareDetailRow("Rounding / minimum adjustment", formatPhp(breakdown.adjustmentCentavos))
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Server fare", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.weight(1f))
+                            Text("₱${"%.2f".format(quote.amount)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else {
+                        Text(
+                            if (isQuotingRide) "Refreshing your road route and fare…" else quoteError ?: "A current server quote is required before requesting a ride.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (quoteError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (quote != null && quote.expiresAtTimestamp <= System.currentTimeMillis()) {
+                        Button(onClick = onRefreshQuote, modifier = Modifier.fillMaxWidth()) {
+                            Text("Refresh quote")
+                        }
                     }
                 }
             }
-            Text("Final fare is calculated securely by Labmda using the road route and current administrator pricing. The server-confirmed amount may differ from this map preview.",
+            Text("This quote was calculated by Labmda from Google road distance and current administrator pricing. It is reserved for this route and ride type until it expires. Route time is an estimate and does not include live traffic delays.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             PaymentMethodSelector(selectedMethod = selectedMethod, onMethodSelected = onMethodSelected, enabled = !isSubmitting)
-            PayButton(label = "Confirm and request ride", enabled = distanceKm > 0.05, isLoading = isSubmitting, onClick = onConfirm)
+            PayButton(
+                label = "Confirm and request ride",
+                enabled = quote != null && quote.expiresAtTimestamp > System.currentTimeMillis() && !isQuotingRide,
+                isLoading = isSubmitting || isQuotingRide,
+                onClick = onConfirm
+            )
         }
     }
     @Composable
@@ -701,9 +849,8 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             Text(driver.fullName, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
 
             driverDistanceKm?.let {
-                val eta = maxOf(1, Math.ceil(it / 30.0 * 60).toInt())
                 Text(
-                    "${"%.1f".format(it)} km away · ~$eta min",
+                    "${"%.1f".format(it)} km away (straight-line estimate)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -747,11 +894,15 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Distance: ${"%.1f".format(tripDistanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "Est. ₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (fare > 0.0) {
+                        Text(
+                            "Server quote ₱${"%.2f".format(fare)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Calculating server quote…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 PayButton(
@@ -837,11 +988,15 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "Est. ₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (fare > 0.0) {
+                        Text(
+                            "Server quote ₱${"%.2f".format(fare)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Calculating server quote…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
 
@@ -973,8 +1128,58 @@ private fun distanceKm(a: LatLng, b: LatLng): Double {
     return result[0] / 1000.0
 }
 
-private fun estimateFare(distanceKm: Double): Double =
-    if (distanceKm <= 0.0) 0.0 else maxOf(MIN_FARE, BASE_FARE + distanceKm * PER_KM_FARE)
+private fun decodeRoutePolyline(encoded: String): List<LatLng> {
+    if (encoded.isBlank()) return emptyList()
+    val points = mutableListOf<LatLng>()
+    var index = 0
+    var latitude = 0
+    var longitude = 0
+
+    fun decodeDelta(): Int {
+        var result = 0
+        var shift = 0
+        while (true) {
+            require(index < encoded.length) { "Incomplete encoded route polyline." }
+            val value = encoded[index++].code - 63
+            require(value in 0..63 && shift <= 30) { "Invalid encoded route polyline." }
+            result = result or ((value and 0x1f) shl shift)
+            shift += 5
+            if (value < 0x20) break
+        }
+        return if ((result and 1) != 0) (result shr 1).inv() else result shr 1
+    }
+
+    return runCatching {
+        while (index < encoded.length) {
+            latitude += decodeDelta()
+            longitude += decodeDelta()
+            points += LatLng(latitude / 1e5, longitude / 1e5)
+        }
+        points
+    }.getOrDefault(emptyList())
+}
+
+private fun formatRouteEta(duration: String): String {
+    // Google Routes returns protobuf durations such as "754s" and may include decimals.
+    val seconds = duration.removeSuffix("s").toDoubleOrNull() ?: return "ETA unavailable"
+    if (!seconds.isFinite() || seconds <= 0.0) return "ETA unavailable"
+    val minutes = maxOf(1, kotlin.math.ceil(seconds / 60.0).toInt())
+    return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
+}
+
+private fun formatPhp(centavos: Long): String = "₱${"%.2f".format(centavos / 100.0)}"
+
+@Composable
+private fun FareDetailRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
 
 private suspend fun reverseGeocode(context: Context, point: LatLng): String =
     withContext(Dispatchers.IO) {

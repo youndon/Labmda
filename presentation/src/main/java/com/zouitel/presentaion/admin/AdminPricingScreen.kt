@@ -13,6 +13,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -58,11 +60,25 @@ class AdminPricingScreen : Screen {
         var deliveryRoundingIncrement by remember { mutableStateOf("1") }
         var deliveryRoundingMode by remember { mutableStateOf("NEAREST") }
 
+        val rideTypeOptions = listOf("ride", "car", "bike", "e_bike", "scooter", "motorcycle", "truck", "van", "other")
+        var selectedRideType by remember { mutableStateOf("ride") }
+        var rideTypeMenuExpanded by remember { mutableStateOf(false) }
+        var rideRules by remember { mutableStateOf<Map<String, Map<*, *>>>(emptyMap()) }
         var rideBase by remember { mutableStateOf("0.00") }
         var ridePerKm by remember { mutableStateOf("0.00") }
         var rideMinimum by remember { mutableStateOf("0.00") }
         var rideRoundingIncrement by remember { mutableStateOf("1") }
         var rideRoundingMode by remember { mutableStateOf("NEAREST") }
+
+        fun selectRideType(type: String) {
+            val rule = rideRules[type] ?: rideRules["ride"] ?: emptyMap<Any, Any>()
+            selectedRideType = type
+            rideBase = amountText(rule["baseFareCentavos"])
+            ridePerKm = amountText(rule["pricePerKmCentavos"])
+            rideMinimum = amountText(rule["minimumFareCentavos"])
+            rideRoundingIncrement = numberText(rule["roundingIncrementCentavos"], "1")
+            rideRoundingMode = numberText(rule["roundingMode"], "NEAREST")
+        }
 
         var foodCommission by remember { mutableStateOf("0") }
         var goodsCommission by remember { mutableStateOf("0") }
@@ -95,7 +111,10 @@ class AdminPricingScreen : Screen {
                     version = (config["version"] as? Number)?.toLong() ?: 0L
                     val delivery = config["delivery"] as? Map<*, *> ?: emptyMap<Any, Any>()
                     val rides = config["rides"] as? Map<*, *> ?: emptyMap<Any, Any>()
-                    val ride = rides["ride"] as? Map<*, *> ?: emptyMap<Any, Any>()
+                    rideRules = rides.entries.associate { entry ->
+                        entry.key.toString() to (entry.value as? Map<*, *> ?: emptyMap<Any, Any>())
+                    }
+                    val ride = rideRules["ride"] ?: emptyMap<Any, Any>()
                     val commissions = config["commissions"] as? Map<*, *> ?: emptyMap<Any, Any>()
                     val additional = config["additionalCharges"] as? Map<*, *> ?: emptyMap<Any, Any>()
                     val cancellation = config["cancellationFees"] as? Map<*, *> ?: emptyMap<Any, Any>()
@@ -173,6 +192,30 @@ class AdminPricingScreen : Screen {
 
                 HorizontalDivider()
                 PricingSectionTitle("Ride pricing")
+                Text(
+                    "Set a separate rate for each vehicle type. A vehicle-specific rule overrides the generic ride rule.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { rideTypeMenuExpanded = true }) {
+                        Text(selectedRideType.uppercase())
+                    }
+                    DropdownMenu(
+                        expanded = rideTypeMenuExpanded,
+                        onDismissRequest = { rideTypeMenuExpanded = false }
+                    ) {
+                        rideTypeOptions.forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(type.uppercase()) },
+                                onClick = {
+                                    selectRideType(type)
+                                    rideTypeMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                    Text("Vehicle pricing rule", modifier = Modifier.padding(top = 12.dp))
+                }
                 PricingField("Base ride fare (₱)", rideBase) { rideBase = it }
                 PricingField("Ride price per kilometre (₱)", ridePerKm) { ridePerKm = it }
                 PricingField("Minimum ride fare (₱)", rideMinimum) { rideMinimum = it }
@@ -233,6 +276,20 @@ class AdminPricingScreen : Screen {
                         saving = true
                         scope.launch {
                             try {
+                                val rideRulePayload = mapOf(
+                                    "baseFareCentavos" to moneyCentavos(rideBase),
+                                    "pricePerKmCentavos" to moneyCentavos(ridePerKm),
+                                    "minimumFareCentavos" to moneyCentavos(rideMinimum),
+                                    "roundingIncrementCentavos" to integerValue(rideRoundingIncrement, "Ride rounding increment"),
+                                    "roundingMode" to rideRoundingMode,
+                                    "additionalCharges" to emptyList<Map<String, Any>>()
+                                )
+                                val nextRideRules = mutableMapOf<String, Any?>()
+                                rideRules.forEach { (key, rule) -> nextRideRules[key] = rule }
+                                if (!nextRideRules.containsKey("ride") && selectedRideType != "ride") {
+                                    nextRideRules["ride"] = rideRulePayload
+                                }
+                                nextRideRules[selectedRideType] = rideRulePayload
                                 val configuration = mapOf(
                                     "currency" to "PHP",
                                     "delivery" to mapOf(
@@ -242,16 +299,7 @@ class AdminPricingScreen : Screen {
                                         "roundingIncrementCentavos" to integerValue(deliveryRoundingIncrement, "Delivery rounding increment"),
                                         "roundingMode" to deliveryRoundingMode
                                     ),
-                                    "rides" to mapOf(
-                                        "ride" to mapOf(
-                                            "baseFareCentavos" to moneyCentavos(rideBase),
-                                            "pricePerKmCentavos" to moneyCentavos(ridePerKm),
-                                            "minimumFareCentavos" to moneyCentavos(rideMinimum),
-                                            "roundingIncrementCentavos" to integerValue(rideRoundingIncrement, "Ride rounding increment"),
-                                            "roundingMode" to rideRoundingMode,
-                                            "additionalCharges" to emptyList<Map<String, Any>>()
-                                        )
-                                    ),
+                                    "rides" to nextRideRules,
                                     "commissions" to mapOf(
                                         "foodBps" to percentBasisPoints(foodCommission),
                                         "goodsBps" to percentBasisPoints(goodsCommission),
@@ -284,7 +332,10 @@ class AdminPricingScreen : Screen {
                                 val result = response.data<Map<String, Any?>>()
                                 version = (result["version"] as? Number)?.toLong() ?: version + 1
                                 configured = true
-                                message = "Pricing version $version published. New quotes will use these rates; existing orders and trips keep their saved pricing."
+                                rideRules = nextRideRules.mapValues { (_, rule) ->
+                                    rule as? Map<*, *> ?: emptyMap<Any, Any>()
+                                }
+                                message = "Pricing version $version published. New quotes will use the selected vehicle rate; other rates and existing trips keep their saved pricing."
                             } catch (error: Exception) {
                                 message = error.message ?: "Could not publish pricing configuration."
                             } finally {
