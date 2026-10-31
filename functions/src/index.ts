@@ -5814,6 +5814,8 @@ export const getMyWallet = onCall(
           createdAtTimestamp: Number(payoutRequest.createdAtTimestamp ?? 0),
           updatedAtTimestamp: Number(payoutRequest.updatedAtTimestamp ?? 0),
           maskedAccountNumber: asString(payoutRequest.maskedAccountNumber),
+          rejectionNote: asString(payoutRequest.rejectionNote),
+          payoutId: asString(payoutRequest.payoutId),
         });
       }
       return false;
@@ -5830,6 +5832,7 @@ export const getMyWallet = onCall(
           provider: asString(payout.provider),
           providerPayoutId: asString(payout.providerPayoutId),
           failureCode: asString(payout.failureCode),
+          failureMessage: asString(payout.failureMessage) || asString(payout.failureReason),
           createdAtTimestamp: Number(payout.createdAtTimestamp ?? 0),
           updatedAtTimestamp: Number(payout.updatedAtTimestamp ?? 0),
           maskedAccountNumber: asString(payout.maskedAccountNumber),
