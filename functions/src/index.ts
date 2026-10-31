@@ -6,6 +6,7 @@ import { defineSecret, defineString } from "firebase-functions/params";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { onValueWritten } from "firebase-functions/v2/database";
+import { calculateNetParticipantShares, isSettledGcashPaymentTransaction, matchesGcashPaymentTransaction, phpAmountToCentavos } from "./xenditSettlement";
 
 initializeApp();
 
@@ -634,6 +635,122 @@ function centsFromPhp(value: number, field: string): number {
 
 function phpFromCents(centavos: number): number {
   return Number((centavos / 100).toFixed(2));
+}
+
+type XenditSettlementResult = {
+  transactionId: string;
+  settlementStatus: string;
+  estimatedSettlementAtTimestamp: number;
+  netAmountCentavos: number;
+  feeCentavos: number;
+};
+
+async function findXenditGcashSettlement(
+  payment: Record<string, unknown>,
+  secret: string
+): Promise<{ transaction: Record<string, unknown>; settled: boolean } | null> {
+  const referenceId = asString(payment.referenceId);
+  if (!referenceId) throw new HttpsError("data-loss", "The saved GCash payment reference is missing.");
+
+  const url = new URL("https://api.xendit.co/transactions");
+  url.searchParams.set("types", "PAYMENT");
+  url.searchParams.set("reference_id", referenceId);
+  url.searchParams.set("currency", "PHP");
+  url.searchParams.set("limit", "10");
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
+      "Content-Type": "application/json",
+    },
+  });
+  const body = asRecord(await response.json().catch(() => ({})));
+  if (!response.ok) {
+    logger.warn("Xendit transaction settlement lookup failed", {
+      status: response.status,
+      referenceId,
+    });
+    throw new HttpsError("unavailable", "Xendit settlement status is temporarily unavailable.");
+  }
+
+  const rows = Array.isArray(body.data) ? body.data.map(asRecord) : [];
+  const transaction = rows.find((row) => asString(row.reference_id) === referenceId);
+  if (!transaction) return null;
+
+  if (!matchesGcashPaymentTransaction(payment, transaction)) {
+    logger.error("Xendit settlement transaction did not match the saved GCash payment", {
+      referenceId,
+      transactionId: asString(transaction.id),
+    });
+    throw new HttpsError("data-loss", "Xendit settlement details do not match the saved GCash payment.");
+  }
+
+  return {
+    transaction,
+    settled: isSettledGcashPaymentTransaction(payment, transaction),
+  };
+}
+
+async function getXenditAvailableBalanceCentavos(secret: string): Promise<number> {
+  const response = await fetch("https://api.xendit.co/balance?account_type=CASH&currency=PHP", {
+    method: "GET",
+    headers: {
+      Authorization: "Basic " + Buffer.from(secret + ":").toString("base64"),
+      "Content-Type": "application/json",
+    },
+  });
+  const body = asRecord(await response.json().catch(() => ({})));
+  if (!response.ok) {
+    logger.warn("Xendit PHP available-balance lookup failed", { status: response.status });
+    throw new HttpsError("unavailable", "Xendit available balance could not be verified.");
+  }
+  const balanceCentavos = phpAmountToCentavos(body.balance);
+  if (balanceCentavos === null) {
+    throw new HttpsError("data-loss", "Xendit returned an invalid PHP cash balance.");
+  }
+  return balanceCentavos;
+}
+
+async function sumWalletAvailableLiabilityCentavos(): Promise<number> {
+  const snapshot = await db.ref("wallets").get();
+  let total = 0;
+  snapshot.forEach((child) => {
+    const wallet = asRecord(child.val());
+    const available = nonNegativeInteger(wallet.availableCentavos ?? 0, "wallet available balance");
+    total += available;
+    if (!Number.isSafeInteger(total)) {
+      throw new HttpsError("data-loss", "Aggregate wallet liabilities exceed the supported amount range.");
+    }
+    return false;
+  });
+  return total;
+}
+
+function participantEarningsCentavos(
+  entityType: "ORDER" | "TRIP",
+  entity: Record<string, unknown>,
+  payment: Record<string, unknown>
+): number {
+  const breakdown = asRecord(payment.breakdown ?? entity.breakdown);
+  const amount = nonNegativeInteger(payment.amountCentavos, "payment amount");
+  const net = calculateNetParticipantShares({
+    grossAmountCentavos: amount,
+    merchantCentavos: entityType === "ORDER" ? nonNegativeInteger(breakdown.merchantShare ?? 0, "merchant share") : 0,
+    courierCentavos: entityType === "ORDER" ? nonNegativeInteger(breakdown.courierShare ?? 0, "courier share") : 0,
+    driverCentavos: entityType === "TRIP" ? nonNegativeInteger(breakdown.driverShare ?? 0, "driver share") : 0,
+    platformCentavos: nonNegativeInteger(breakdown.platformShare ?? 0, "platform share"),
+    refunds: asRecord(payment.refunds) as Record<string, {
+      amountCentavos?: unknown;
+      status?: unknown;
+      walletSettlementStatus?: unknown;
+    }>,
+  });
+  const total = net.merchantCentavos + net.courierCentavos + net.driverCentavos;
+  if (!Number.isSafeInteger(total)) {
+    throw new HttpsError("data-loss", "Participant earnings exceed the supported amount range.");
+  }
+  return total;
 }
 
 function roundCentavos(amount: number, increment: number, mode: RoundingMode): number {
@@ -4682,7 +4799,7 @@ async function reconcileCompletedPaymentEarnings(
 ): Promise<boolean> {
   if (
     asString(payment.provider).toUpperCase() !== "XENDIT" ||
-    asString(payment.status).toUpperCase() !== "PAID" ||
+    !["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].includes(asString(payment.status).toUpperCase()) ||
     asString(entity.paymentMethod).toUpperCase() !== "GCASH"
   ) return false;
 
@@ -4697,6 +4814,18 @@ async function reconcileCompletedPaymentEarnings(
     throw new HttpsError("failed-precondition", "The paid transaction breakdown does not reconcile to its received amount.");
   }
 
+  const netShares = calculateNetParticipantShares({
+    grossAmountCentavos: amount,
+    merchantCentavos: merchantShare,
+    courierCentavos: courierShare,
+    driverCentavos: driverShare,
+    platformCentavos: platformShare,
+    refunds: asRecord(payment.refunds) as Record<string, {
+      amountCentavos?: unknown;
+      status?: unknown;
+      walletSettlementStatus?: unknown;
+    }>,
+  });
   const merchantId = asString(entity.merchantId) || asString(entity.sourceId);
   const courierId = asString(entity.deliveryId);
   const driverId = asString(entity.driverId);
@@ -4707,21 +4836,46 @@ async function reconcileCompletedPaymentEarnings(
   const complete = entityType === "ORDER"
     ? asString(entity.status).toUpperCase() === "DELIVERED"
     : asString(entity.status).toUpperCase() === "COMPLETED";
+  const settlementConfirmed = ["SETTLED", "EARLY_SETTLED"].includes(
+    asString(payment.settlementStatus).toUpperCase()
+  );
+  const availableFundsConfirmed = Number(payment.availableFundsConfirmedAtTimestamp ?? 0) > 0;
+  const release = complete && settlementConfirmed && availableFundsConfirmed &&
+    !netShares.refundReconciliationPending;
   const hasPending = asString(payment.earningsPendingStatus).toUpperCase() === "PENDING";
-  if (!complete && hasPending) return false;
+
+  if (!release && hasPending) {
+    if (complete) {
+      await db.ref("payments/" + entityId).update({
+        earningsSettlementStatus: netShares.refundReconciliationPending
+          ? "WAITING_FOR_REFUND_RECONCILIATION"
+          : settlementConfirmed
+            ? "WAITING_FOR_AVAILABLE_FUNDS"
+            : "AWAITING_SETTLEMENT",
+        ...(netShares.refundReconciliationPending ? { availableFundsConfirmedAtTimestamp: null } : {}),
+        serviceCompletedAtTimestamp: Number(entity.completedAtTimestamp ?? entity.updatedAtTimestamp ?? Date.now()),
+      });
+    }
+    return false;
+  }
 
   const shares: Array<{ ownerId: string; accountType: string; amount: number }> = [];
-  if (merchantShare > 0) shares.push({ ownerId: merchantId, accountType: "MERCHANT", amount: merchantShare });
-  if (courierShare > 0) shares.push({ ownerId: courierId, accountType: "COURIER", amount: courierShare });
-  if (driverShare > 0) shares.push({ ownerId: driverId, accountType: "DRIVER", amount: driverShare });
-  const participantTotal = merchantShare + courierShare + driverShare;
-  const entryId = (complete ? "earning_release_" : "earning_pending_") + entityType.toLowerCase() + "_" + entityId;
+  const releaseMerchantShare = release ? netShares.merchantCentavos : merchantShare;
+  const releaseCourierShare = release ? netShares.courierCentavos : courierShare;
+  const releaseDriverShare = release ? netShares.driverCentavos : driverShare;
+  if (releaseMerchantShare > 0) shares.push({ ownerId: merchantId, accountType: "MERCHANT", amount: releaseMerchantShare });
+  if (releaseCourierShare > 0) shares.push({ ownerId: courierId, accountType: "COURIER", amount: releaseCourierShare });
+  if (releaseDriverShare > 0) shares.push({ ownerId: driverId, accountType: "DRIVER", amount: releaseDriverShare });
+  const participantTotal = release
+    ? releaseMerchantShare + releaseCourierShare + releaseDriverShare
+    : merchantShare + courierShare + driverShare;
+  const entryId = (release ? "earning_release_" : "earning_pending_") + entityType.toLowerCase() + "_" + entityId;
   const lines: LedgerLine[] = [];
   const recoveredByOwner = new Map<string, number>();
 
-  if (complete) {
-    // Apply each wallet mutation idempotently first, then build the immutable journal
-    // from the exact recovered/debt-offset amount returned by that wallet transaction.
+  if (release) {
+    // Wallet balances become withdrawable only after Xendit confirms transaction settlement,
+    // posted refunds are reconciled, and the current PHP cash balance has been checked.
     for (const share of shares) {
       const eventId = "earning_release_" + entryId + "_" + share.ownerId;
       const result = await applyWalletEarningCredit(share.ownerId, eventId, share.amount, hasPending);
@@ -4736,47 +4890,87 @@ async function reconcileCompletedPaymentEarnings(
         if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
       }
     } else {
-      lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
+      lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", netShares.netAmountCentavos));
       for (const share of shares) {
         const recovered = recoveredByOwner.get(share.ownerId) ?? 0;
         const available = share.amount - recovered;
         if (available > 0) lines.push(ledgerLine(share.accountType + "_AVAILABLE_PAYABLE", share.ownerId, "CREDIT", available));
         if (recovered > 0) lines.push(ledgerLine("WALLET_REFUND_RECEIVABLE", share.ownerId, "CREDIT", recovered));
       }
-      if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
+      if (netShares.platformCentavos > 0) {
+        lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", netShares.platformCentavos));
+      }
     }
   } else {
+    // Keep gross participant shares pending; refund postings reduce these balances
+    // before any later settlement release.
     lines.push(ledgerLine("XENDIT_GATEWAY_CLEARING", "PLATFORM", "DEBIT", amount));
-    for (const share of shares) lines.push(ledgerLine(share.accountType + "_PENDING_PAYABLE", share.ownerId, "CREDIT", share.amount));
+    if (merchantShare > 0) lines.push(ledgerLine("MERCHANT_PENDING_PAYABLE", merchantId, "CREDIT", merchantShare));
+    if (courierShare > 0) lines.push(ledgerLine("COURIER_PENDING_PAYABLE", courierId, "CREDIT", courierShare));
+    if (driverShare > 0) lines.push(ledgerLine("DRIVER_PENDING_PAYABLE", driverId, "CREDIT", driverShare));
     if (platformShare > 0) lines.push(ledgerLine("PLATFORM_COMMISSION_REVENUE", "PLATFORM", "CREDIT", platformShare));
   }
 
-  const journalTotal = complete && hasPending ? participantTotal : amount;
+  const journalTotal = release && hasPending
+    ? participantTotal
+    : release
+      ? netShares.netAmountCentavos
+      : amount;
   if (journalTotal <= 0) {
-    await db.ref("payments/" + entityId).update({ earningsSettlementStatus: "RELEASED", earningsReleasedAtTimestamp: Date.now() });
+    if (release) {
+      await db.ref("payments/" + entityId).update({
+        earningsSettlementStatus: "RELEASED",
+        earningsReleasedAtTimestamp: Date.now(),
+      });
+    }
     return true;
   }
   const entry = {
-    operationId: (complete ? "EARNING_RELEASE:" : "EARNING_PENDING:") + entityType + ":" + entityId,
-    entryType: complete ? "EARNING_RELEASE" : "EARNING_PENDING",
+    operationId: (release ? "EARNING_RELEASE:" : "EARNING_PENDING:") + entityType + ":" + entityId,
+    entryType: release ? "EARNING_RELEASE" : "EARNING_PENDING",
     entityType,
     entityId,
     paymentId: asString(payment.providerReference),
     totalCentavos: journalTotal,
     lines,
-    memo: complete ? "Move pending GCash earnings to available after service completion" : "Reserve paid GCash earnings pending service completion",
+    memo: release
+      ? "Move settled GCash earnings to available after refund and balance verification"
+      : "Reserve paid GCash earnings pending service completion or Xendit settlement",
     createdAtTimestamp: Number(payment.earningsPendingAtTimestamp ?? payment.paidAtTimestamp ?? payment.updatedAtTimestamp ?? entity.createdAtTimestamp ?? 1),
   };
   await ensureMarketplaceLedgerEntry(entryId, entry);
 
-  if (!complete) {
+  if (!release) {
     for (const share of shares) {
       await applyWalletDeltas(share.ownerId, "earning_pending_" + entryId + "_" + share.ownerId, { pendingCentavos: share.amount });
     }
-  }
-
-  if (complete) {
-
+    await db.ref("payments/" + entityId).update({
+      earningsPendingStatus: "PENDING",
+      earningsPendingLedgerEntryId: entryId,
+      earningsSettlementStatus: complete
+        ? netShares.refundReconciliationPending
+          ? "WAITING_FOR_REFUND_RECONCILIATION"
+          : settlementConfirmed
+            ? "WAITING_FOR_AVAILABLE_FUNDS"
+            : "AWAITING_SETTLEMENT"
+        : "PENDING_SERVICE_COMPLETION",
+      ...(complete ? {
+        serviceCompletedAtTimestamp: Number(entity.completedAtTimestamp ?? entity.updatedAtTimestamp ?? Date.now()),
+      } : {}),
+    });
+    await db.ref((entityType === "ORDER" ? "orders/" : "trips/") + entityId).update({
+      earningsPendingStatus: "PENDING",
+      earningsPendingLedgerEntryId: entryId,
+      ...(complete ? {
+        earningsSettlementStatus: netShares.refundReconciliationPending
+          ? "WAITING_FOR_REFUND_RECONCILIATION"
+          : settlementConfirmed
+            ? "WAITING_FOR_AVAILABLE_FUNDS"
+            : "AWAITING_SETTLEMENT",
+        serviceCompletedAtTimestamp: Number(entity.completedAtTimestamp ?? entity.updatedAtTimestamp ?? Date.now()),
+      } : {}),
+    });
+  } else {
     await db.ref("payments/" + entityId).update({
       earningsPendingStatus: hasPending ? "RELEASED" : asString(payment.earningsPendingStatus),
       earningsSettlementStatus: "RELEASED",
@@ -4787,16 +4981,6 @@ async function reconcileCompletedPaymentEarnings(
       earningsSettlementStatus: "RELEASED",
       earningsReleasedAtTimestamp: Date.now(),
       earningsLedgerEntryId: entryId,
-    });
-  } else {
-    await db.ref("payments/" + entityId).update({
-      earningsPendingStatus: "PENDING",
-      earningsPendingLedgerEntryId: entryId,
-      earningsPendingAtTimestamp: Date.now(),
-    });
-    await db.ref((entityType === "ORDER" ? "orders/" : "trips/") + entityId).update({
-      earningsPendingStatus: "PENDING",
-      earningsPendingLedgerEntryId: entryId,
     });
   }
   return true;
@@ -4974,66 +5158,146 @@ async function reconcileRefundedPaymentEarnings(entityId: string, refundAttemptI
 }
 
 export const reconcileMarketplaceEarnings = onSchedule(
-  { schedule: "every 5 minutes", timeZone: "Asia/Manila", region: REGION },
+  {
+    schedule: "every 5 minutes",
+    timeZone: "Asia/Manila",
+    region: REGION,
+    secrets: [XENDIT_PAYOUT_SECRET_KEY],
+  },
   async () => {
+    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
     let released = 0;
+    let pending = 0;
     let failed = 0;
-    const paidSnapshot = await db.ref("payments").orderByChild("status").equalTo("PAID").limitToLast(500).get();
-    const paidRows: Array<{ id: string; value: Record<string, unknown> }> = [];
-    paidSnapshot.forEach((child) => {
-      if (child.key) paidRows.push({ id: child.key, value: asRecord(child.val()) });
-      return false;
-    });
+    const paymentSnapshots = await Promise.all(
+      ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].map((status) =>
+        db.ref("payments").orderByChild("status").equalTo(status).limitToLast(500).get()
+      )
+    );
+    const paidRowsById = new Map<string, Record<string, unknown>>();
+    for (const snapshot of paymentSnapshots) {
+      snapshot.forEach((child) => {
+        if (child.key) paidRowsById.set(child.key, asRecord(child.val()));
+        return false;
+      });
+    }
+    const paidRows = Array.from(paidRowsById.entries()).map(([id, value]) => ({ id, value }));
+
     for (const row of paidRows) {
       try {
-        const payment = row.value;
-        if (asString(payment.provider).toUpperCase() !== "XENDIT" ||
-            asString(payment.channelCode).toUpperCase() !== "GCASH" ||
-            asString(payment.earningsSettlementStatus).toUpperCase() === "RELEASED") continue;
+        let payment = row.value;
+        if (
+          asString(payment.provider).toUpperCase() !== "XENDIT" ||
+          asString(payment.channelCode).toUpperCase() !== "GCASH" ||
+          asString(payment.earningsSettlementStatus).toUpperCase() === "RELEASED"
+        ) continue;
+
         const entityType = asString(payment.entityType).toUpperCase() === "TRIP" ? "TRIP" : "ORDER";
         const entityPath = entityType === "TRIP" ? "trips/" : "orders/";
         const entitySnapshot = await db.ref(entityPath + row.id).get();
         if (!entitySnapshot.exists()) continue;
-        if (await reconcileCompletedPaymentEarnings(entityType, row.id, asRecord(entitySnapshot.val()), payment)) released++;
+        const entity = asRecord(entitySnapshot.val());
+        const complete = entityType === "ORDER"
+          ? asString(entity.status).toUpperCase() === "DELIVERED"
+          : asString(entity.status).toUpperCase() === "COMPLETED";
+
+        let settlementConfirmed = ["SETTLED", "EARLY_SETTLED"].includes(
+          asString(payment.settlementStatus).toUpperCase()
+        );
+
+        // Reserve participant earnings as pending as soon as payment is confirmed.
+        // A completed service cannot release those earnings until the provider settlement
+        // and available PHP balance have both been independently verified.
+        if (!complete || !settlementConfirmed) {
+          if (await reconcileCompletedPaymentEarnings(entityType, row.id, entity, payment)) pending++;
+        }
+
+        if (!settlementConfirmed) {
+          if (!secret) continue;
+          const matched = await findXenditGcashSettlement(payment, secret);
+          if (!matched) {
+            await db.ref("payments/" + row.id).update({
+              settlementStatus: "PENDING",
+              settlementLastCheckedAtTimestamp: Date.now(),
+            });
+            continue;
+          }
+          const transaction = matched.transaction;
+          const providerSettlementStatus = asString(transaction.settlement_status).toUpperCase();
+          settlementConfirmed = matched.settled;
+          const estimatedAt = Date.parse(asString(transaction.estimated_settlement_time));
+          const settlementFields = {
+            settlementStatus: settlementConfirmed ? providerSettlementStatus : "PENDING",
+            settlementTransactionId: asString(transaction.id),
+            estimatedSettlementAtTimestamp: Number.isFinite(estimatedAt) ? estimatedAt : 0,
+            settlementNetAmountCentavos: phpAmountToCentavos(transaction.net_amount) ?? 0,
+            settlementLastCheckedAtTimestamp: Date.now(),
+          };
+          await db.ref("payments/" + row.id).update(settlementFields);
+          payment = { ...payment, ...settlementFields };
+        }
+
+        if (!settlementConfirmed || !complete || !secret) continue;
+
+        // Clear any previous one-time balance confirmation before rechecking. If a function
+        // execution stops between the check and ledger release, the next run must check again.
+        await db.ref("payments/" + row.id).update({
+          availableFundsConfirmedAtTimestamp: null,
+          earningsSettlementStatus: "WAITING_FOR_AVAILABLE_FUNDS",
+        });
+        payment = { ...payment, availableFundsConfirmedAtTimestamp: null };
+
+        const participantTotal = participantEarningsCentavos(entityType, entity, payment);
+        if (participantTotal > 0) {
+          const [availableBalanceCentavos, walletLiabilitiesCentavos] = await Promise.all([
+            getXenditAvailableBalanceCentavos(secret),
+            sumWalletAvailableLiabilityCentavos(),
+          ]);
+          const requiredCentavos = walletLiabilitiesCentavos + participantTotal;
+          if (!Number.isSafeInteger(requiredCentavos) || availableBalanceCentavos < requiredCentavos) {
+            await db.ref("payments/" + row.id).update({
+              earningsSettlementStatus: "WAITING_FOR_AVAILABLE_FUNDS",
+              availableFundsConfirmedAtTimestamp: null,
+              availableBalanceSnapshotCentavos: availableBalanceCentavos,
+              availableBalanceCheckedAtTimestamp: Date.now(),
+            });
+            continue;
+          }
+          const confirmedAt = Date.now();
+          await db.ref("payments/" + row.id).update({
+            availableFundsConfirmedAtTimestamp: confirmedAt,
+            availableBalanceSnapshotCentavos: availableBalanceCentavos,
+            availableBalanceCheckedAtTimestamp: confirmedAt,
+          });
+          payment = {
+            ...payment,
+            availableFundsConfirmedAtTimestamp: confirmedAt,
+            availableBalanceSnapshotCentavos: availableBalanceCentavos,
+          };
+        } else {
+          const confirmedAt = Date.now();
+          await db.ref("payments/" + row.id).update({
+            availableFundsConfirmedAtTimestamp: confirmedAt,
+            availableBalanceCheckedAtTimestamp: confirmedAt,
+          });
+          payment = { ...payment, availableFundsConfirmedAtTimestamp: confirmedAt };
+        }
+
+        if (await reconcileCompletedPaymentEarnings(entityType, row.id, entity, payment)) released++;
       } catch (error) {
         failed++;
-        logger.error("Paid transaction earnings reservation/release failed", { entityId: row.id, error });
-      }
-    }
-    const orderSnapshot = await db.ref("orders").orderByChild("status").equalTo("DELIVERED").limitToFirst(300).get();
-    const orders: Array<{ id: string; value: Record<string, unknown> }> = [];
-    orderSnapshot.forEach((child) => {
-      if (child.key) orders.push({ id: child.key, value: asRecord(child.val()) });
-      return false;
-    });
-    for (const order of orders) {
-      try {
-        const payment = asRecord((await db.ref("payments/" + order.id).get()).val());
-        if (asString(payment.earningsSettlementStatus) === "RELEASED") continue;
-        if (await reconcileCompletedPaymentEarnings("ORDER", order.id, order.value, payment)) released++;
-      } catch (error) {
-        failed++;
-        logger.error("Order earnings settlement failed", { orderId: order.id, error });
+        logger.error("Paid transaction settlement/earnings reconciliation failed", {
+          entityId: row.id,
+          error,
+        });
       }
     }
 
-    const tripSnapshot = await db.ref("trips").orderByChild("status").equalTo("COMPLETED").limitToFirst(300).get();
-    const trips: Array<{ id: string; value: Record<string, unknown> }> = [];
-    tripSnapshot.forEach((child) => {
-      if (child.key) trips.push({ id: child.key, value: asRecord(child.val()) });
-      return false;
+    logger.info("Marketplace settlement and earnings reconciliation finished", {
+      released,
+      pending,
+      failed,
     });
-    for (const trip of trips) {
-      try {
-        const payment = asRecord((await db.ref("payments/" + trip.id).get()).val());
-        if (asString(payment.earningsSettlementStatus) === "RELEASED") continue;
-        if (await reconcileCompletedPaymentEarnings("TRIP", trip.id, trip.value, payment)) released++;
-      } catch (error) {
-        failed++;
-        logger.error("Ride earnings settlement failed", { tripId: trip.id, error });
-      }
-    }
-    logger.info("Marketplace earnings reconciliation finished", { released, failed });
   }
 );
 
@@ -5400,6 +5664,13 @@ async function reserveAndSubmitPayout(
   const amount = requestedAmountCentavos ?? availableAmount;
   if (!Number.isSafeInteger(amount) || amount <= 0 || amount > availableAmount) {
     throw new HttpsError("failed-precondition", "Available earnings are lower than the requested payout amount.");
+  }
+  const xenditAvailableBalanceCentavos = await getXenditAvailableBalanceCentavos(secret);
+  if (xenditAvailableBalanceCentavos < amount) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Xendit's available PHP balance is not sufficient for this payout. The request remains unsubmitted."
+    );
   }
   if (walletNumber(wallet, "refundDebtCentavos") > 0) {
     throw new HttpsError("failed-precondition", "Outstanding refund recovery must be cleared from future earnings before another payout.");

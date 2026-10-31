@@ -612,3 +612,53 @@ Trusted Functions maintain browse-safe `publicDrivers` and `publicShops` views p
 5. Set `XENDIT_SECRET_KEY`, `XENDIT_WEBHOOK_TOKEN`, `XENDIT_PAYOUT_SECRET_KEY`, `XENDIT_PAYOUT_WEBHOOK_TOKEN` and `PAYOUT_ACCOUNT_ENCRYPTION_KEY` through `firebase functions:secrets:set`, then configure provider webhook URLs.
 
 Deploying Functions does not publish database rules. This PR does not deploy to the live Firebase project. Review the current production RTDB shape and run the emulator authorization tests before deploying; unknown paths are denied by default. CI compilation does not exercise provider callbacks or live payouts.
+
+
+## Settlement-aware GCash earnings and payout availability
+
+A Xendit `payment.capture` callback confirms that the customer paid; it does **not** mean the
+payment has settled into the Labmda business cash balance. Labmda therefore keeps merchant,
+courier and driver shares in `wallets/{uid}/pendingCentavos` until the Xendit transaction itself
+reports `settlement_status: SETTLED` or `EARLY_SETTLED`.
+
+The `reconcileMarketplaceEarnings` scheduled function uses the Xendit Transactions API to find
+the exact transaction by the saved `reference_id`. It verifies the PHP amount, GCash channel,
+Money-In direction, successful transaction status, and the Payment Request ID (or payment ID)
+before accepting the settlement status. A missing or mismatched transaction never releases
+earnings.
+
+Before moving settled participant shares into wallet available balances, Functions reads the
+current PHP cash balance from Xendit's Balance API. It requires that balance to cover existing
+wallet available liabilities plus the new participant earnings. If it cannot, earnings remain
+pending with `WAITING_FOR_AVAILABLE_FUNDS`. Admin payout approval performs another live balance
+check for the requested amount immediately before reserving and submitting the payout. The
+Xendit Payouts API remains the final authority and can still reject a payout if the balance
+changes or fees/limits apply.
+
+### Xendit API key permissions
+
+The server-side `XENDIT_PAYOUT_SECRET_KEY` must have all of these permissions enabled for the
+account/environment used by the Functions runtime:
+
+- **Money-Out** write — create direct recipient payouts.
+- **Balance** read — retrieve the available PHP cash balance.
+- **Transaction** read — retrieve the transaction-specific settlement status.
+
+The payment collection key remains separate as `XENDIT_SECRET_KEY`. Never put either secret
+in Android code, Realtime Database, or committed environment files.
+
+### Standard account, without XenPlatform
+
+Labmda does not use XenPlatform. Direct payouts are sent from the Labmda business account to the
+recipient's supported destination. Do not send a `for-user-id` header and do not use the
+XenPlatform Transfers API or sub-account balance routing.
+
+The current Android payout-account form supports GCash only. Bank payout destinations and
+business-entity recipient profiles still require their channel-specific recipient fields and
+must be implemented only after the exact Xendit coverage/schema and the account's approved use
+case have been confirmed.
+
+**Live-payment gate:** keep live collections and payouts disabled until Xendit confirms that this
+specific marketplace model is approved for the Labmda account, and the dedicated security and
+end-to-end testing phases have passed. Public API documentation confirms technical endpoints;
+it cannot confirm the commercial approval or permissions on an individual Xendit account.
