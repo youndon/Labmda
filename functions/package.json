@@ -6,7 +6,9 @@
     "build:watch": "tsc --watch",
     "serve": "npm run build && cd .. && firebase --config firebase.emulator.json emulators:start --project demo-labmda --only functions,database,auth",
     "deploy": "npm run build && cd .. && firebase deploy --only functions",
-    "logs": "cd .. && firebase functions:log"
+    "logs": "cd .. && firebase functions:log",
+    "test:payout-migration": "node --test test/payout-migration.test.cjs",
+    "migrate:payouts": "node scripts/migrate-payout-requests.cjs"
   },
   "engines": {
     "node": "22"
