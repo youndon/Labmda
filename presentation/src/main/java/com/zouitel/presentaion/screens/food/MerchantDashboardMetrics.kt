@@ -36,6 +36,6 @@ fun calculateMerchantDashboardMetrics(orders: List<MerchantOrderSnapshot>): Merc
         outForDeliveryOrders = orders.count { it.status == "OUT_FOR_DELIVERY" },
         todayOrders = normalized.count { it.second >= today },
         todaySales = delivered.filter { it.second >= today }.sumOf { it.first.salesAmount },
-        weekSales = delivered.filter { it.second >= week }.sumOf { it.first.totalPrice }
+        weekSales = delivered.filter { it.second >= week }.sumOf { it.first.salesAmount }
     )
 }
