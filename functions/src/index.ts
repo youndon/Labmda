@@ -3565,6 +3565,7 @@ export const xenditPaymentWebhook = onRequest(
       response.status(503).send("Payment update could not be applied");
       return;
     }
+    await markWebhookEventProcessed(webhookEventKey);
     response.status(200).send("OK");
   }
 );
