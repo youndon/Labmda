@@ -17,6 +17,9 @@ data class UserProfile(
     val email: String? = null,
     val phoneNumber: String? = null,
     val photoUrl: String? = null,
+    val restaurantName: String = "",
+    val restaurantAddress: String = "",
+    val restaurantImageUrl: String = "",
     //---------------------------
 //    val driveMode: UserMode = UserMode.PASSENGER,
 //    val driverStatus: Status = Status.NONE,
