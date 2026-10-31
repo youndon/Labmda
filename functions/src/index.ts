@@ -5822,12 +5822,25 @@ export const adminApprovePayoutRequest = onCall(
     if (asString(wallet.activePayoutRequestId) !== requestId) {
       throw new HttpsError("failed-precondition", "The payout request no longer holds the wallet request lock.");
     }
-    await requestRef.update({
-      status: "APPROVING",
-      approvedBy: adminUid,
-      approvalStartedAtTimestamp: Date.now(),
-      updatedAtTimestamp: Date.now(),
+    let approvalClaimError = "";
+    const approvalClaim = await requestRef.transaction((rawValue) => {
+      const current = asRecord(rawValue);
+      const currentStatus = asString(current.status);
+      if (currentStatus !== "PENDING_ADMIN_APPROVAL" && currentStatus !== "APPROVING") {
+        approvalClaimError = "This payout request is no longer awaiting approval.";
+        return;
+      }
+      return {
+        ...current,
+        status: "APPROVING",
+        approvedBy: adminUid,
+        approvalStartedAtTimestamp: Number(current.approvalStartedAtTimestamp ?? Date.now()),
+        updatedAtTimestamp: Date.now(),
+      };
     });
+    if (!approvalClaim.committed) {
+      throw new HttpsError("failed-precondition", approvalClaimError || "The payout request could not be claimed for approval.");
+    }
 
     try {
       const payout = await reserveAndSubmitPayout(uid, requestKey, false, amountCentavos, requestId);
