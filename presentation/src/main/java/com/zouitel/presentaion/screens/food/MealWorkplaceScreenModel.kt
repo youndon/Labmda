@@ -4,6 +4,8 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.FirebaseImageUploader
 import com.zouitel.presentaion.common.PickedImage
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.auth.auth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +16,7 @@ import kotlinx.coroutines.launch
 class MealWorkplaceScreenModel(
     private val repository: FoodRepository = FoodRepository()
 ) : ScreenModel {
+    private val auth = Firebase.auth
 
     private val _imageUpload = MutableStateFlow<ImageUploadState>(ImageUploadState.Idle)
     val imageUpload: StateFlow<ImageUploadState> = _imageUpload.asStateFlow()
