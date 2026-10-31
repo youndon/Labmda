@@ -104,6 +104,9 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember(openHistoryOnStart) { mutableStateOf(openHistoryOnStart) }
+        var showCheckout by remember { mutableStateOf(false) }
+        var checkoutName by remember { mutableStateOf("") }
+        var checkoutPhone by remember { mutableStateOf("") }
         var hasCenteredOnPickup by remember { mutableStateOf(false) }
 
         var hasLocationPermission by remember {
@@ -372,16 +375,34 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                         destination = null
                                         destinationAddress = ""
                                     },
-                                    onSubmit = { name, phone -> submitTrip(name, phone, selectedDriver) }
-                                )
-                                PaymentMethodSelector(
-                                    selectedMethod = paymentUiState.selectedMethod,
-                                    onMethodSelected = paymentScreenModel::selectMethod,
-                                    enabled = !paymentUiState.isSubmitting
+                                    onSubmit = { name, phone ->
+                                        checkoutName = name
+                                        checkoutPhone = phone
+                                        showCheckout = true
+                                    }
                                 )
                             }
                         }
                     }
+                }
+            }
+
+            if (showCheckout && activeTrip == null) {
+                ModalBottomSheet(onDismissRequest = { showCheckout = false }) {
+                    CheckoutReviewSheet(
+                        pickupAddress = pickupAddress,
+                        destinationAddress = destinationAddress,
+                        vehicleType = vehicleType,
+                        distanceKm = distanceKm,
+                        indicativeFare = fare,
+                        selectedMethod = paymentUiState.selectedMethod,
+                        onMethodSelected = paymentScreenModel::selectMethod,
+                        isSubmitting = paymentUiState.isSubmitting,
+                        onConfirm = {
+                            showCheckout = false
+                            submitTrip(checkoutName, checkoutPhone, selectedDriver)
+                        }
+                    )
                 }
             }
 
@@ -494,7 +515,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 Icon(Icons.Default.MyLocation, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text("Pickup location", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("PICKUP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                     Text(
                         if (hasPickup) pickupAddress.ifBlank { "Resolving address…" } else "Locating you…",
                         style = MaterialTheme.typography.bodyMedium,
@@ -508,7 +529,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 Icon(Icons.Default.Flag, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Destination", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("DROP-OFF", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.SemiBold)
                     Text(
                         if (hasDestination) destinationAddress.ifBlank { "Resolving address…" }
                         else "Tap anywhere on map to set destination",
@@ -570,16 +591,16 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Approx. ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "Est. ₱${"%.2f".format(fare)}",
+                        "Preview ₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
 
                 PayButton(
-                    label = if (selectedDriver != null) "Request ${selectedDriver.fullName}" else "Request Ride",
+                    label = "Review ride",
                     enabled = name.isNotBlank() && distanceKm > 0.05,
                     isLoading = isSubmitting,
                     onClick = { onSubmit(name.trim(), phone.trim()) }
@@ -588,6 +609,74 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         }
     }
 
+    @Composable
+    private fun CheckoutReviewSheet(
+        pickupAddress: String,
+        destinationAddress: String,
+        vehicleType: VehicleType,
+        distanceKm: Double,
+        indicativeFare: Double,
+        selectedMethod: com.zouitel.presentaion.model.PaymentMethod,
+        onMethodSelected: (com.zouitel.presentaion.model.PaymentMethod) -> Unit,
+        isSubmitting: Boolean,
+        onConfirm: () -> Unit
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Review your ride", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+            Text("Check your route and payment method before requesting a driver.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.MyLocation, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("PICKUP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(pickupAddress.ifBlank { "Current location" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Flag, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("DROP-OFF", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(destinationAddress.ifBlank { "Selected map destination" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            }
+            Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Ride type", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.weight(1f))
+                        Text(vehicleType.name.replace('_', ' '), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Map distance (approx.)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.weight(1f))
+                        Text("${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Indicative fare", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text("Not the final amount", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text("₱${"%.2f".format(indicativeFare)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            Text("Final fare is calculated securely by Labmda using the road route and current administrator pricing. The server-confirmed amount may differ from this map preview.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            PaymentMethodSelector(selectedMethod = selectedMethod, onMethodSelected = onMethodSelected, enabled = !isSubmitting)
+            PayButton(label = "Confirm and request ride", enabled = distanceKm > 0.05, isLoading = isSubmitting, onClick = onConfirm)
+        }
+    }
     @Composable
     private fun DriverRequestSheet(
         driver: UserProfile,
