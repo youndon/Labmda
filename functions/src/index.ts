@@ -1248,37 +1248,51 @@ export const getTrackingRoute = onCall(
       throw new HttpsError("not-found", "The order could not be found.");
     }
     const order = asRecord(orderSnapshot.val());
-    if (asString(order.clientId) !== uid) {
-      throw new HttpsError("permission-denied", "You cannot track this order.");
+    const isCustomer = asString(order.clientId) === uid;
+    const isAssignedCourier = asString(order.deliveryId) === uid;
+    const audience = asString(data.audience).toUpperCase();
+    if ((!isCustomer && !isAssignedCourier) || (audience === "COURIER" && !isAssignedCourier)) {
+      throw new HttpsError("permission-denied", "You cannot access this delivery route.");
     }
     if (asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY") {
-      throw new HttpsError("failed-precondition", "Live courier routing is available while the order is out for delivery.");
+      throw new HttpsError("failed-precondition", "Live routing is available while the order is out for delivery.");
     }
 
     const deliveryId = asString(order.deliveryId);
     if (!deliveryId) {
       throw new HttpsError("failed-precondition", "A courier has not been assigned to this order.");
     }
-    const [courierSnapshot] = await Promise.all([
-      db.ref("publicDrivers/" + deliveryId + "/currentLocation").get(),
-    ]);
+    const courierSnapshot = await db.ref("publicDrivers/" + deliveryId + "/currentLocation").get();
     if (!courierSnapshot.exists()) {
       throw new HttpsError("unavailable", "The courier location is not available yet.");
     }
 
     const location = asRecord(courierSnapshot.val());
-    const pickupLat = asNumber(location.latitude, "courier latitude");
-    const pickupLng = asNumber(location.longitude, "courier longitude");
-    const dropoffLat = asNumber(order.dropoffLat, "drop-off latitude");
-    const dropoffLng = asNumber(order.dropoffLng, "drop-off longitude");
-    validateCoordinates(pickupLat, pickupLng, "Courier");
-    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
+    const originLat = asNumber(location.latitude, "courier latitude");
+    const originLng = asNumber(location.longitude, "courier longitude");
+    validateCoordinates(originLat, originLng, "Courier");
+    const deliveryStage = asString(order.deliveryStage).toUpperCase() || "TO_PICKUP";
+    const routeToPickup = audience === "COURIER" && deliveryStage !== "PICKED_UP";
+    const destinationLat = asNumber(routeToPickup ? order.pickupLat : order.dropoffLat, routeToPickup ? "pickup latitude" : "drop-off latitude");
+    const destinationLng = asNumber(routeToPickup ? order.pickupLng : order.dropoffLng, routeToPickup ? "pickup longitude" : "drop-off longitude");
+    validateCoordinates(destinationLat, destinationLng, routeToPickup ? "Pickup" : "Drop-off");
 
-    const route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng, "car");
+    const route = await calculateGoogleRoute(originLat, originLng, destinationLat, destinationLng, "car");
+    let recipientName = "";
+    let recipientPhone = "";
+    if (audience === "COURIER") {
+      const recipient = asRecord((await db.ref("users/" + asString(order.clientId)).get()).val());
+      recipientName = asString(recipient.fullName) || asString(order.clientName) || "Recipient";
+      recipientPhone = asString(recipient.phoneNumber) || asString(recipient.phone) || asString(order.clientPhone);
+    }
     return {
       distanceMeters: route.distanceMeters,
       duration: route.duration,
       encodedPolyline: route.encodedPolyline,
+      routeTo: routeToPickup ? "PICKUP" : "DROPOFF",
+      deliveryStage,
+      recipientName,
+      recipientPhone,
     };
   }
 );
@@ -2285,10 +2299,33 @@ export const claimDeliveryOrder = onCall({ region: REGION }, async (request) => 
     const order = asRecord(currentValue);
     const assigned = asString(order.deliveryId);
     if (asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || (assigned && assigned !== uid)) return;
-    return { ...order, deliveryId: uid, deliveryName: name, deliveryPhone: phone };
+    return { ...order, deliveryId: uid, deliveryName: name, deliveryPhone: phone, deliveryStage: asString(order.deliveryStage) || "TO_PICKUP" };
   });
   if (!tx.committed) throw new HttpsError("failed-precondition", "This order is no longer available for delivery.");
   return { orderId, deliveryId: uid, status: "ASSIGNED" };
+});
+
+export const markDeliveryPickedUp = onCall({ region: REGION }, async (request) => {
+  const uid = requireUid(request);
+  await requireApprovedCourier(uid);
+  const orderId = asString(asRecord(request.data).orderId);
+  if (!/^[A-Za-z0-9_-]{12,80}$/.test(orderId)) {
+    throw new HttpsError("invalid-argument", "A valid order ID is required.");
+  }
+  const ref = db.ref("orders/" + orderId);
+  let failure = "";
+  const tx = await ref.transaction((currentValue) => {
+    if (!currentValue || typeof currentValue !== "object") return;
+    const order = asRecord(currentValue);
+    if (asString(order.deliveryId) !== uid || asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY") {
+      failure = "This order is not assigned to you or is no longer active.";
+      return;
+    }
+    if (asString(order.deliveryStage).toUpperCase() === "PICKED_UP") return order;
+    return { ...order, deliveryStage: "PICKED_UP", pickedUpAtTimestamp: Date.now() };
+  });
+  if (!tx.committed) throw new HttpsError("failed-precondition", failure || "The pickup could not be confirmed.");
+  return { orderId, deliveryStage: "PICKED_UP" };
 });
 
 export const releaseDeliveryOrder = onCall({ region: REGION }, async (request) => {
@@ -2301,7 +2338,7 @@ export const releaseDeliveryOrder = onCall({ region: REGION }, async (request) =
     if (!currentValue || typeof currentValue !== "object") return;
     const order = asRecord(currentValue);
     if (asString(order.deliveryId) !== uid || asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY" || asString(order.cashCollectionStatus).toUpperCase() === "COLLECTED") return;
-    return { ...order, deliveryId: "", deliveryName: "", deliveryPhone: "" };
+    return { ...order, deliveryId: "", deliveryName: "", deliveryPhone: "", deliveryStage: "" };
   });
   if (!tx.committed) throw new HttpsError("failed-precondition", "This delivery cannot be released.");
   return { orderId, status: "RELEASED" };
