@@ -30,6 +30,7 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
         val navigator = LocalNavigator.current
         val screenModel = rememberScreenModel { RestaurantDashboardScreenModel(restaurantId) }
         val meals by screenModel.meals.collectAsState()
+        val metrics by screenModel.metrics.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
         Scaffold(
@@ -62,21 +63,6 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                     CircularProgressIndicator()
                 }
 
-                meals.isEmpty() -> Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "No meals added yet. Tap + to add items to your menu.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-
                 else -> LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -85,11 +71,38 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
-                        Text(
-                            text = "Restaurant Menu (${meals.size})",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Restaurant overview", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                RestaurantMetricTile("New", metrics.newOrders, Modifier.weight(1f))
+                                RestaurantMetricTile("Preparing", metrics.preparingOrders, Modifier.weight(1f))
+                                RestaurantMetricTile("On delivery", metrics.outForDeliveryOrders, Modifier.weight(1f))
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                RestaurantSalesTile("Today · ${metrics.todayOrders} orders", metrics.todaySales, Modifier.weight(1f))
+                                RestaurantSalesTile("Last 7 days", metrics.weekSales, Modifier.weight(1f))
+                            }
+                            OutlinedButton(
+                                onClick = { navigator?.push(FoodOrdersScreen()) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Open order queue")
+                            }
+                            val unavailable = meals.filterNot { it.isAvailable }
+                            if (unavailable.isNotEmpty()) {
+                                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Unavailable menu items · ${unavailable.size}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.Bold)
+                                        unavailable.take(4).forEach { meal ->
+                                            Text("• ${meal.name}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                                        }
+                                    }
+                                }
+                            }
+                            Text("Menu · ${meals.size} items", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            if (meals.isEmpty()) Text("No meals yet. Tap + to add your first menu item.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                     items(meals, key = { it.id }) { meal ->
                         MealItemCard(
@@ -98,7 +111,8 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                                 navigator?.push(
                                     MealWorkplaceScreen(restaurantId = restaurantId, meal = meal)
                                 )
-                            }
+                            },
+                            onAvailabilityChange = { available -> screenModel.setMealAvailability(meal, available) }
                         )
                     }
                 }
@@ -106,8 +120,30 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
         }
     }
 
+
     @Composable
-    private fun MealItemCard(meal: Meal, onClick: () -> Unit) {
+    private fun RestaurantMetricTile(label: String, count: Int, modifier: Modifier = Modifier) {
+        Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(count.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+
+    @Composable
+    private fun RestaurantSalesTile(label: String, amount: Double, modifier: Modifier = Modifier) {
+        Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("₱${"%.2f".format(amount)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text("Delivered orders", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
+            }
+        }
+    }
+
+    @Composable
+    private fun MealItemCard(meal: Meal, onClick: () -> Unit, onAvailabilityChange: (Boolean) -> Unit) {
         val imageUrl = meal.imageUrls.firstOrNull().orEmpty()
 
         Card(
@@ -160,11 +196,19 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                     }
                 }
 
-                Text(
-                    text = "$${"%.2f".format(meal.basePrice)}",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "₱${"%.2f".format(meal.basePrice)}",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        if (meal.isAvailable) "Available" else "Unavailable",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (meal.isAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    )
+                    Switch(checked = meal.isAvailable, onCheckedChange = onAvailabilityChange)
+                }
             }
         }
     }

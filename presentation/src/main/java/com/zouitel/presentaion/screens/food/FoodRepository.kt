@@ -111,7 +111,8 @@ class FoodRepository {
         description: String,
         basePrice: Double,
         category: MealCategory,
-        imageUrl: String
+        imageUrl: String,
+        isAvailable: Boolean = true
     ) {
         val mealRef = if (mealId.isBlank()) {
             db.child("restaurants").child(restaurantId).child("meals").push()
@@ -127,9 +128,14 @@ class FoodRepository {
             "basePrice" to basePrice,
             "category" to category.name,
             "imageUrl" to imageUrl,
-            "isAvailable" to true
+            "isAvailable" to isAvailable
         )
         mealRef.setValue(mealMap)
+    }
+
+    suspend fun setMealAvailability(restaurantId: String, mealId: String, isAvailable: Boolean) {
+        db.child("restaurants").child(restaurantId).child("meals").child(mealId)
+            .child("isAvailable").setValue(isAvailable)
     }
 
     suspend fun deleteMeal(restaurantId: String, mealId: String) {

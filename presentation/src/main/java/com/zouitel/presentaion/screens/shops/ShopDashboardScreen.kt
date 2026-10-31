@@ -37,6 +37,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
         val navigator = LocalNavigator.current
         val screenModel = rememberScreenModel { ShopDashboardScreenModel(shopId) }
         val products by screenModel.products.collectAsState()
+        val metrics by screenModel.metrics.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
         val imageUpload by screenModel.imageUpload.collectAsState()
 
@@ -70,21 +71,52 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                 Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-            } else if (products.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No products added to your store yet. Tap + to add items.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(paddingValues),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Store overview", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SummaryTile("New", metrics.newOrders, Modifier.weight(1f))
+                                SummaryTile("Preparing", metrics.preparingOrders, Modifier.weight(1f))
+                                SummaryTile("On delivery", metrics.outForDeliveryOrders, Modifier.weight(1f))
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SalesTile("Today · ${metrics.todayOrders} orders", metrics.todaySales, Modifier.weight(1f))
+                                SalesTile("Last 7 days", metrics.weekSales, Modifier.weight(1f))
+                            }
+                            OutlinedButton(
+                                onClick = { navigator?.push(ShopOrdersScreen()) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Open order queue")
+                            }
+                            val lowStock = products.filter { it.stockQuantity <= 5 }
+                            if (lowStock.isNotEmpty()) {
+                                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text("Stock attention · ${lowStock.size} products", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onErrorContainer, fontWeight = FontWeight.Bold)
+                                        lowStock.take(4).forEach { product ->
+                                            Text(
+                                                if (product.stockQuantity <= 0) "• ${product.name} — out of stock" else "• ${product.name} — ${product.stockQuantity} left",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            Text("Products · ${products.size}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            if (products.isEmpty()) {
+                                Text("No products yet. Tap + to add your first product.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                     items(products, key = { it.id }) { product ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -112,7 +144,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                 ) {
                                     Text(text = product.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                     Text(
-                                        text = "$${"%.2f".format(product.price)}",
+                                        text = "₱${"%.2f".format(product.price)}",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -138,7 +170,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                             color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                     }
-                                    Text(text = "In Stock: ${product.stockQuantity} units", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                                    Text(text = if (product.stockQuantity <= 0) "Out of stock" else "${product.stockQuantity} units in stock", style = MaterialTheme.typography.labelMedium, color = if (product.stockQuantity <= 5) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary)
                                 }
 
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
@@ -151,10 +183,11 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Switch(
                                             checked = product.isAvailable,
+                                            enabled = product.stockQuantity > 0,
                                             onCheckedChange = { screenModel.toggleProductAvailability(product) }
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text(if (product.isAvailable) "Available" else "Out of Stock", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                        Text(when { product.stockQuantity <= 0 -> "Out of stock"; product.isAvailable -> "Available"; else -> "Hidden" }, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                                     }
 
                                     Row {
@@ -195,6 +228,28 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                         )
                     }
                 )
+            }
+        }
+    }
+
+
+    @Composable
+    private fun SummaryTile(label: String, count: Int, modifier: Modifier = Modifier) {
+        Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(count.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+
+    @Composable
+    private fun SalesTile(label: String, amount: Double, modifier: Modifier = Modifier) {
+        Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("₱${"%.2f".format(amount)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text("Delivered orders", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
             }
         }
     }
@@ -250,7 +305,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                     OutlinedTextField(
                         value = price,
                         onValueChange = { price = it },
-                        label = { Text("Price ($)") },
+                        label = { Text("Price (₱)") },
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
@@ -278,7 +333,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                             stockQuantity.toIntOrNull() ?: 0
                         )
                     },
-                    enabled = name.isNotBlank() && price.isNotBlank() && !isUploading,
+                    enabled = name.isNotBlank() && price.toDoubleOrNull()?.let { it >= 0.0 } == true && stockQuantity.toIntOrNull()?.let { it >= 0 } == true && !isUploading,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(if (isUploading) "Uploading photo…" else "Save Product", fontWeight = FontWeight.Bold)

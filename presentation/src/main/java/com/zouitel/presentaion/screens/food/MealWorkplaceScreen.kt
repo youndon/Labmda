@@ -86,7 +86,7 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
                     OutlinedTextField(
                         value = basePrice,
                         onValueChange = { basePrice = it },
-                        label = { Text("Price ($)") },
+                        label = { Text("Price (₱)") },
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
@@ -169,6 +169,7 @@ data class MealWorkplaceScreen(val restaurantId: String, val meal: Meal? = null)
                                 basePrice = basePrice.toDoubleOrNull() ?: 0.0,
                                 category = selectedCategory,
                                 imageUrl = imageUrl,
+                                isAvailable = meal?.isAvailable ?: true,
                                 onSuccess = { navigator?.pop() }
                             )
                         },
