@@ -67,6 +67,8 @@ class ShopWorkplaceScreenModel : ScreenModel {
                         val statusStr: String = child.child("status").value()
                         val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()
                         val isOnline: Boolean = child.child("isOnline").value()
+                        val latitude = runCatching { child.child("latitude").value<Double>() }.getOrNull()
+                        val longitude = runCatching { child.child("longitude").value<Double>() }.getOrNull()
                         val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.PENDING)
 
                         Shop(
@@ -80,7 +82,9 @@ class ShopWorkplaceScreenModel : ScreenModel {
                             imageUrl = imageUrl,
                             status = status,
                             createdAtTimestamp = createdAtTimestamp,
-                            isOnline = isOnline
+                            isOnline = isOnline,
+                            latitude = latitude,
+                            longitude = longitude
                         )
                     } catch (e: Exception) {
                         null
@@ -161,7 +165,9 @@ class ShopWorkplaceScreenModel : ScreenModel {
         phone: String,
         address: String,
         imageUrl: String,
-        isOnline: Boolean
+        isOnline: Boolean,
+        latitude: Double?,
+        longitude: Double?
     ) {
         val uid = auth.currentUser?.uid ?: return
         _isLoading.value = true
@@ -170,7 +176,8 @@ class ShopWorkplaceScreenModel : ScreenModel {
             runCatching {
                 functions.httpsCallable("submitShopApplication")(
                     mapOf("name" to name, "description" to description, "category" to category,
-                        "phone" to phone, "address" to address, "imageUrl" to imageUrl)
+                        "phone" to phone, "address" to address, "imageUrl" to imageUrl,
+                        "latitude" to latitude, "longitude" to longitude)
                 )
             }.onFailure { error ->
                 _imageUpload.value = ImageUploadState.Error(error.message ?: "Application could not be submitted.")
@@ -186,7 +193,9 @@ class ShopWorkplaceScreenModel : ScreenModel {
         category: String,
         phone: String,
         address: String,
-        imageUrl: String
+        imageUrl: String,
+        latitude: Double?,
+        longitude: Double?
     ) {
         _isLoading.value = true
         screenModelScope.launch {
@@ -196,7 +205,9 @@ class ShopWorkplaceScreenModel : ScreenModel {
                 "category" to category,
                 "phone" to phone,
                 "address" to address,
-                "imageUrl" to imageUrl
+                "imageUrl" to imageUrl,
+                "latitude" to latitude,
+                "longitude" to longitude
             )
             db.child("shops").child(shopId).updateChildren(updates)
             _isLoading.value = false
