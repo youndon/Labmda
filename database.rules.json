@@ -94,7 +94,8 @@
       ".write": false,
       ".indexOn": [
         "clientId",
-        "merchantId"
+        "merchantId",
+        "status"
       ],
       "$paymentId": {
         ".read": "auth != null && (auth.token.admin === true || data.child('clientId').val() === auth.uid || data.child('merchantId').val() === auth.uid || root.child('orders').child($paymentId).child('deliveryId').val() === auth.uid || root.child('trips').child($paymentId).child('driverId').val() === auth.uid)",
