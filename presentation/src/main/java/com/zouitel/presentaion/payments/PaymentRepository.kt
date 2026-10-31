@@ -43,6 +43,15 @@ data class PricingOrderQuoteResult(
     val breakdown: OrderBreakdown?
 )
 
+/** Itemized ride fare values returned by the server, all in PHP centavos. */
+data class RideFareBreakdown(
+    val baseFareCentavos: Long,
+    val distanceChargeCentavos: Long,
+    val additionalChargesCentavos: Long,
+    val adjustmentCentavos: Long,
+    val totalCentavos: Long
+)
+
 /** A route and rate quote produced by Firebase Functions. */
 data class PricingQuoteResult(
     val quoteId: String,
@@ -52,7 +61,10 @@ data class PricingQuoteResult(
     val distanceMeters: Long,
     val distanceKm: Double,
     val pricingVersion: Long,
-    val expiresAtTimestamp: Long
+    val expiresAtTimestamp: Long,
+    val routePolyline: String = "",
+    val routeDuration: String = "",
+    val fareBreakdown: RideFareBreakdown? = null
 )
 
 
@@ -225,7 +237,20 @@ class PaymentRepository {
             distanceMeters = (result["distanceMeters"] as? Number)?.toLong() ?: 0L,
             distanceKm = (result["distanceKm"] as? Number)?.toDouble() ?: 0.0,
             pricingVersion = (result["pricingVersion"] as? Number)?.toLong() ?: 0L,
-            expiresAtTimestamp = (result["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L
+            expiresAtTimestamp = (result["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L,
+            routePolyline = result["routePolyline"] as? String ?: "",
+            routeDuration = result["routeDuration"] as? String ?: "",
+            fareBreakdown = (result["fareBreakdown"] as? Map<*, *>)?.let { values ->
+                RideFareBreakdown(
+                    baseFareCentavos = (values["baseFareCentavos"] as? Number)?.toLong() ?: 0L,
+                    distanceChargeCentavos = (values["distanceChargeCentavos"] as? Number)?.toLong() ?: 0L,
+                    additionalChargesCentavos = (values["additionalChargesCentavos"] as? Number)?.toLong() ?: 0L,
+                    adjustmentCentavos = (values["adjustmentCentavos"] as? Number)?.toLong() ?: 0L,
+                    totalCentavos = (values["totalCentavos"] as? Number)?.toLong()
+                        ?: (values["totalCentavos"] as? Number)?.toLong()
+                        ?: 0L
+                )
+            }
         )
     }
 
@@ -499,15 +524,17 @@ class PaymentRepository {
         pricingQuoteId?.takeIf { it.isNotBlank() }?.let { payload["pricingQuoteId"] = it }
 
         if (paymentMethod.toPaymentCode() == "GCASH") {
-            val quote = quoteTrip(
+            // Reuse the exact quote reviewed by the passenger. Only request a replacement
+            // when this call was initiated without a previously generated quote.
+            val quoteId = pricingQuoteId?.takeIf { it.isNotBlank() } ?: quoteTrip(
                 pickupLat = pickupLat,
                 pickupLng = pickupLng,
                 dropoffLat = dropoffLat,
                 dropoffLng = dropoffLng,
                 serviceType = serviceType.trim().lowercase()
-            )
+            ).quoteId
             val trip = createTripFromQuote(
-                quoteId = quote.quoteId,
+                quoteId = quoteId,
                 idempotencyKey = idempotencyKey,
                 pickupLocation = pickupLocation,
                 dropoffLocation = dropoffLocation,
