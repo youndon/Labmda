@@ -61,6 +61,9 @@ class ShopOrdersScreenModel : ScreenModel {
                         val deliveryId: String = runCatching { child.child("deliveryId").value<String>() }.getOrDefault("")
                         val deliveryName: String = runCatching { child.child("deliveryName").value<String>() }.getOrDefault("")
                         val deliveryPhone: String = runCatching { child.child("deliveryPhone").value<String>() }.getOrDefault("")
+                        val createdAtTimestamp: Long = runCatching {
+                            child.child("createdAtTimestamp").value<Long>()
+                        }.getOrDefault(0L)
 
                         val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(OrderStatus.PLACED)
 
@@ -109,7 +112,7 @@ class ShopOrdersScreenModel : ScreenModel {
                             dropoffLocation = dropoffLocation,
                             dropoffLat = dropoffLat,
                             dropoffLng = dropoffLng,
-//                            createdAtTimestamp = createdAtTimestamp,
+                            createdAtTimestamp = createdAtTimestamp,
                         )
                     } catch (e: Exception) {
                         null
