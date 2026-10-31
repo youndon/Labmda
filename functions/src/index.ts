@@ -1232,6 +1232,57 @@ export const quoteTrip = onCall(
   async (request) => buildRouteQuote(requireUid(request), asRecord(request.data), "RIDE")
 );
 
+/** Returns a road route only for the signed-in customer of an active delivery order. */
+export const getTrackingRoute = onCall(
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  async (request) => {
+    const uid = requireUid(request);
+    const data = asRecord(request.data);
+    const orderId = asString(data.orderId);
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(orderId)) {
+      throw new HttpsError("invalid-argument", "A valid order ID is required.");
+    }
+
+    const orderSnapshot = await db.ref("orders/" + orderId).get();
+    if (!orderSnapshot.exists()) {
+      throw new HttpsError("not-found", "The order could not be found.");
+    }
+    const order = asRecord(orderSnapshot.val());
+    if (asString(order.clientId) !== uid) {
+      throw new HttpsError("permission-denied", "You cannot track this order.");
+    }
+    if (asString(order.status).toUpperCase() !== "OUT_FOR_DELIVERY") {
+      throw new HttpsError("failed-precondition", "Live courier routing is available while the order is out for delivery.");
+    }
+
+    const deliveryId = asString(order.deliveryId);
+    if (!deliveryId) {
+      throw new HttpsError("failed-precondition", "A courier has not been assigned to this order.");
+    }
+    const [courierSnapshot] = await Promise.all([
+      db.ref("publicDrivers/" + deliveryId + "/currentLocation").get(),
+    ]);
+    if (!courierSnapshot.exists()) {
+      throw new HttpsError("unavailable", "The courier location is not available yet.");
+    }
+
+    const location = asRecord(courierSnapshot.val());
+    const pickupLat = asNumber(location.latitude, "courier latitude");
+    const pickupLng = asNumber(location.longitude, "courier longitude");
+    const dropoffLat = asNumber(order.dropoffLat, "drop-off latitude");
+    const dropoffLng = asNumber(order.dropoffLng, "drop-off longitude");
+    validateCoordinates(pickupLat, pickupLng, "Courier");
+    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
+
+    const route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng, "car");
+    return {
+      distanceMeters: route.distanceMeters,
+      duration: route.duration,
+      encodedPolyline: route.encodedPolyline,
+    };
+  }
+);
+
 
 // -----------------------------------------------------------------------------
 // Explicit quoteOrder/createOrder API. The quote stores trusted catalogue lines and
