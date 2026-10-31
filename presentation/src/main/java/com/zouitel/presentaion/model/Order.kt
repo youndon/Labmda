@@ -66,6 +66,7 @@ data class Order(
     val deliveryId: String = "",
     val deliveryName: String = "",
     val deliveryPhone: String = "",
+    val deliveryStage: String = "TO_PICKUP",
     val cashCollectionStatus: String = "",
     val cashCollectedBy: String = "",
     val cashCollectedByRole: String = "",
