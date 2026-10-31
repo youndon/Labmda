@@ -819,6 +819,14 @@ function calculateDeliveryFeeCentavos(distanceMeters: number, rule: DeliveryPric
   return Math.max(rule.minimumFeeCentavos, rounded);
 }
 
+const SUPPORTED_RIDE_TYPES = new Set([
+  "ride", "car", "bike", "e_bike", "scooter", "motorcycle", "truck", "van", "other",
+]);
+
+function isSupportedRideType(serviceType: string): boolean {
+  return SUPPORTED_RIDE_TYPES.has(serviceType.toLowerCase());
+}
+
 function resolveRidePricingRule(config: PricingConfiguration, serviceType: string): RidePricingRule | null {
   return config.rides[serviceType.toLowerCase()] ?? config.rides.ride ?? null;
 }
@@ -1139,8 +1147,8 @@ async function buildRouteQuote(
         additionalChargesCentavos,
       });
     } else {
-      if (!/^[a-z0-9_-]{2,24}$/.test(serviceType)) {
-        throw new HttpsError("invalid-argument", "Invalid ride service type.");
+      if (!isSupportedRideType(serviceType)) {
+        throw new HttpsError("invalid-argument", "Unsupported ride service type.");
       }
       const rule = resolveRidePricingRule(config, serviceType);
       if (!rule) {
@@ -1816,8 +1824,8 @@ export const createTripPayment = onCall(
 
     const paymentMethod = parsePaymentMethod(data.paymentMethod);
     const serviceType = (asString(data.serviceType) || "ride").toLowerCase();
-    if (!/^[a-z0-9_-]{2,24}$/.test(serviceType)) {
-      throw new HttpsError("invalid-argument", "Invalid ride service type.");
+    if (!isSupportedRideType(serviceType)) {
+      throw new HttpsError("invalid-argument", "Unsupported ride service type.");
     }
     const targetDriverId = asString(data.targetDriverId);
     await validateTargetDriverForRide(targetDriverId, serviceType);
@@ -2049,7 +2057,7 @@ export const createTrip = onCall(
       throw new HttpsError("deadline-exceeded", "The ride quote expired. Request a new quote.");
     }
     const serviceType = asString(quote.serviceType).toLowerCase();
-    if (!serviceType || (asString(data.serviceType) && asString(data.serviceType).toLowerCase() !== serviceType)) {
+    if (!isSupportedRideType(serviceType) || (asString(data.serviceType) && asString(data.serviceType).toLowerCase() !== serviceType)) {
       throw new HttpsError("invalid-argument", "The requested ride service does not match the quote.");
     }
     const targetDriverId = asString(data.targetDriverId);
