@@ -778,6 +778,11 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            VehicleType.TRUCK -> Text(
+                                "Truck-specific height and weight restrictions are not yet included in this route estimate.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             else -> Unit
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
