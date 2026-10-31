@@ -82,7 +82,7 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
                         runCatching {
                             MerchantOrderSnapshot(
                                 status = child.child("status").value<String?>() ?: "PLACED",
-                                totalPrice = child.child("totalPrice").value<Double?>() ?: 0.0,
+                                salesAmount = child.child("subtotal").value<Double?>() ?: child.child("totalPrice").value<Double?>() ?: 0.0,
                                 createdAtTimestamp = child.child("createdAtTimestamp").value<Long?>() ?: 0L
                             )
                         }.getOrNull()
