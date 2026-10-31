@@ -621,7 +621,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         isSubmitting: Boolean,
         onConfirm: () -> Unit
     ) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Review your ride", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
             Text("Check your route and payment method before requesting a driver.",
