@@ -28,9 +28,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.Location
-import android.location.LocationRequest
-import android.location.LocationCallback
-import android.location.LocationResult
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationResult
 import android.os.Looper
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
