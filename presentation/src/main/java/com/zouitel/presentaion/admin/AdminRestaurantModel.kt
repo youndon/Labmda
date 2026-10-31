@@ -83,16 +83,17 @@ class AdminRestaurantModel : ScreenModel {
                         "deliveryFee" to deliveryFee,
                         "estimatedTimeMinutes" to estimatedTimeMinutes,
                         "isOpen" to true,
-                        "managers" to listOf(managerPhone),
                         "paymentMethods" to listOf("GCASH", "CASH"),
                         "address" to runCatching { snap.child("restaurantAddress").value<String>() }.getOrDefault(""),
                         "latitude" to runCatching { snap.child("restaurantLatitude").value<Double>() }.getOrDefault(0.0),
                         "longitude" to runCatching { snap.child("restaurantLongitude").value<Double>() }.getOrDefault(0.0)
                     )
                     db.child("restaurants").child(uid).setValue(restaurantMap)
+                    db.child("restaurantPrivate").child(uid).setValue(mapOf("managerPhone" to managerPhone))
                 }
             } else if (newStatus == Status.REJECTED) {
                 db.child("restaurants").child(uid).removeValue()
+                db.child("restaurantPrivate").child(uid).removeValue()
             }
         }
     }
