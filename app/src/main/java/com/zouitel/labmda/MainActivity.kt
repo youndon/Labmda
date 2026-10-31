@@ -8,6 +8,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import com.zouitel.presentaion.screens.account.AccountPreferencesStore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
@@ -37,6 +39,8 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             accountPreferencesStore.preferences.collect { preferences ->
                 darkModeEnabled = preferences.darkModeEnabled
+                val locales = if (preferences.language == "system") LocaleListCompat.getEmptyLocaleList() else LocaleListCompat.forLanguageTags(preferences.language)
+                AppCompatDelegate.setApplicationLocales(locales)
             }
         }
         setContent {
