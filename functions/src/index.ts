@@ -4508,7 +4508,6 @@ async function ensureMarketplaceLedgerEntry(
   });
 }
 
-function enqueueWalletPayout(uid: string): void {
   void db.ref("walletPayoutQueue/" + uid).set({
     userId: uid,
     dueAtTimestamp: Date.now(),
@@ -4625,7 +4624,6 @@ async function applyCashRemittanceWalletEffects(
     });
     const wallet = asRecord((await db.ref("wallets/" + merchantId).get()).val());
     if (walletNumber(wallet, "refundDebtCentavos") === 0 && walletNumber(wallet, "availableCentavos") > 0) {
-      enqueueWalletPayout(merchantId);
     }
   }
 }
@@ -4790,7 +4788,6 @@ async function reconcileCompletedPaymentEarnings(
 
   if (complete) {
     if (payment.suppressPayoutQueue !== true) {
-      for (const share of shares) enqueueWalletPayout(share.ownerId);
     }
     await db.ref("payments/" + entityId).update({
       earningsPendingStatus: hasPending ? "RELEASED" : asString(payment.earningsPendingStatus),
@@ -5356,7 +5353,6 @@ async function applyPayoutProviderStatus(args: {
     await ensureMarketplaceLedgerEntry(entryId, entry);
     await payoutRef.update({ ledgerEntryId: entryId, reversalLedgerEntryId: entryId, refundRecoveredCentavos: walletResult.refundRecoveredCentavos, reversedAtTimestamp: Date.now() });
     await db.ref("payoutReconciliationQueue/" + args.payoutId).remove();
-    enqueueWalletPayout(uid);
   } else {
     await db.ref("payoutReconciliationQueue/" + args.payoutId).set({
       payoutId: args.payoutId,
@@ -5364,12 +5360,32 @@ async function applyPayoutProviderStatus(args: {
       attempts: 0,
     });
   }
+
+  const payoutRequestId = asString(payout.payoutRequestId);
+  if (payoutRequestId) {
+    const requestStatus = status === "SUCCEEDED"
+      ? "PAID"
+      : ["FAILED", "REJECTED", "CANCELLED", "EXPIRED"].includes(status)
+        ? "FAILED"
+        : status === "REVERSED"
+          ? "REVERSED"
+          : "PROCESSING";
+    await db.ref("payoutRequests/" + payoutRequestId).update({
+      status: requestStatus,
+      payoutId: args.payoutId,
+      providerPayoutId: args.providerPayoutId,
+      providerStatus: status,
+      updatedAtTimestamp: Date.now(),
+    });
+  }
 }
 
 async function reserveAndSubmitPayout(
   uid: string,
   requestKey: string,
-  automatic: boolean
+  automatic: boolean,
+  requestedAmountCentavos?: number,
+  payoutRequestId?: string
 ): Promise<Record<string, unknown>> {
   const payoutId = payoutIntentId(uid, requestKey);
   const payoutRef = db.ref("payouts/" + payoutId);
@@ -5392,7 +5408,11 @@ async function reserveAndSubmitPayout(
   if (!secret) throw new HttpsError("failed-precondition", "Xendit money-out credentials are not configured.");
   const walletRef = db.ref("wallets/" + uid);
   const wallet = asRecord((await walletRef.get()).val());
-  const amount = walletNumber(wallet, "availableCentavos");
+  const availableAmount = walletNumber(wallet, "availableCentavos");
+  const amount = requestedAmountCentavos ?? availableAmount;
+  if (!Number.isSafeInteger(amount) || amount <= 0 || amount > availableAmount) {
+    throw new HttpsError("failed-precondition", "Available earnings are lower than the requested payout amount.");
+  }
   if (walletNumber(wallet, "refundDebtCentavos") > 0) {
     throw new HttpsError("failed-precondition", "Outstanding refund recovery must be cleared from future earnings before another payout.");
   }
@@ -5424,6 +5444,7 @@ async function reserveAndSubmitPayout(
     accountChannelCode: asString(account.channelCode),
     maskedAccountNumber: asString(account.maskedAccountNumber),
     automatic,
+    payoutRequestId: payoutRequestId || null,
     attempts: 0,
     createdAtTimestamp: timestamp,
     updatedAtTimestamp: timestamp,
@@ -5446,13 +5467,18 @@ async function reserveAndSubmitPayout(
       return;
     }
     const available = walletNumber(current, "availableCentavos");
-    if (available !== amount) {
-      reserveError = "Wallet balance changed while the payout was being prepared. Please retry.";
+    if (available < amount) {
+      reserveError = "Wallet balance changed and is now lower than the requested payout. Please retry.";
+      return;
+    }
+    const activeRequestId = asString(current.activePayoutRequestId);
+    if (activeRequestId && activeRequestId !== (payoutRequestId || "")) {
+      reserveError = "A different payout request is awaiting administrator approval.";
       return;
     }
     const pending = walletNumber(current, "pendingPayoutCentavos");
     const applied = asRecord(current.appliedLedgerEntries);
-    return {
+    const nextWallet: Record<string, unknown> = {
       ...current,
       availableCentavos: available - amount,
       pendingPayoutCentavos: pending + amount,
@@ -5461,6 +5487,10 @@ async function reserveAndSubmitPayout(
       currency: "PHP",
       updatedAtTimestamp: Date.now(),
     };
+    if (payoutRequestId && asString(nextWallet.activePayoutRequestId) === payoutRequestId) {
+      delete nextWallet.activePayoutRequestId;
+    }
+    return nextWallet;
   });
   if (!reserve.committed) {
     await payoutRef.update({
@@ -5481,7 +5511,7 @@ async function reserveAndSubmitPayout(
       ledgerLine("WALLET_AVAILABLE_PAYABLE", uid, "DEBIT", amount),
       ledgerLine("WALLET_PAYOUT_PENDING", uid, "CREDIT", amount),
     ],
-    memo: automatic ? "Automatically reserve available earnings for payout" : "User requested an earnings payout",
+    memo: automatic ? "Automatically reserve available earnings for payout" : "Administrator-approved manual earnings payout",
     createdAtTimestamp: timestamp,
   };
   await ensureMarketplaceLedgerEntry("payout_" + payoutId + "_reserve", reserveLedger);
@@ -5505,6 +5535,13 @@ export const getMyWallet = onCall(
     const uid = requireUid(request);
     const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
     const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
+    const activeRequestId = asString(wallet.activePayoutRequestId);
+    const activePayoutRequestSnapshot = activeRequestId
+      ? await db.ref("payoutRequests/" + activeRequestId).get()
+      : null;
+    const activePayoutRequest = activePayoutRequestSnapshot?.exists()
+      ? asRecord(activePayoutRequestSnapshot.val())
+      : null;
     const payoutSnapshot = await db.ref("payouts").orderByChild("userId").equalTo(uid).limitToLast(25).get();
     const payouts: Record<string, unknown>[] = [];
     payoutSnapshot.forEach((child) => {
@@ -5535,6 +5572,13 @@ export const getMyWallet = onCall(
       paidOutCentavos: walletNumber(wallet, "paidOutCentavos"),
       refundDebtCentavos: walletNumber(wallet, "refundDebtCentavos"),
       payoutAccount: Object.keys(account).length ? payoutAccountSummary(account) : { status: "NOT_CONFIGURED" },
+      activePayoutRequest: activePayoutRequest ? {
+        id: asString(activePayoutRequest.id),
+        amountCentavos: Number(activePayoutRequest.amountCentavos ?? 0),
+        status: asString(activePayoutRequest.status),
+        createdAtTimestamp: Number(activePayoutRequest.createdAtTimestamp ?? 0),
+        updatedAtTimestamp: Number(activePayoutRequest.updatedAtTimestamp ?? 0),
+      } : null,
       payouts: payouts.sort((a, b) => Number(b.createdAtTimestamp) - Number(a.createdAtTimestamp)),
     };
   }
@@ -5573,8 +5617,8 @@ export const savePayoutAccount = onCall(
       throw new HttpsError("invalid-argument", "Enter the recipient's Philippine street, city, province and postal code.");
     }
     const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
-    if (asString(wallet.activePayoutId)) {
-      throw new HttpsError("failed-precondition", "Payout account details cannot be changed while a payout is processing.");
+    if (asString(wallet.activePayoutId) || asString(wallet.activePayoutRequestId)) {
+      throw new HttpsError("failed-precondition", "Payout account details cannot be changed while a payout is pending or processing.");
     }
     const encrypted = encryptPayoutAccountNumber(accountNumber);
     const timestamp = Date.now();
@@ -5613,21 +5657,268 @@ export const savePayoutAccount = onCall(
   }
 );
 
+/**
+ * A participant requests a manual cashout. This reserves the request slot, not the
+ * money: available earnings remain visible until an administrator approves it.
+ */
 export const requestPayout = onCall(
-  { region: REGION, secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY] },
+  { region: REGION },
   async (request) => {
     const uid = requireUid(request);
     await requireApprovedEarningsRole(uid);
     const data = asRecord(request.data);
-    const key = parseIdempotencyKey(data.idempotencyKey);
-    const result = await reserveAndSubmitPayout(uid, key, false);
-    return {
-      payoutId: asString(result.id),
-      status: asString(result.status),
-      amountCentavos: Number(result.amountCentavos ?? 0),
-      providerPayoutId: asString(result.providerPayoutId),
-      maskedAccountNumber: asString(result.maskedAccountNumber),
+    const requestKey = parseIdempotencyKey(data.idempotencyKey);
+    const requestId = payoutIntentId(uid, requestKey);
+    const requestRef = db.ref("payoutRequests/" + requestId);
+    const existingSnapshot = await requestRef.get();
+    if (existingSnapshot.exists()) {
+      const existing = asRecord(existingSnapshot.val());
+      if (asString(existing.userId) !== uid) {
+        throw new HttpsError("already-exists", "This payout request key belongs to another account.");
+      }
+      return {
+        payoutRequestId: requestId,
+        status: asString(existing.status),
+        amountCentavos: Number(existing.amountCentavos ?? 0),
+        maskedAccountNumber: asString(existing.maskedAccountNumber),
+        reused: true,
+      };
+    }
+
+    const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
+    if (asString(account.status).toUpperCase() !== "VERIFIED") {
+      throw new HttpsError("failed-precondition", "Set up a payout account and have it verified before requesting a payout.");
+    }
+
+    const walletRef = db.ref("wallets/" + uid);
+    let reservationError = "";
+    let requestedAmountCentavos = 0;
+    const lock = await walletRef.transaction((rawValue) => {
+      const wallet = asRecord(rawValue);
+      if (asString(wallet.activePayoutId)) {
+        reservationError = "A payout is already being processed for this wallet.";
+        return;
+      }
+      const activeRequest = asString(wallet.activePayoutRequestId);
+      if (activeRequest && activeRequest !== requestId) {
+        reservationError = "You already have a payout request awaiting administrator review.";
+        return;
+      }
+      if (walletNumber(wallet, "refundDebtCentavos") > 0) {
+        reservationError = "Outstanding refund recovery must be cleared before requesting another payout.";
+        return;
+      }
+      const available = walletNumber(wallet, "availableCentavos");
+      if (available < MANUAL_PAYOUT_MINIMUM_CENTAVOS) {
+        reservationError = "Available earnings must reach PHP " +
+          phpFromCents(MANUAL_PAYOUT_MINIMUM_CENTAVOS).toFixed(2) + " before requesting a payout.";
+        return;
+      }
+      requestedAmountCentavos = available;
+      return {
+        ...wallet,
+        activePayoutRequestId: requestId,
+        currency: "PHP",
+        updatedAtTimestamp: Date.now(),
+      };
+    });
+    if (!lock.committed) {
+      throw new HttpsError("failed-precondition", reservationError || "A payout request could not be created.");
+    }
+
+    const timestamp = Date.now();
+    const payoutRequest = {
+      id: requestId,
+      userId: uid,
+      requestKey,
+      amountCentavos: requestedAmountCentavos,
+      amount: phpFromCents(requestedAmountCentavos),
+      currency: "PHP",
+      status: "PENDING_ADMIN_APPROVAL",
+      provider: "XENDIT",
+      maskedAccountNumber: asString(account.maskedAccountNumber),
+      accountChannelCode: asString(account.channelCode),
+      createdAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
     };
+    const created = await requestRef.transaction((currentValue) => {
+      if (currentValue !== null && currentValue !== undefined) return;
+      return payoutRequest;
+    });
+    if (!created.committed) {
+      const saved = asRecord((await requestRef.get()).val());
+      if (asString(saved.userId) === uid) {
+        return {
+          payoutRequestId: requestId,
+          status: asString(saved.status),
+          amountCentavos: Number(saved.amountCentavos ?? 0),
+          maskedAccountNumber: asString(saved.maskedAccountNumber),
+          reused: true,
+        };
+      }
+      await walletRef.transaction((rawValue) => {
+        const wallet = asRecord(rawValue);
+        if (asString(wallet.activePayoutRequestId) !== requestId) return;
+        const next = { ...wallet };
+        delete next.activePayoutRequestId;
+        return next;
+      });
+      throw new HttpsError("already-exists", "This payout request key is already in use.");
+    }
+
+    return {
+      payoutRequestId: requestId,
+      status: "PENDING_ADMIN_APPROVAL",
+      amountCentavos: requestedAmountCentavos,
+      maskedAccountNumber: asString(account.maskedAccountNumber),
+      reused: false,
+    };
+  }
+);
+
+/** Only an administrator can approve a pending request and initiate its Xendit payout. */
+export const adminApprovePayoutRequest = onCall(
+  { region: REGION, secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY] },
+  async (request) => {
+    const adminUid = requireAdmin(request);
+    const requestId = asString(asRecord(request.data).payoutRequestId);
+    if (!/^[a-f0-9]{32}$/i.test(requestId)) {
+      throw new HttpsError("invalid-argument", "A valid payout request ID is required.");
+    }
+    const requestRef = db.ref("payoutRequests/" + requestId);
+    const requestSnapshot = await requestRef.get();
+    if (!requestSnapshot.exists()) throw new HttpsError("not-found", "The payout request was not found.");
+    const payoutRequest = asRecord(requestSnapshot.val());
+    const uid = asString(payoutRequest.userId);
+    const requestKey = asString(payoutRequest.requestKey);
+    const amountCentavos = nonNegativeInteger(payoutRequest.amountCentavos, "requested payout amount");
+    if (!uid || !requestKey || amountCentavos <= 0) {
+      throw new HttpsError("data-loss", "The payout request is missing its accounting details.");
+    }
+    if (["PROCESSING", "PAID"].includes(asString(payoutRequest.status))) {
+      const existingPayout = asRecord((await db.ref("payouts/" + requestId).get()).val());
+      return {
+        payoutRequestId: requestId,
+        payoutId: requestId,
+        status: asString(payoutRequest.status),
+        payoutStatus: asString(existingPayout.status),
+        amountCentavos,
+        reused: true,
+      };
+    }
+    if (asString(payoutRequest.status) !== "PENDING_ADMIN_APPROVAL" &&
+        asString(payoutRequest.status) !== "APPROVING") {
+      throw new HttpsError("failed-precondition", "This payout request is no longer awaiting approval.");
+    }
+
+    await requireApprovedEarningsRole(uid);
+    const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
+    if (asString(wallet.activePayoutRequestId) !== requestId) {
+      throw new HttpsError("failed-precondition", "The payout request no longer holds the wallet request lock.");
+    }
+    await requestRef.update({
+      status: "APPROVING",
+      approvedBy: adminUid,
+      approvalStartedAtTimestamp: Date.now(),
+      updatedAtTimestamp: Date.now(),
+    });
+
+    try {
+      const payout = await reserveAndSubmitPayout(uid, requestKey, false, amountCentavos, requestId);
+      const payoutStatus = asString(payout.status);
+      const requestStatus = payoutStatus === "SUCCEEDED" ? "PAID" : "PROCESSING";
+      await requestRef.update({
+        status: requestStatus,
+        payoutId: requestId,
+        providerPayoutId: asString(payout.providerPayoutId),
+        approvedBy: adminUid,
+        approvedAtTimestamp: Date.now(),
+        updatedAtTimestamp: Date.now(),
+      });
+      return {
+        payoutRequestId: requestId,
+        payoutId: requestId,
+        status: requestStatus,
+        payoutStatus,
+        amountCentavos,
+        providerPayoutId: asString(payout.providerPayoutId),
+        reused: false,
+      };
+    } catch (error) {
+      const existingPayout = asRecord((await db.ref("payouts/" + requestId).get()).val());
+      if (Object.keys(existingPayout).length) {
+        await requestRef.update({
+          status: "PROCESSING",
+          payoutId: requestId,
+          providerPayoutId: asString(existingPayout.providerPayoutId),
+          approvedBy: adminUid,
+          approvedAtTimestamp: Date.now(),
+          lastError: "Provider submission is pending reconciliation.",
+          updatedAtTimestamp: Date.now(),
+        });
+        return {
+          payoutRequestId: requestId,
+          payoutId: requestId,
+          status: "PROCESSING",
+          payoutStatus: asString(existingPayout.status),
+          amountCentavos,
+          reused: true,
+        };
+      }
+      await requestRef.update({
+        status: "PENDING_ADMIN_APPROVAL",
+        approvedBy: null,
+        lastError: "Payout approval could not be completed. The administrator can retry.",
+        updatedAtTimestamp: Date.now(),
+      });
+      throw error;
+    }
+  }
+);
+
+/** Rejecting a request releases its request lock without changing the user's balance. */
+export const adminRejectPayoutRequest = onCall(
+  { region: REGION },
+  async (request) => {
+    const adminUid = requireAdmin(request);
+    const data = asRecord(request.data);
+    const requestId = asString(data.payoutRequestId);
+    const note = asString(data.note).slice(0, 300);
+    if (!/^[a-f0-9]{32}$/i.test(requestId)) {
+      throw new HttpsError("invalid-argument", "A valid payout request ID is required.");
+    }
+    const requestRef = db.ref("payoutRequests/" + requestId);
+    let rejectError = "";
+    const transaction = await requestRef.transaction((rawValue) => {
+      const current = asRecord(rawValue);
+      if (asString(current.status) !== "PENDING_ADMIN_APPROVAL") {
+        rejectError = "Only a payout request awaiting approval can be rejected.";
+        return;
+      }
+      return {
+        ...current,
+        status: "REJECTED",
+        rejectedBy: adminUid,
+        rejectionNote: note,
+        rejectedAtTimestamp: Date.now(),
+        updatedAtTimestamp: Date.now(),
+      };
+    });
+    if (!transaction.committed) {
+      throw new HttpsError("failed-precondition", rejectError || "The payout request could not be rejected.");
+    }
+    const uid = asString(asRecord(transaction.snapshot.val()).userId);
+    if (uid) {
+      await db.ref("wallets/" + uid).transaction((rawValue) => {
+        const wallet = asRecord(rawValue);
+        if (asString(wallet.activePayoutRequestId) !== requestId) return;
+        const next = { ...wallet };
+        delete next.activePayoutRequestId;
+        next.updatedAtTimestamp = Date.now();
+        return next;
+      });
+    }
+    return { payoutRequestId: requestId, status: "REJECTED" };
   }
 );
 
@@ -5664,7 +5955,6 @@ export const adminReviewPayoutAccount = onCall(
       reviewedAtTimestamp: timestamp,
       updatedAtTimestamp: timestamp,
     });
-    if (approved) enqueueWalletPayout(targetUid);
     return {
       userId: targetUid,
       status,
@@ -5678,10 +5968,11 @@ export const getAdminPaymentDashboard = onCall(
   { region: REGION },
   async (request) => {
     requireAdmin(request);
-    const [payments, ledger, payouts, wallets, accountReviews, cashCollections] = await Promise.all([
+    const [payments, ledger, payouts, payoutRequests, wallets, accountReviews, cashCollections] = await Promise.all([
       db.ref("payments").limitToLast(100).get(),
       db.ref("ledger").limitToLast(100).get(),
       db.ref("payouts").limitToLast(100).get(),
+      db.ref("payoutRequests").limitToLast(100).get(),
       db.ref("wallets").limitToLast(100).get(),
       db.ref("payoutAccountReviews").limitToLast(100).get(),
       db.ref("cashCollections").limitToLast(100).get(),
@@ -5698,6 +5989,7 @@ export const getAdminPaymentDashboard = onCall(
       payments: values(payments),
       ledgerEntries: values(ledger),
       payouts: values(payouts),
+      payoutRequests: values(payoutRequests),
       wallets: values(wallets).map((wallet) => ({
         userId: wallet.id,
         availableCentavos: Number(wallet.availableCentavos ?? 0),
@@ -5909,54 +6201,6 @@ export const reconcilePayouts = onSchedule(
           dueAtTimestamp: now + Math.min(60, 5 * Math.pow(2, Math.min(attempts, 3))) * 60 * 1000,
           lastError: "Provider status lookup failed; payout remains reserved.",
         });
-      }
-    }
-  }
-);
-
-export const processAutomaticPayouts = onSchedule(
-  {
-    schedule: "every 15 minutes",
-    timeZone: "Asia/Manila",
-    region: REGION,
-    secrets: [XENDIT_PAYOUT_SECRET_KEY, PAYOUT_ACCOUNT_ENCRYPTION_KEY],
-  },
-  async () => {
-    const secret = XENDIT_PAYOUT_SECRET_KEY.value();
-    if (!secret) return;
-    const queue = await db.ref("walletPayoutQueue").limitToFirst(100).get();
-    const entries: Array<{ uid: string; updatedAtTimestamp: number }> = [];
-    queue.forEach((child) => {
-      if (child.key) {
-        const item = asRecord(child.val());
-        entries.push({
-          uid: child.key,
-          updatedAtTimestamp: Number(item.updatedAtTimestamp ?? item.dueAtTimestamp ?? 0),
-        });
-      }
-      return false;
-    });
-    for (const queued of entries) {
-      const uid = queued.uid;
-      try {
-        await requireApprovedEarningsRole(uid);
-        const account = asRecord((await db.ref("payoutAccounts/" + uid).get()).val());
-        const wallet = asRecord((await db.ref("wallets/" + uid).get()).val());
-        const available = walletNumber(wallet, "availableCentavos");
-        if (walletNumber(wallet, "refundDebtCentavos") > 0) {
-          await db.ref("walletPayoutQueue/" + uid).remove();
-          continue;
-        }
-        if (asString(account.status).toUpperCase() !== "VERIFIED") continue;
-        if (available < AUTO_PAYOUT_MINIMUM_CENTAVOS) {
-          await db.ref("walletPayoutQueue/" + uid).remove();
-          continue;
-        }
-        const requestKey = "auto_" + createHash("sha256").update(uid + "|" + queued.updatedAtTimestamp).digest("hex").slice(0, 32);
-        await reserveAndSubmitPayout(uid, requestKey, true);
-        await db.ref("walletPayoutQueue/" + uid).remove();
-      } catch (error) {
-        logger.warn("Automatic wallet payout is deferred", { uid, error });
       }
     }
   }
