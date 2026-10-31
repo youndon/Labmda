@@ -1645,7 +1645,8 @@ export const createOrder = onCall(
       pricingQuoteId: quoteId,
       pricingSnapshot: snapshot,
       breakdown: quote.breakdown,
-      status: "PLACED",
+      // Quote-first orders are created for GCash checkout; keep them hidden from merchants until capture.
+      status: "AWAITING_PAYMENT",
       deliveryId: "",
       deliveryName: "",
       deliveryPhone: "",
