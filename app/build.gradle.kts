@@ -85,5 +85,5 @@ dependencies {
     api(libs.firebase.firestore)
     api(libs.firebase.database)
     implementation(libs.firebase.appcheck.playintegrity)
-    debugImplementation(libs.firebase.appcheck.debug)
+    implementation(libs.firebase.appcheck.debug)
 }
