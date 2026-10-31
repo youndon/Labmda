@@ -1637,6 +1637,7 @@ export const createOrderPayment = onCall(
         provider: "GOOGLE_ROUTES_API",
         distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
         duration: asString(quote.routeDuration),
+        travelMode: "DRIVE",
         encodedPolyline: asString(quote.routePolyline),
       };
       deliveryFeeCentavos = nonNegativeInteger(quote.deliveryFeeCentavos, "quoted delivery fee");
@@ -1745,6 +1746,7 @@ export const createOrderPayment = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       pricingVersion: config.version,
       pricingQuoteId: pricingQuoteId || null,
@@ -1850,6 +1852,7 @@ export const createTripPayment = onCall(
         provider: "GOOGLE_ROUTES_API",
         distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
         duration: asString(quote.routeDuration),
+        travelMode: resolveRouteTravelMode(serviceType),
         encodedPolyline: asString(quote.routePolyline),
       };
       fareCentavos = nonNegativeInteger(quote.fareCentavos, "quoted ride fare");
@@ -1947,6 +1950,7 @@ export const createTripPayment = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       pricingVersion: config.version,
       pricingQuoteId: pricingQuoteId || null,
@@ -2061,6 +2065,7 @@ export const createTrip = onCall(
       provider: "GOOGLE_ROUTES_API" as const,
       distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
       duration: asString(quote.routeDuration),
+      travelMode: resolveRouteTravelMode(serviceType),
       encodedPolyline: asString(quote.routePolyline),
     };
     const pricingSnapshotValue = asRecord(quote.pricingSnapshot);
@@ -2142,6 +2147,7 @@ export const createTrip = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       pricingVersion: config.version,
       pricingQuoteId: quoteId,
