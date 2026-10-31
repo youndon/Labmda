@@ -39,7 +39,7 @@
           ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() !== true || (root.child('users').child($uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child($uid).child('shopStatus').val() === 'ACTIVE'))))"
         },
         "currentLocation": {
-          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || (root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE'))))"
+          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'ACTIVE')))"
         }
       },
       ".indexOn": [
