@@ -4,6 +4,8 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.model.VehicleInfo
+import com.zouitel.presentaion.model.VehicleType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -83,6 +85,11 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
                             DeliveryAccountInfo(
                                 id = id,
                                 deliveryType = deliveryType,
+                                vehicleInfo = VehicleInfo(
+                                    type = runCatching { VehicleType.valueOf(vehicleType.uppercase()) }
+                                        .getOrDefault(VehicleType.OTHER),
+                                    serviceType = "Delivery"
+                                ),
                                 identityDocumentLink = identityDocumentLink,
                                 status = status,
                                 isOnline = isOnline
