@@ -29,15 +29,15 @@ class LambdaApplication : Application(), KoinStartup, SingletonImageLoader.Facto
 
     override fun onCreate() {
         super.onCreate()
-        KMPAuth.initialize {
-            google("814762435029-63a565o3ub7d4ph32es0vugn5aoa79qs.apps.googleusercontent.com")
-        }
         Firebase.initialize(this)
         val appCheck = FirebaseAppCheck.getInstance()
         if (BuildConfig.DEBUG) {
             appCheck.installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
         } else {
             appCheck.installAppCheckProviderFactory(PlayIntegrityAppCheckProviderFactory.getInstance())
+        }
+        KMPAuth.initialize {
+            google("814762435029-63a565o3ub7d4ph32es0vugn5aoa79qs.apps.googleusercontent.com")
         }
     }
 
