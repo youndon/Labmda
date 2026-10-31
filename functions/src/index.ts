@@ -6758,12 +6758,43 @@ export const syncPublicShop = onValueWritten({ ref: "/shops/{shopId}", region: R
 export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", region: REGION }, async (event) => {
   const uid = event.params.uid, after = event.data.after, target = db.ref("publicDrivers/" + event.params.uid);
   if (!after.exists()) { await target.remove(); return; }
-  const profile = asRecord(after.val()), driver = asRecord(profile.driverService);
-  if (!["APPROVED", "ACTIVE"].includes(asString(driver.status).toUpperCase()) || driver.isOnline !== true) { await target.remove(); return; }
-  const location = asRecord(profile.currentLocation ?? driver.currentLocation), vehicle = asRecord(driver.vehicleInfo ?? profile.vehicleInfo);
-  await target.set({ uid, fullName: asString(profile.fullName) || "Driver", phoneNumber: asString(profile.phoneNumber) || asString(profile.phone), isOnline: true,
-    currentLocation: { latitude: Number(location.latitude ?? 0), longitude: Number(location.longitude ?? 0), heading: Number(location.heading ?? 0) },
-    vehicleInfo: { type: asString(vehicle.type), make: asString(vehicle.make), model: asString(vehicle.model), color: asString(vehicle.color) }, updatedAtTimestamp: Date.now() });
+
+  const profile = asRecord(after.val());
+  const driver = asRecord(profile.driverService);
+  const courier = asRecord(profile.deliveryServices);
+  const driverStatus = asString(driver.status).toUpperCase();
+  const courierStatus = asString(courier.status).toUpperCase();
+  const driverApproved = driverStatus === "APPROVED" || driverStatus === "ACTIVE";
+  const courierApproved = courierStatus === "APPROVED" || courierStatus === "ACTIVE";
+  const driverOnline = driverApproved && driver.isOnline === true;
+  const courierOnline = courierApproved && courier.isOnline === true;
+
+  // A delivery-only account must be published too: customer tracking and
+  // getTrackingRoute intentionally share the publicDrivers location contract.
+  if (!driverOnline && !courierOnline) { await target.remove(); return; }
+
+  const location = asRecord(profile.currentLocation ?? driver.currentLocation);
+  const vehicle = asRecord(driver.vehicleInfo ?? profile.vehicleInfo);
+  await target.set({
+    uid,
+    fullName: asString(profile.fullName) || (courierOnline && !driverOnline ? "Courier" : "Driver"),
+    phoneNumber: asString(profile.phoneNumber) || asString(profile.phone),
+    isOnline: true,
+    isDriverOnline: driverOnline,
+    isCourierOnline: courierOnline,
+    currentLocation: {
+      latitude: Number(location.latitude ?? 0),
+      longitude: Number(location.longitude ?? 0),
+      heading: Number(location.heading ?? 0),
+    },
+    vehicleInfo: {
+      type: asString(vehicle.type),
+      make: asString(vehicle.make),
+      model: asString(vehicle.model),
+      color: asString(vehicle.color),
+    },
+    updatedAtTimestamp: Date.now(),
+  });
 });
 export const syncAvailableDeliveryTask = onValueWritten({ ref: "/orders/{orderId}", region: REGION }, async (event) => {
   const id = event.params.orderId, after = event.data.after, target = db.ref("availableDeliveryTasks/" + event.params.orderId);
