@@ -1119,7 +1119,10 @@ async function buildRouteQuote(
 
     const config = await getCurrentPricingConfiguration();
     const serviceType = (asString(data.serviceType) || "ride").toLowerCase();
-    const route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng);
+    const route = await calculateGoogleRoute(
+      pickupLat, pickupLng, dropoffLat, dropoffLng,
+      quoteType === "RIDE" ? serviceType : "car"
+    );
     let amountCentavos: number;
     let feeKind: "deliveryFeeCentavos" | "fareCentavos";
     let additionalChargesCentavos = 0;
@@ -1178,6 +1181,7 @@ async function buildRouteQuote(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       fareBreakdown: asRecord(snapshot.fareBreakdown),
       [feeKind]: feeKind === "deliveryFeeCentavos" ? deliveryFeeCentavos : amountCentavos,
@@ -1202,6 +1206,7 @@ async function buildRouteQuote(
       distanceMeters: route.distanceMeters,
       distanceKm: quote.distanceKm,
       routeDuration: route.duration,
+      routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       fareBreakdown: asRecord(snapshot.fareBreakdown),
       pricingVersion: config.version,
@@ -1371,6 +1376,7 @@ export const quoteOrder = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       deliveryFeeCentavos,
       subtotalCentavos: calculated.subtotalCentavos,
@@ -1407,6 +1413,7 @@ export const quoteOrder = onCall(
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       routeDuration: route.duration,
+      routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       pricingVersion: config.version,
       breakdown: calculated.breakdown,
@@ -1854,7 +1861,7 @@ export const createTripPayment = onCall(
       if (!rideRule) {
         throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
       }
-      route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng);
+      route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng, serviceType);
       const fare = calculateRideFareCentavos(route.distanceMeters, rideRule, config.additionalCharges.ridesCentavos);
       fareCentavos = fare.fareCentavos;
       optionalChargesCentavos = fare.optionalChargesCentavos;
