@@ -68,7 +68,7 @@ class SettingsScreen : Screen {
                     SettingsCard {
                         SettingsSwitchRow(
                             icon = Icons.Filled.NotificationsNone,
-                            label = "Push Notifications",
+                            label = "Notification Preference",
                             checked = preferences.notificationsEnabled,
                             onCheckedChange = model::setNotificationsEnabled
                         )
