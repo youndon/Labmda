@@ -190,13 +190,9 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                         }
                                     }
 
-                                    LinearProgressIndicator(
-                                        progress = { if (courier != null) 0.72f else 0.15f },
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                                    )
                                     Text(
                                         if (courier == null) "Waiting for the courier's GPS update."
-                                        else "Your courier is travelling to your delivery address.",
+                                        else "Delivery progress: Out for delivery · Your courier is travelling to your address.",
                                         modifier = Modifier.padding(horizontal = 16.dp),
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -350,7 +346,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                 Text("Delivery Address", style = MaterialTheme.typography.titleSmall)
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = currentOrder.pickupLocation.ifBlank { "Address not provided" },
+                                    text = currentOrder.dropoffLocation.ifBlank { "Address not provided" },
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
