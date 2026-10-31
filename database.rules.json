@@ -11,7 +11,7 @@
           ".validate": "($other !== 'isAdmin' && $other !== 'admin' && $other !== 'adminRole' && $other !== 'isAdministrator' && $other !== 'administrator' && $other !== 'role' && $other !== 'roles' && $other !== 'permissions' && $other !== 'isSuperAdmin') || newData.val() === data.val()"
         },
         "foodStatus": {
-          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || ((data.val() === null || data.val() === 'NONE' || data.val() === 'REJECTED') && newData.val() === 'PENDING')))"
+          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || ((data.val() === null || data.val() === 'NONE' || data.val() === 'REJECTED') && newData.val() === 'PENDING'))))"
         },
         "shopStatus": {
           ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && newData.val() === data.val()))"
