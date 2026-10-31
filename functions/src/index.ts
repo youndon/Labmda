@@ -4207,7 +4207,6 @@ type WalletDeltaField =
 
 type WalletDeltas = Partial<Record<WalletDeltaField, number>>;
 
-const AUTO_PAYOUT_MINIMUM_CENTAVOS = 50000; // PHP 500.00
 const MANUAL_PAYOUT_MINIMUM_CENTAVOS = 10000; // PHP 100.00
 const PAYOUT_RECONCILIATION_MS = 5 * 60 * 1000;
 
@@ -4623,8 +4622,7 @@ async function applyCashRemittanceWalletEffects(
       merchantSettledAtTimestamp: Date.now(),
     });
     const wallet = asRecord((await db.ref("wallets/" + merchantId).get()).val());
-    if (walletNumber(wallet, "refundDebtCentavos") === 0 && walletNumber(wallet, "availableCentavos") > 0) {
-    }
+
   }
 }
 
@@ -4787,8 +4785,7 @@ async function reconcileCompletedPaymentEarnings(
   }
 
   if (complete) {
-    if (payment.suppressPayoutQueue !== true) {
-    }
+
     await db.ref("payments/" + entityId).update({
       earningsPendingStatus: hasPending ? "RELEASED" : asString(payment.earningsPendingStatus),
       earningsSettlementStatus: "RELEASED",
@@ -5847,6 +5844,33 @@ export const adminApprovePayoutRequest = onCall(
     } catch (error) {
       const existingPayout = asRecord((await db.ref("payouts/" + requestId).get()).val());
       if (Object.keys(existingPayout).length) {
+        const existingPayoutStatus = asString(existingPayout.status).toUpperCase();
+        if (["CANCELLED", "FAILED", "REJECTED", "EXPIRED"].includes(existingPayoutStatus)) {
+          await db.ref("wallets/" + uid).transaction((rawValue) => {
+            const currentWallet = asRecord(rawValue);
+            if (asString(currentWallet.activePayoutRequestId) !== requestId) return;
+            const nextWallet = { ...currentWallet };
+            delete nextWallet.activePayoutRequestId;
+            nextWallet.updatedAtTimestamp = Date.now();
+            return nextWallet;
+          });
+          await requestRef.update({
+            status: "FAILED",
+            payoutId: requestId,
+            payoutStatus: existingPayoutStatus,
+            approvedBy: adminUid,
+            lastError: "The payout could not be reserved or submitted. Submit a new request after reviewing the wallet.",
+            updatedAtTimestamp: Date.now(),
+          });
+          return {
+            payoutRequestId: requestId,
+            payoutId: requestId,
+            status: "FAILED",
+            payoutStatus: existingPayoutStatus,
+            amountCentavos,
+            reused: true,
+          };
+        }
         await requestRef.update({
           status: "PROCESSING",
           payoutId: requestId,
@@ -5860,7 +5884,7 @@ export const adminApprovePayoutRequest = onCall(
           payoutRequestId: requestId,
           payoutId: requestId,
           status: "PROCESSING",
-          payoutStatus: asString(existingPayout.status),
+          payoutStatus: existingPayoutStatus,
           amountCentavos,
           reused: true,
         };
