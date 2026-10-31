@@ -69,5 +69,5 @@ jobs:
       - name: Install Functions dependencies
         run: npm install
 
-      - name: Compile Firebase Functions
-        run: npm run build
+      - name: Build and test Firebase Functions
+        run: npm run test
