@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -27,6 +28,11 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.Location
+import android.location.LocationRequest
+import android.location.LocationCallback
+import android.location.LocationResult
+import android.os.Looper
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -35,6 +41,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
@@ -47,6 +54,7 @@ import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import kotlinx.coroutines.Dispatchers
@@ -61,12 +69,15 @@ class DeliveryDashboardScreen : Screen {
     override fun Content() {
         val navigator = LocalNavigator.current
         val context = LocalContext.current
+        val uriHandler = LocalUriHandler.current
         val scope = rememberCoroutineScope()
         val screenModel = rememberScreenModel { DeliveryDashboardScreenModel() }
 
         val activeDeliveries by screenModel.activeDeliveries.collectAsState()
         val completedDeliveries by screenModel.completedDeliveries.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val trackingRoute by screenModel.trackingRoute.collectAsState()
+        val routeLoading by screenModel.routeLoading.collectAsState()
 
         val cameraPositionState = rememberCameraPositionState()
 
@@ -97,6 +108,7 @@ class DeliveryDashboardScreen : Screen {
                     if (loc != null) {
                         val p = LatLng(loc.latitude, loc.longitude)
                         courier = p
+                        screenModel.updateCourierLocation(p.latitude, p.longitude, loc.bearing)
                         scope.launch {
                             runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(p, 14f), 600) }
                         }
@@ -109,6 +121,22 @@ class DeliveryDashboardScreen : Screen {
             else permissionLauncher.launch(
                 arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
             )
+        }
+
+        DisposableEffect(hasLocationPermission, fusedClient) {
+            if (!hasLocationPermission) return@DisposableEffect onDispose { }
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5_000L)
+                .setMinUpdateIntervalMillis(3_000L)
+                .build()
+            val callback = object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    val location = result.lastLocation ?: return
+                    courier = LatLng(location.latitude, location.longitude)
+                    screenModel.updateCourierLocation(location.latitude, location.longitude, location.bearing)
+                }
+            }
+            fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            onDispose { fusedClient.removeLocationUpdates(callback) }
         }
 
         fun pointOf(o: Order): LatLng? =
@@ -134,6 +162,17 @@ class DeliveryDashboardScreen : Screen {
         var selectedOrderId by remember { mutableStateOf<String?>(null) }
         var selectedTab by remember { mutableIntStateOf(0) }
         val selectedOrder = activeDeliveries.firstOrNull { it.id == selectedOrderId }
+
+        LaunchedEffect(selectedOrder?.id, courier) {
+            val orderId = selectedOrder?.id ?: return@LaunchedEffect
+            while (true) {
+                screenModel.refreshCourierRoute(orderId)
+                kotlinx.coroutines.delay(15_000L)
+            }
+        }
+        LaunchedEffect(selectedOrderId) {
+            if (selectedOrderId == null) screenModel.clearTrackingRoute()
+        }
 
         val sheetScaffoldState = rememberBottomSheetScaffoldState()
         val peekHeight = 120.dp
@@ -214,6 +253,7 @@ class DeliveryDashboardScreen : Screen {
                                     isCompleted = selectedTab == 1,
                                     onAccept = { screenModel.claimCourierTask(orderItem) },
                                     onReject = { screenModel.rejectCourierTask(orderItem) },
+                                    onMarkPickedUp = { screenModel.markDeliveryPickedUp(orderItem) },
                                     onMarkDelivered = { screenModel.markCourierOrderDelivered(orderItem) }
                                 )
                             }
@@ -288,11 +328,53 @@ class DeliveryDashboardScreen : Screen {
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             val from = courier
-                            val pickupPt = pickupOf(selectedOrder)
-                            if (from != null && pickupPt != null) {
-                                val km = distanceKm(from, pickupPt)
-                                val eta = maxOf(1, Math.ceil(km / 25.0 * 60).toInt())
-                                Text("${"%.1f".format(km)} km to pickup · ~$eta min away", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            val routePoints = remember(trackingRoute?.encodedPolyline) {
+                                decodeRoutePolyline(trackingRoute?.encodedPolyline.orEmpty())
+                            }
+                            val routeTarget = if (trackingRoute?.routeTo == "PICKUP") pickupOf(selectedOrder) else pointOf(selectedOrder)
+                            Card(shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                        Column {
+                                            Text(if (trackingRoute?.routeTo == "PICKUP") "Route to pickup" else "Route to recipient", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                if (routeLoading && trackingRoute == null) "Calculating road route…" else
+                                                    trackingRoute?.let { "${it.duration} · ${"%.1f".format(it.distanceMeters / 1000.0)} km" }
+                                                        ?: "Waiting for route and live location",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        if (routeLoading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    }
+                                    GoogleMap(
+                                        modifier = Modifier.fillMaxWidth().height(230.dp),
+                                        cameraPositionState = rememberCameraPositionState(),
+                                        uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false)
+                                    ) {
+                                        from?.let { Marker(state = rememberUpdatedMarkerState(it), title = "You", icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)) }
+                                        routeTarget?.let { Marker(state = rememberUpdatedMarkerState(it), title = if (trackingRoute?.routeTo == "PICKUP") "Pickup" else "Recipient") }
+                                        if (routePoints.size > 1) Polyline(points = routePoints, width = 9f, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                        val phone = trackingRoute?.recipientPhone.orEmpty()
+                                        OutlinedButton(
+                                            onClick = { if (phone.isNotBlank()) uriHandler.openUri("tel:$phone") },
+                                            enabled = phone.isNotBlank(),
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text("Call recipient") }
+                                        OutlinedButton(
+                                            onClick = { if (phone.isNotBlank()) uriHandler.openUri("sms:$phone") },
+                                            enabled = phone.isNotBlank(),
+                                            modifier = Modifier.weight(1f)
+                                        ) { Text("Message") }
+                                    }
+                                    Text(
+                                        if (trackingRoute?.routeTo == "PICKUP") "Progress: heading to pickup" else "Progress: order picked up · heading to recipient",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                             DeliveryCardItem(
                                 order = selectedOrder,
@@ -305,6 +387,7 @@ class DeliveryDashboardScreen : Screen {
                                     screenModel.rejectCourierTask(selectedOrder)
                                     selectedOrderId = null
                                 },
+                                onMarkPickedUp = { screenModel.markDeliveryPickedUp(selectedOrder) },
                                 onMarkDelivered = {
                                     screenModel.markCourierOrderDelivered(selectedOrder)
                                     selectedOrderId = null
@@ -323,6 +406,7 @@ class DeliveryDashboardScreen : Screen {
         isCompleted: Boolean,
         onAccept: () -> Unit,
         onReject: () -> Unit,
+        onMarkPickedUp: () -> Unit,
         onMarkDelivered: () -> Unit
     ) {
         Card(
@@ -517,15 +601,28 @@ class DeliveryDashboardScreen : Screen {
                         }
                     } else {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = onMarkDelivered,
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Mark as Delivered")
+                            if (order.deliveryStage != "PICKED_UP") {
+                                Button(
+                                    onClick = onMarkPickedUp,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Confirm Pickup")
+                                }
+                            } else {
+                                Button(
+                                    onClick = onMarkDelivered,
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Mark as Delivered")
+                                }
                             }
 
                             OutlinedButton(
@@ -561,6 +658,35 @@ class DeliveryDashboardScreen : Screen {
             }
         }
     }
+}
+
+private fun decodeRoutePolyline(encoded: String): List<LatLng> {
+    if (encoded.isBlank()) return emptyList()
+    val points = ArrayList<LatLng>()
+    var index = 0
+    var latitude = 0
+    var longitude = 0
+    while (index < encoded.length) {
+        var result = 0
+        var shift = 0
+        var value: Int
+        do {
+            value = encoded[index++].code - 63
+            result = result or ((value and 0x1f) shl shift)
+            shift += 5
+        } while (value >= 0x20 && index < encoded.length)
+        latitude += if ((result and 1) != 0) (result shr 1).inv() else result shr 1
+        result = 0
+        shift = 0
+        do {
+            value = encoded[index++].code - 63
+            result = result or ((value and 0x1f) shl shift)
+            shift += 5
+        } while (value >= 0x20 && index < encoded.length)
+        longitude += if ((result and 1) != 0) (result shr 1).inv() else result shr 1
+        points += LatLng(latitude / 1e5, longitude / 1e5)
+    }
+    return points
 }
 
 private fun distanceKm(a: LatLng, b: LatLng): Double {
