@@ -17,6 +17,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalUriHandler
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.Polyline
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.maps.android.compose.rememberUpdatedMarkerState
+import kotlinx.coroutines.launch
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -27,9 +39,15 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
+        val uriHandler = LocalUriHandler.current
         val screenModel = rememberScreenModel { LiveOrderTrackingScreenModel(orderId) }
         val order by screenModel.order.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val courierLocation by screenModel.courierLocation.collectAsState()
+        val trackingRoute by screenModel.trackingRoute.collectAsState()
+        val routeLoading by screenModel.routeLoading.collectAsState()
+        val cameraState = rememberCameraPositionState()
+        val mapScope = rememberCoroutineScope()
 
         Scaffold(
             topBar = {
@@ -71,6 +89,143 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // Live courier map and road route for food and shop orders.
+                    if (currentOrder.deliveryId.isNotBlank() &&
+                        currentOrder.status == OrderStatus.OUT_FOR_DELIVERY &&
+                        currentOrder.dropoffLat != 0.0 && currentOrder.dropoffLng != 0.0
+                    ) {
+                        item {
+                            val destination = LatLng(currentOrder.dropoffLat, currentOrder.dropoffLng)
+                            val courier = courierLocation?.let { LatLng(it.latitude, it.longitude) }
+                            val routePoints = remember(trackingRoute?.encodedPolyline) {
+                                decodeTrackingPolyline(trackingRoute?.encodedPolyline.orEmpty())
+                            }
+                            val courierMarker = rememberUpdatedMarkerState(
+                                position = courier ?: destination
+                            )
+                            LaunchedEffect(courier) {
+                                if (courier != null) courierMarker.position = courier
+                            }
+                            LaunchedEffect(courier, routePoints, destination) {
+                                val points = (routePoints + listOfNotNull(courier, destination)).distinct()
+                                if (points.isNotEmpty()) {
+                                    runCatching {
+                                        val bounds = LatLngBounds.Builder()
+                                        points.forEach(bounds::include)
+                                        cameraState.animate(
+                                            CameraUpdateFactory.newLatLngBounds(bounds.build(), 100),
+                                            650
+                                        )
+                                    }
+                                }
+                            }
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 16.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column {
+                                            Text("Live delivery", style = MaterialTheme.typography.titleMedium)
+                                            Text(
+                                                when {
+                                                    courier == null -> "Waiting for courier location"
+                                                    routeLoading -> "Updating road route…"
+                                                    trackingRoute != null -> "Courier is on the way"
+                                                    else -> "Courier location received"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        if (trackingRoute != null) {
+                                            Column(horizontalAlignment = Alignment.End) {
+                                                Text(
+                                                    formatTrackingEta(trackingRoute!!.duration),
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Text(
+                                                    "%.1f km".format(trackingRoute!!.distanceMeters / 1000.0),
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Box(modifier = Modifier.fillMaxWidth().height(280.dp)) {
+                                        GoogleMap(
+                                            modifier = Modifier.fillMaxSize(),
+                                            cameraPositionState = cameraState,
+                                            properties = MapProperties(isBuildingEnabled = false),
+                                            uiSettings = MapUiSettings(
+                                                zoomControlsEnabled = false,
+                                                myLocationButtonEnabled = false,
+                                                mapToolbarEnabled = false
+                                            )
+                                        ) {
+                                            if (routePoints.size >= 2) {
+                                                Polyline(points = routePoints, color = MaterialTheme.colorScheme.primary, width = 10f)
+                                            } else if (courier != null) {
+                                                Polyline(
+                                                    points = listOf(courier, destination),
+                                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                                    width = 7f
+                                                )
+                                            }
+                                            if (courier != null) {
+                                                Marker(
+                                                    state = courierMarker,
+                                                    title = currentOrder.deliveryName.ifBlank { "Courier" },
+                                                    snippet = "Live courier location"
+                                                )
+                                            }
+                                            Marker(
+                                                state = rememberUpdatedMarkerState(position = destination),
+                                                title = "Your delivery address",
+                                                snippet = currentOrder.dropoffLocation
+                                            )
+                                        }
+                                    }
+
+                                    LinearProgressIndicator(
+                                        progress = { if (courier != null) 0.72f else 0.15f },
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                                    )
+                                    Text(
+                                        if (courier == null) "Waiting for the courier's GPS update."
+                                        else "Your courier is travelling to your delivery address.",
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    if (currentOrder.deliveryPhone.isNotBlank()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            OutlinedButton(
+                                                onClick = { uriHandler.openUri("tel:${currentOrder.deliveryPhone}") },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(Icons.Default.Phone, contentDescription = null)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Call courier")
+                                            }
+                                            OutlinedButton(
+                                                onClick = { uriHandler.openUri("sms:${currentOrder.deliveryPhone}") },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Text("Message")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Pickup & drop-off
                     item {
                         Card(modifier = Modifier.fillMaxWidth()) {
@@ -340,4 +495,38 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
             }
         }
     }
+}
+
+private fun decodeTrackingPolyline(encoded: String): List<LatLng> {
+    if (encoded.isBlank()) return emptyList()
+    val points = mutableListOf<LatLng>()
+    var index = 0
+    var lat = 0
+    var lng = 0
+    fun delta(): Int {
+        var result = 0
+        var shift = 0
+        while (index < encoded.length) {
+            val value = encoded[index++].code - 63
+            result = result or ((value and 0x1f) shl shift)
+            shift += 5
+            if (value < 0x20) break
+        }
+        return if ((result and 1) != 0) (result shr 1).inv() else result shr 1
+    }
+    return runCatching {
+        while (index < encoded.length) {
+            lat += delta()
+            lng += delta()
+            points += LatLng(lat / 1e5, lng / 1e5)
+        }
+        points
+    }.getOrDefault(emptyList())
+}
+
+private fun formatTrackingEta(duration: String): String {
+    val seconds = duration.removeSuffix("s").toDoubleOrNull() ?: return "ETA unavailable"
+    if (!seconds.isFinite() || seconds <= 0.0) return "ETA unavailable"
+    val minutes = kotlin.math.ceil(seconds / 60.0).toInt().coerceAtLeast(1)
+    return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
 }
