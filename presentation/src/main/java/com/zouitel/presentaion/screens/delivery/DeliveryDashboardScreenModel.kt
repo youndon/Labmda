@@ -190,7 +190,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
         val uid = currentUid ?: return
         screenModelScope.launch(Dispatchers.IO) {
             runCatching {
-                db.child("users").child(uid).child("currentLocation").setValue(
+                db.child("driverLocations").child(uid).setValue(
                     mapOf("latitude" to latitude, "longitude" to longitude, "heading" to heading)
                 )
             }

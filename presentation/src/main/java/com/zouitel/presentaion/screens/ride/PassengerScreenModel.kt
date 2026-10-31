@@ -123,9 +123,6 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
                         if (!isOnline) return@mapNotNull null
 
                         val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
-                        val phone = runCatching { child.child("phoneNumber").value<String>() }
-                            .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
-
                         val loc = child.child("currentLocation")
                         val lat = runCatching { loc.child("latitude").value<Double>() }.getOrDefault(0.0)
                         val lng = runCatching { loc.child("longitude").value<Double>() }.getOrDefault(0.0)
@@ -138,7 +135,7 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
                         UserProfile(
                             uid = uid,
                             fullName = fullName,
-                            phoneNumber = phone,
+                            phoneNumber = "",
 
                             driverService = DriverAccountInfo(
                                 vehicleInfo = VehicleInfo(type = vehicleType),

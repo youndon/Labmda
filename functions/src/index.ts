@@ -7085,8 +7085,12 @@ export const syncPublicShop = onValueWritten({ ref: "/shops/{shopId}", region: R
   });
 });
 export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", region: REGION }, async (event) => {
-  const uid = event.params.uid, after = event.data.after, target = db.ref("publicDrivers/" + event.params.uid);
-  if (!after.exists()) { await target.remove(); return; }
+  const uid = event.params.uid, after = event.data.after, target = db.ref("publicDrivers/" + uid);
+  if (!after.exists()) {
+    await target.remove();
+    await db.ref("driverLocations/" + uid).remove();
+    return;
+  }
 
   const profile = asRecord(after.val());
   const driver = asRecord(profile.driverService);
@@ -7098,24 +7102,30 @@ export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", reg
   const driverOnline = driverApproved && driver.isOnline === true;
   const courierOnline = courierApproved && courier.isOnline === true;
 
-  // A delivery-only account must be published too: customer tracking and
-  // getTrackingRoute intentionally share the publicDrivers location contract.
-  if (!driverOnline && !courierOnline) { await target.remove(); return; }
+  // Publish profile/availability changes only. High-frequency coordinates live
+  // under /driverLocations/{uid} and are handled by syncPublicDriverLocation.
+  if (!driverOnline && !courierOnline) {
+    await target.remove();
+    await db.ref("driverLocations/" + uid).remove();
+    return;
+  }
 
-  const location = asRecord(profile.currentLocation ?? driver.currentLocation);
+  const locationSnapshot = await db.ref("driverLocations/" + uid).get();
+  const location = asRecord(locationSnapshot.val());
   const vehicle = asRecord(driver.vehicleInfo ?? profile.vehicleInfo);
-  await target.set({
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
+  const heading = Number(location.heading ?? 0);
+  const hasLocation = locationSnapshot.exists() &&
+    Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
+    Number.isFinite(longitude) && longitude >= -180 && longitude <= 180 &&
+    !(latitude === 0 && longitude === 0);
+  const publicProfile: Record<string, unknown> = {
     uid,
     fullName: asString(profile.fullName) || (courierOnline && !driverOnline ? "Courier" : "Driver"),
-    phoneNumber: asString(profile.phoneNumber) || asString(profile.phone),
     isOnline: true,
     isDriverOnline: driverOnline,
     isCourierOnline: courierOnline,
-    currentLocation: {
-      latitude: Number(location.latitude ?? 0),
-      longitude: Number(location.longitude ?? 0),
-      heading: Number(location.heading ?? 0),
-    },
     vehicleInfo: {
       type: asString(vehicle.type),
       make: asString(vehicle.make),
@@ -7123,8 +7133,80 @@ export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", reg
       color: asString(vehicle.color),
     },
     updatedAtTimestamp: Date.now(),
+  };
+  if (hasLocation) {
+    publicProfile.currentLocation = { latitude, longitude, heading: Number.isFinite(heading) ? heading : 0 };
+  }
+  await target.set(publicProfile);
+});
+
+export const syncPublicDriverLocation = onValueWritten({ ref: "/driverLocations/{uid}", region: REGION }, async (event) => {
+  const uid = event.params.uid;
+  const target = db.ref("publicDrivers/" + uid);
+  const publicSnapshot = await target.get();
+  if (!publicSnapshot.exists() || asRecord(publicSnapshot.val()).isOnline !== true) return;
+
+  if (!event.data.after.exists()) {
+    await target.child("currentLocation").remove();
+    await target.child("updatedAtTimestamp").set(Date.now());
+    return;
+  }
+
+  const location = asRecord(event.data.after.val());
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
+  const heading = Number(location.heading ?? 0);
+  if (
+    !Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+    !Number.isFinite(longitude) || longitude < -180 || longitude > 180 ||
+    (latitude === 0 && longitude === 0)
+  ) {
+    await target.child("currentLocation").remove();
+    return;
+  }
+
+  await target.update({
+    currentLocation: {
+      latitude,
+      longitude,
+      heading: Number.isFinite(heading) ? heading : 0,
+    },
+    updatedAtTimestamp: Date.now(),
   });
 });
+
+/**
+ * One-time admin migration: remove phone fields from already-published driver
+ * records. The ongoing projection never republishes phone numbers.
+ */
+export const sanitizePublicDriverProfiles = onCall({ region: REGION }, async (request) => {
+  requireUid(request);
+  if (request.auth?.token.admin !== true) {
+    throw new HttpsError("permission-denied", "Only an administrator can sanitize public driver profiles.");
+  }
+
+  const snapshot = await db.ref("publicDrivers").get();
+  const batches: Array<Record<string, null>> = [];
+  let batch: Record<string, null> = {};
+  let sanitizedProfiles = 0;
+  snapshot.forEach((child) => {
+    const uid = child.key;
+    if (!uid) return false;
+    const profile = asRecord(child.val());
+    if (profile.phoneNumber !== undefined) batch[uid + "/phoneNumber"] = null;
+    if (profile.phone !== undefined) batch[uid + "/phone"] = null;
+    if (Object.keys(batch).length >= 400) {
+      batches.push(batch);
+      batch = {};
+    }
+    if (profile.phoneNumber !== undefined || profile.phone !== undefined) sanitizedProfiles++;
+    return false;
+  });
+  if (Object.keys(batch).length) batches.push(batch);
+  for (const updates of batches) await db.ref("publicDrivers").update(updates);
+  return { sanitizedProfiles };
+});
+
 export const syncAvailableDeliveryTask = onValueWritten({ ref: "/orders/{orderId}", region: REGION }, async (event) => {
   const id = event.params.orderId, after = event.data.after, target = db.ref("availableDeliveryTasks/" + event.params.orderId);
   if (!after.exists()) { await target.remove(); return; }

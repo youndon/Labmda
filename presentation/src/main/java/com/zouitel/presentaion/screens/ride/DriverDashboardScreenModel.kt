@@ -250,7 +250,7 @@ class DriverDashboardScreenModel : ScreenModel {
     fun updateDriverLocation(latitude: Double, longitude: Double, heading: Float = 0f) {
         val uid = currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).child("currentLocation").setValue(
+            db.child("driverLocations").child(uid).setValue(
                 mapOf(
                     "latitude" to latitude,
                     "longitude" to longitude,
