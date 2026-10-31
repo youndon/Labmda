@@ -2773,7 +2773,7 @@ async function applyXenditPaymentStatus(args: {
     if (!rawValue || typeof rawValue !== "object") return;
     const entity = asRecord(rawValue);
     const currentStatus = asString(entity.status).toUpperCase();
-    const nextEntity = {
+    const nextEntity: Record<string, unknown> = {
       ...entity,
       paymentStatus: savedStatus,
       paymentId: asString(saved.providerReference),
