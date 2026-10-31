@@ -612,6 +612,19 @@ async function requireApprovedDriver(uid: string): Promise<Record<string, unknow
   return profile;
 }
 
+async function validateTargetDriverForRide(targetDriverId: string, serviceType: string): Promise<void> {
+  if (!targetDriverId) return;
+  const profile = await requireApprovedDriver(targetDriverId);
+  const driverService = asRecord(profile.driverService);
+  if (driverService.isOnline !== true) {
+    throw new HttpsError("failed-precondition", "The selected driver is no longer online. Choose another driver.");
+  }
+  const vehicleType = asString(asRecord(driverService.vehicleInfo).type).toLowerCase();
+  if (vehicleType !== serviceType.toLowerCase()) {
+    throw new HttpsError("failed-precondition", "The selected driver's vehicle does not match this ride type.");
+  }
+}
+
 async function getCurrentPricingConfiguration(): Promise<PricingConfiguration> {
   const snapshot = await db.ref("config/pricing/current").get();
   if (!snapshot.exists()) {
@@ -1772,6 +1785,8 @@ export const createTripPayment = onCall(
     if (!/^[a-z0-9_-]{2,24}$/.test(serviceType)) {
       throw new HttpsError("invalid-argument", "Invalid ride service type.");
     }
+    const targetDriverId = asString(data.targetDriverId);
+    await validateTargetDriverForRide(targetDriverId, serviceType);
 
     const pickupAddress = asString(data.pickupLocation);
     const dropoffAddress = asString(data.dropoffLocation);
@@ -1884,7 +1899,6 @@ export const createTripPayment = onCall(
       tripStatus = paymentStatus === "PAID" ? "REQUESTED" : ["FAILED", "CANCELLED", "EXPIRED"].includes(paymentStatus) ? "CANCELLED" : "AWAITING_PAYMENT";
     }
 
-    const targetDriverId = asString(data.targetDriverId);
     const trip = {
       id,
       passengerId: uid,
@@ -2002,6 +2016,8 @@ export const createTrip = onCall(
     if (!serviceType || (asString(data.serviceType) && asString(data.serviceType).toLowerCase() !== serviceType)) {
       throw new HttpsError("invalid-argument", "The requested ride service does not match the quote.");
     }
+    const targetDriverId = asString(data.targetDriverId);
+    await validateTargetDriverForRide(targetDriverId, serviceType);
 
     const config = normalizePricingConfiguration(quote.pricingConfiguration);
     const rideRule = resolveRidePricingRule(config, serviceType);
@@ -2100,7 +2116,7 @@ export const createTrip = onCall(
       pricingSnapshot: pricingSnapshotValue,
       breakdown: rideBreakdown,
       serviceType: serviceType.toUpperCase(),
-      driverId: asString(data.targetDriverId),
+      driverId: targetDriverId,
       status: "REQUESTED",
       paymentMethod: "",
       paymentStatus: "UNPAID",
