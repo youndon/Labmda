@@ -620,7 +620,7 @@ async function validateTargetDriverForRide(targetDriverId: string, serviceType: 
     throw new HttpsError("failed-precondition", "The selected driver is no longer online. Choose another driver.");
   }
   const vehicleType = asString(asRecord(driverService.vehicleInfo).type).toLowerCase();
-  if (vehicleType !== serviceType.toLowerCase()) {
+  if (serviceType.toLowerCase() !== "ride" && vehicleType !== serviceType.toLowerCase()) {
     throw new HttpsError("failed-precondition", "The selected driver's vehicle does not match this ride type.");
   }
 }
