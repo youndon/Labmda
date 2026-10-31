@@ -4,6 +4,12 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// Supply this through ~/.gradle/gradle.properties or the MAPS_API_KEY
+// environment variable. The key is a restricted client key, not a secret.
+val mapsApiKey = providers.gradleProperty("MAPS_API_KEY")
+    .orElse(providers.environmentVariable("MAPS_API_KEY"))
+    .orElse("")
+
 android {
     namespace = "com.zouitel.labmda"
     compileSdk {
@@ -18,6 +24,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey.get()
     }
 
     buildTypes {
