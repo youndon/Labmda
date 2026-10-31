@@ -237,43 +237,6 @@ async function createXenditGcashRequest(args: {
   return { paymentId, checkoutUrl, status, webCheckoutUrl, checkoutActionDescriptor };
 }
 
-function buildPaymentResponse(
-  entityType: "ORDER" | "TRIP",
-  id: string,
-  payment: Record<string, unknown>,
-  amount: number
-): Record<string, unknown> {
-  return {
-    [entityType === "ORDER" ? "orderId" : "tripId"]: id,
-    paymentId: asString(payment.providerReference),
-    paymentStatus: asString(payment.status),
-    amount,
-    checkoutUrl: asString(payment.checkoutUrl) || null,
-  };
-}
-
-async function returnExistingCheckout(
-  entityPath: "orders" | "trips",
-  id: string,
-  uid: string
-): Promise<Record<string, unknown> | null> {
-  const entitySnapshot = await db.ref(entityPath + "/" + id).get();
-  if (!entitySnapshot.exists()) return null;
-
-  const entity = asRecord(entitySnapshot.val());
-  const ownerId = entityPath === "orders" ? asString(entity.clientId) : asString(entity.passengerId);
-  if (ownerId !== uid) {
-    throw new HttpsError("already-exists", "This checkout key is already in use.");
-  }
-
-  const paymentSnapshot = await db.ref("payments/" + id).get();
-  const payment = asRecord(paymentSnapshot.val());
-  const amount = entityPath === "orders"
-    ? asNumber(entity.totalPrice, "stored total")
-    : asNumber(entity.fare, "stored fare");
-  return buildPaymentResponse(entityPath === "orders" ? "ORDER" : "TRIP", id, payment, amount);
-}
-
 async function loadOrderCatalog(
   uid: string,
   orderType: OrderType,
@@ -1510,6 +1473,7 @@ export const createOrder = onCall(
   async (request) => {
     const uid = requireUid(request);
     const data = asRecord(request.data);
+    const paymentMethod = parsePaymentMethod(data.paymentMethod);
     const quoteId = asString(data.quoteId);
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(quoteId)) {
       throw new HttpsError("invalid-argument", "A valid order quote ID is required.");
@@ -1521,13 +1485,21 @@ export const createOrder = onCall(
       if (asString(existing.clientId) !== uid) {
         throw new HttpsError("already-exists", "This idempotency key has already been used.");
       }
+      if (asString(existing.paymentMethod).toUpperCase() !== paymentMethod) {
+        throw new HttpsError("failed-precondition", "This checkout key was already used with a different payment method.");
+      }
+      const existingPayment = asRecord((await db.ref("payments/" + orderId).get()).val());
       return {
         orderId,
+        paymentId: asString(existingPayment.providerReference) || asString(existing.paymentId),
+        paymentStatus: asString(existing.paymentStatus) || "UNPAID",
+        amountCentavos: Number(existing.totalPriceCentavos ?? 0),
         totalCentavos: Number(existing.totalPriceCentavos ?? 0),
         amount: Number(existing.totalPrice ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
         distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
+        checkoutUrl: asString(existingPayment.checkoutUrl) || null,
         reused: true,
       };
     }
@@ -1603,6 +1575,9 @@ export const createOrder = onCall(
         const value = asRecord(refreshedOrder.val());
         return {
           orderId,
+          paymentId: asString(asRecord((await db.ref("payments/" + orderId).get()).val()).providerReference) || asString(value.paymentId),
+          paymentStatus: asString(value.paymentStatus) || "UNPAID",
+          amountCentavos: Number(value.totalPriceCentavos ?? 0),
           totalCentavos: Number(value.totalPriceCentavos ?? 0),
           amount: Number(value.totalPrice ?? 0),
           pricingVersion: Number(value.pricingVersion ?? 0),
@@ -1645,8 +1620,8 @@ export const createOrder = onCall(
       pricingQuoteId: quoteId,
       pricingSnapshot: snapshot,
       breakdown: quote.breakdown,
-      // Quote-first orders are created for GCash checkout; keep them hidden from merchants until capture.
-      status: "AWAITING_PAYMENT",
+      // GCash orders remain hidden until capture; cash orders are immediately available to merchants.
+      status: paymentMethod === "CASH" ? "PLACED" : "AWAITING_PAYMENT",
       deliveryId: "",
       deliveryName: "",
       deliveryPhone: "",
@@ -1657,437 +1632,49 @@ export const createOrder = onCall(
       dropoffLat: Number(quote.dropoffLat),
       dropoffLng: Number(quote.dropoffLng),
       createdAtTimestamp: timestamp,
-      paymentMethod: "",
+      paymentMethod,
       paymentStatus: "UNPAID",
-      paymentId: "",
+      paymentId: paymentMethod === "CASH" ? "cash_" + orderId : "",
     };
-    await orderRef.set(order);
+    const payment = {
+      entityType: "ORDER",
+      entityId: orderId,
+      clientId: uid,
+      merchantId: order.merchantId,
+      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
+      providerReference: paymentMethod === "CASH" ? "cash_" + orderId : "",
+      channelCode: paymentMethod,
+      status: "UNPAID",
+      amount: phpFromCents(totalCentavos),
+      amountCentavos: totalCentavos,
+      breakdown: quote.breakdown,
+      pricingVersion: pricingConfig.version,
+      currency: "PHP",
+      checkoutUrl: "",
+      createdAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    };
+    const updates: Record<string, unknown> = {};
+    updates["orders/" + orderId] = order;
+    updates["payments/" + orderId] = payment;
+    await db.ref().update(updates);
 
-    logger.info("Server created order from locked pricing quote", { orderId, quoteId, uid, pricingVersion: pricingConfig.version });
+    logger.info("Server created order from locked pricing quote", { orderId, quoteId, uid, pricingVersion: pricingConfig.version, paymentMethod });
     return {
       orderId,
+      paymentId: asString(payment.providerReference),
+      paymentStatus: "UNPAID",
       totalCentavos,
+      amountCentavos: totalCentavos,
       amount: phpFromCents(totalCentavos),
       distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
       pricingVersion: pricingConfig.version,
       breakdown: quote.breakdown,
+      checkoutUrl: null,
       reused: false,
     };
   }
 );
-
-export const createOrderPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY, GOOGLE_ROUTES_API_KEY] },
-  async (request) => {
-    const uid = requireUid(request);
-    const data = asRecord(request.data);
-    const id = parseIdempotencyKey(data.idempotencyKey);
-    const orderTypeValue = asString(data.orderType).toUpperCase();
-    if (orderTypeValue !== "FOOD" && orderTypeValue !== "RETAIL") {
-      throw new HttpsError("invalid-argument", "Unsupported order type.");
-    }
-    const orderType = orderTypeValue as OrderType;
-    const sourceId = asString(data.sourceId);
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(sourceId)) {
-      throw new HttpsError("invalid-argument", "A valid source ID is required.");
-    }
-
-    const existing = await returnExistingCheckout("orders", id, uid);
-    if (existing) return existing;
-
-    const paymentMethod = parsePaymentMethod(data.paymentMethod);
-    const requestedItems = normalizeCatalogItems(data.items);
-    const dropoffLocation = asString(data.dropoffLocation);
-    const dropoffLat = asNumber(data.dropoffLat, "drop-off latitude");
-    const dropoffLng = asNumber(data.dropoffLng, "drop-off longitude");
-    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
-    if (!dropoffLocation) throw new HttpsError("invalid-argument", "A drop-off address is required.");
-
-    const catalog = await loadOrderCatalog(uid, orderType, sourceId, requestedItems);
-    validateCoordinates(catalog.pickupLat, catalog.pickupLng, "Merchant pickup");
-    const pricingQuoteId = asString(data.pricingQuoteId);
-    let config: PricingConfiguration;
-    let route: RouteResult;
-    let deliveryFeeCentavos: number;
-    let savedPricingSnapshot: Record<string, unknown>;
-
-    if (pricingQuoteId) {
-      const quote = await loadOwnedPricingQuote(
-        uid, pricingQuoteId, "DELIVERY",
-        catalog.pickupLat, catalog.pickupLng, dropoffLat, dropoffLng
-      );
-      config = normalizePricingConfiguration(quote.pricingConfiguration);
-      route = {
-        provider: "GOOGLE_ROUTES_API",
-        distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
-        duration: asString(quote.routeDuration),
-        travelMode: "DRIVE",
-        encodedPolyline: asString(quote.routePolyline),
-      };
-      deliveryFeeCentavos = nonNegativeInteger(quote.deliveryFeeCentavos, "quoted delivery fee");
-      savedPricingSnapshot = asRecord(quote.pricingSnapshot);
-    } else {
-      config = await getCurrentPricingConfiguration();
-      route = await calculateGoogleRoute(catalog.pickupLat, catalog.pickupLng, dropoffLat, dropoffLng);
-      deliveryFeeCentavos = calculateDeliveryFeeCentavos(route.distanceMeters, config.delivery);
-      savedPricingSnapshot = pricingSnapshot(config, orderType === "FOOD" ? "FOOD_DELIVERY" : "GOODS_DELIVERY", route);
-    }
-
-    const subtotalCentavos = catalog.items.reduce(
-      (sum, item) => sum + centsFromPhp(item.basePrice, "catalog item price") * item.quantity,
-      0
-    );
-    if (!Number.isSafeInteger(subtotalCentavos) || subtotalCentavos <= 0) {
-      throw new HttpsError("failed-precondition", "The server-calculated item subtotal is invalid.");
-    }
-    const categoryChargeCentavos = orderType === "FOOD"
-      ? config.additionalCharges.foodCentavos
-      : config.additionalCharges.goodsCentavos;
-    const additionalChargesCentavos =
-      categoryChargeCentavos + config.additionalCharges.deliveryCentavos;
-    const totalCentavos = subtotalCentavos + deliveryFeeCentavos + additionalChargesCentavos;
-    if (!Number.isSafeInteger(totalCentavos) || totalCentavos <= 0) {
-      throw new HttpsError("failed-precondition", "The server-calculated order total is invalid.");
-    }
-
-    const itemCommissionBps = orderType === "FOOD"
-      ? config.commissions.foodBps
-      : config.commissions.goodsBps;
-    const merchantCommissionCentavos = commissionCentavos(subtotalCentavos, itemCommissionBps);
-    const deliveryCommissionCentavos = commissionCentavos(deliveryFeeCentavos, config.commissions.deliveryBps);
-    const merchantShareCentavos = subtotalCentavos - merchantCommissionCentavos;
-    const courierShareCentavos = deliveryFeeCentavos - deliveryCommissionCentavos;
-    const platformShareCentavos =
-      merchantCommissionCentavos + deliveryCommissionCentavos + additionalChargesCentavos;
-
-    const subtotal = phpFromCents(subtotalCentavos);
-    const deliveryFee = phpFromCents(deliveryFeeCentavos);
-    const totalPrice = phpFromCents(totalCentavos);
-    const breakdown = {
-      subtotal: subtotalCentavos,
-      deliveryFee: deliveryFeeCentavos,
-      serviceFee: additionalChargesCentavos,
-      discount: 0,
-      tax: 0,
-      total: totalCentavos,
-      merchantShare: merchantShareCentavos,
-      courierShare: courierShareCentavos,
-      driverShare: 0,
-      platformShare: platformShareCentavos,
-      gatewayFee: 0,
-      merchantCommission: merchantCommissionCentavos,
-      deliveryCommission: deliveryCommissionCentavos,
-      rideCommission: 0,
-    };
-    savedPricingSnapshot = {
-      ...savedPricingSnapshot,
-      category: orderType === "FOOD" ? "FOOD_DELIVERY" : "GOODS_DELIVERY",
-      commissionRatesBps: {
-        merchant: itemCommissionBps,
-        delivery: config.commissions.deliveryBps,
-      },
-      additionalChargesCentavos,
-      cancellationFees: config.cancellationFees,
-      refundPolicy: config.refundPolicy,
-    };
-
-    const timestamp = Date.now();
-    let providerReference = "cash_" + id;
-    let paymentStatus = "UNPAID";
-    let checkoutUrl = "";
-    let orderStatus = "PLACED";
-
-    if (paymentMethod === "GCASH") {
-      const xendit = await createXenditGcashRequest({
-        referenceId: "order_" + id,
-        amount: totalPrice,
-        description: catalog.sourceName + " order",
-        entityType: "ORDER",
-        entityId: id,
-        clientId: uid,
-        idempotencyKey: id,
-      });
-      providerReference = xendit.paymentId;
-      checkoutUrl = xendit.checkoutUrl;
-      paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
-      orderStatus = paymentStatus === "PAID" ? "PLACED" : ["FAILED", "CANCELLED", "EXPIRED"].includes(paymentStatus) ? "CANCELLED" : "AWAITING_PAYMENT";
-    }
-
-    const order = {
-      id,
-      clientId: uid,
-      orderType,
-      sourceId,
-      sourceName: catalog.sourceName,
-      merchantId: catalog.merchantId,
-      items: catalog.items,
-      subtotal,
-      deliveryFee,
-      totalPrice,
-      subtotalCentavos,
-      deliveryFeeCentavos,
-      totalPriceCentavos: totalCentavos,
-      distanceMeters: route.distanceMeters,
-      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
-      routeDuration: route.duration,
-      routeTravelMode: route.travelMode,
-      routePolyline: route.encodedPolyline,
-      pricingVersion: config.version,
-      pricingQuoteId: pricingQuoteId || null,
-      pricingSnapshot: savedPricingSnapshot,
-      breakdown,
-      status: orderStatus,
-      deliveryId: "",
-      deliveryName: "",
-      deliveryPhone: "",
-      pickupLocation: catalog.pickupLocation,
-      pickupLat: catalog.pickupLat,
-      pickupLng: catalog.pickupLng,
-      dropoffLocation,
-      dropoffLat,
-      dropoffLng,
-      createdAtTimestamp: timestamp,
-      paymentMethod,
-      paymentStatus,
-      paymentId: providerReference,
-    };
-    const payment = {
-      entityType: "ORDER",
-      entityId: id,
-      clientId: uid,
-      merchantId: catalog.merchantId,
-      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
-      providerReference,
-      channelCode: paymentMethod,
-      status: paymentStatus,
-      amount: totalPrice,
-      amountCentavos: totalCentavos,
-      breakdown,
-      pricingVersion: config.version,
-      currency: "PHP",
-      checkoutUrl,
-      createdAtTimestamp: timestamp,
-      updatedAtTimestamp: timestamp,
-    };
-
-    const updates: Record<string, unknown> = {};
-    updates["orders/" + id] = order;
-    updates["payments/" + id] = payment;
-    await db.ref().update(updates);
-
-    return {
-      orderId: id,
-      paymentId: providerReference,
-      paymentStatus,
-      amount: totalPrice,
-      amountCentavos: totalCentavos,
-      breakdown,
-      distanceMeters: route.distanceMeters,
-      pricingVersion: config.version,
-      checkoutUrl: checkoutUrl || null,
-    };
-  }
-);
-
-export const createTripPayment = onCall(
-  { region: REGION, secrets: [XENDIT_SECRET_KEY, GOOGLE_ROUTES_API_KEY] },
-  async (request) => {
-    const uid = requireUid(request);
-    const data = asRecord(request.data);
-    const id = parseIdempotencyKey(data.idempotencyKey);
-    const existing = await returnExistingCheckout("trips", id, uid);
-    if (existing) return existing;
-
-    const paymentMethod = parsePaymentMethod(data.paymentMethod);
-    const serviceType = (asString(data.serviceType) || "ride").toLowerCase();
-    if (!isSupportedRideType(serviceType)) {
-      throw new HttpsError("invalid-argument", "Unsupported ride service type.");
-    }
-    const targetDriverId = asString(data.targetDriverId);
-    await validateTargetDriverForRide(targetDriverId, serviceType);
-
-    const pickupAddress = asString(data.pickupLocation);
-    const dropoffAddress = asString(data.dropoffLocation);
-    const pickupLat = asNumber(data.pickupLat, "pickup latitude");
-    const pickupLng = asNumber(data.pickupLng, "pickup longitude");
-    const dropoffLat = asNumber(data.dropoffLat, "drop-off latitude");
-    const dropoffLng = asNumber(data.dropoffLng, "drop-off longitude");
-    validateCoordinates(pickupLat, pickupLng, "Pickup");
-    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
-    if (!pickupAddress || !dropoffAddress) {
-      throw new HttpsError("invalid-argument", "Pickup and drop-off addresses are required.");
-    }
-
-    const pricingQuoteId = asString(data.pricingQuoteId);
-    let config: PricingConfiguration;
-    let route: RouteResult;
-    let fareCentavos: number;
-    let optionalChargesCentavos = 0;
-    let savedPricingSnapshot: Record<string, unknown>;
-    let rideRule: RidePricingRule | null;
-
-    if (pricingQuoteId) {
-      const quote = await loadOwnedPricingQuote(
-        uid, pricingQuoteId, "RIDE",
-        pickupLat, pickupLng, dropoffLat, dropoffLng, serviceType
-      );
-      config = normalizePricingConfiguration(quote.pricingConfiguration);
-      route = {
-        provider: "GOOGLE_ROUTES_API",
-        distanceMeters: nonNegativeInteger(quote.distanceMeters, "quoted route distance"),
-        duration: asString(quote.routeDuration),
-        travelMode: resolveRouteTravelMode(serviceType),
-        encodedPolyline: asString(quote.routePolyline),
-      };
-      fareCentavos = nonNegativeInteger(quote.fareCentavos, "quoted ride fare");
-      savedPricingSnapshot = asRecord(quote.pricingSnapshot);
-      rideRule = resolveRidePricingRule(config, serviceType);
-    } else {
-      config = await getCurrentPricingConfiguration();
-      rideRule = resolveRidePricingRule(config, serviceType);
-      if (!rideRule) {
-        throw new HttpsError("failed-precondition", "Ride pricing is not configured for " + serviceType + ".");
-      }
-      route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng, serviceType);
-      const fare = calculateRideFareCentavos(route.distanceMeters, rideRule, config.additionalCharges.ridesCentavos);
-      fareCentavos = fare.fareCentavos;
-      optionalChargesCentavos = fare.optionalChargesCentavos;
-      savedPricingSnapshot = pricingSnapshot(config, "RIDES", route, {
-        serviceType,
-        optionalChargesCentavos,
-      });
-    }
-
-    if (!rideRule) {
-      throw new HttpsError("failed-precondition", "Ride pricing snapshot is missing this service type.");
-    }
-    if (pricingQuoteId) {
-      optionalChargesCentavos = Number(asRecord(savedPricingSnapshot).optionalChargesCentavos ?? 0);
-    }
-    if (fareCentavos <= 0) {
-      throw new HttpsError("failed-precondition", "The server-calculated ride fare must be greater than zero.");
-    }
-
-    const rideCommissionCentavos = commissionCentavos(fareCentavos, config.commissions.ridesBps);
-    const driverShareCentavos = fareCentavos - rideCommissionCentavos;
-    const rideBreakdown = {
-      subtotal: fareCentavos - optionalChargesCentavos,
-      deliveryFee: 0,
-      serviceFee: optionalChargesCentavos,
-      discount: 0,
-      tax: 0,
-      total: fareCentavos,
-      merchantShare: 0,
-      courierShare: 0,
-      driverShare: driverShareCentavos,
-      platformShare: rideCommissionCentavos,
-      gatewayFee: 0,
-      merchantCommission: 0,
-      deliveryCommission: 0,
-      rideCommission: rideCommissionCentavos,
-    };
-    savedPricingSnapshot = {
-      ...savedPricingSnapshot,
-      category: "RIDES",
-      serviceType,
-      commissionRatesBps: { rides: config.commissions.ridesBps },
-      cancellationFees: config.cancellationFees,
-      refundPolicy: config.refundPolicy,
-    };
-    const fareAmount = phpFromCents(fareCentavos);
-
-    const timestamp = Date.now();
-    let providerReference = "cash_" + id;
-    let paymentStatus = "UNPAID";
-    let checkoutUrl = "";
-    let tripStatus = "REQUESTED";
-
-    if (paymentMethod === "GCASH") {
-      const xendit = await createXenditGcashRequest({
-        referenceId: "trip_" + id,
-        amount: fareAmount,
-        description: "Labmda ride",
-        entityType: "TRIP",
-        entityId: id,
-        clientId: uid,
-        idempotencyKey: id,
-      });
-      providerReference = xendit.paymentId;
-      checkoutUrl = xendit.checkoutUrl;
-      paymentStatus = xendit.status === "SUCCEEDED" ? "PAID" : xendit.status;
-      tripStatus = paymentStatus === "PAID" ? "REQUESTED" : ["FAILED", "CANCELLED", "EXPIRED"].includes(paymentStatus) ? "CANCELLED" : "AWAITING_PAYMENT";
-    }
-
-    const trip = {
-      id,
-      passengerId: uid,
-      passengerName: asString(data.passengerName) || "Passenger",
-      passengerPhone: asString(data.passengerPhone),
-      pickupLocation: pickupAddress,
-      dropoffLocation: dropoffAddress,
-      pickupLat,
-      pickupLng,
-      dropoffLat,
-      dropoffLng,
-      fare: fareAmount,
-      fareCentavos,
-      distanceMeters: route.distanceMeters,
-      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
-      routeDuration: route.duration,
-      routeTravelMode: route.travelMode,
-      routePolyline: route.encodedPolyline,
-      pricingVersion: config.version,
-      pricingQuoteId: pricingQuoteId || null,
-      pricingSnapshot: savedPricingSnapshot,
-      breakdown: rideBreakdown,
-      serviceType: serviceType.toUpperCase(),
-      driverId: targetDriverId,
-      status: tripStatus,
-      paymentMethod,
-      paymentStatus,
-      paymentId: providerReference,
-      createdAtTimestamp: timestamp,
-    };
-    const payment = {
-      entityType: "TRIP",
-      entityId: id,
-      clientId: uid,
-      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
-      providerReference,
-      channelCode: paymentMethod,
-      status: paymentStatus,
-      amount: fareAmount,
-      amountCentavos: fareCentavos,
-      breakdown: rideBreakdown,
-      pricingVersion: config.version,
-      currency: "PHP",
-      checkoutUrl,
-      createdAtTimestamp: timestamp,
-      updatedAtTimestamp: timestamp,
-    };
-
-    const updates: Record<string, unknown> = {};
-    updates["trips/" + id] = trip;
-    updates["payments/" + id] = payment;
-    await db.ref().update(updates);
-
-    return {
-      tripId: id,
-      paymentId: providerReference,
-      paymentStatus,
-      fare: fareAmount,
-      fareCentavos,
-      amount: fareAmount,
-      amountCentavos: fareCentavos,
-      distanceMeters: route.distanceMeters,
-      distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
-      pricingVersion: config.version,
-      breakdown: rideBreakdown,
-      checkoutUrl: checkoutUrl || null,
-    };
-  }
-);
-
 
 /**
  * Creates a trip from a server-issued quote. The caller cannot submit or alter the fare,
@@ -2098,6 +1685,7 @@ export const createTrip = onCall(
   async (request) => {
     const uid = requireUid(request);
     const data = asRecord(request.data);
+    const paymentMethod = parsePaymentMethod(data.paymentMethod);
     const quoteId = asString(data.quoteId);
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(quoteId)) {
       throw new HttpsError("invalid-argument", "A valid ride quote ID is required.");
@@ -2109,13 +1697,22 @@ export const createTrip = onCall(
       if (asString(existing.passengerId) !== uid) {
         throw new HttpsError("already-exists", "This idempotency key has already been used.");
       }
+      if (asString(existing.paymentMethod).toUpperCase() !== paymentMethod) {
+        throw new HttpsError("failed-precondition", "This checkout key was already used with a different payment method.");
+      }
+      const existingPayment = asRecord((await db.ref("payments/" + tripId).get()).val());
       return {
         tripId,
+        paymentId: asString(existingPayment.providerReference) || asString(existing.paymentId),
+        paymentStatus: asString(existing.paymentStatus) || "UNPAID",
         fareCentavos: Number(existing.fareCentavos ?? 0),
+        amountCentavos: Number(existing.fareCentavos ?? 0),
         fare: Number(existing.fare ?? 0),
+        amount: Number(existing.fare ?? 0),
         pricingVersion: Number(existing.pricingVersion ?? 0),
         distanceMeters: Number(existing.distanceMeters ?? 0),
         breakdown: existing.breakdown ?? null,
+        checkoutUrl: asString(existingPayment.checkoutUrl) || null,
         reused: true,
       };
     }
@@ -2199,11 +1796,16 @@ export const createTrip = onCall(
         const saved = asRecord(refreshed.val());
         return {
           tripId,
+          paymentId: asString(asRecord((await db.ref("payments/" + tripId).get()).val()).providerReference) || asString(saved.paymentId),
+          paymentStatus: asString(saved.paymentStatus) || "UNPAID",
           fareCentavos: Number(saved.fareCentavos ?? 0),
+          amountCentavos: Number(saved.fareCentavos ?? 0),
           fare: Number(saved.fare ?? 0),
+          amount: Number(saved.fare ?? 0),
           pricingVersion: Number(saved.pricingVersion ?? 0),
           distanceMeters: Number(saved.distanceMeters ?? 0),
           breakdown: saved.breakdown ?? null,
+          checkoutUrl: null,
           reused: true,
         };
       }
@@ -2239,25 +1841,49 @@ export const createTrip = onCall(
       breakdown: rideBreakdown,
       serviceType: serviceType.toUpperCase(),
       driverId: targetDriverId,
-      // The quote-first flow creates the entity before GCash checkout. Keep it
-      // invisible to drivers until the payment callable confirms capture.
-      status: "AWAITING_PAYMENT",
-      paymentMethod: "",
+      // GCash trips remain hidden until capture; cash trips can be dispatched immediately.
+      status: paymentMethod === "CASH" ? "REQUESTED" : "AWAITING_PAYMENT",
+      paymentMethod,
       paymentStatus: "UNPAID",
-      paymentId: "",
+      paymentId: paymentMethod === "CASH" ? "cash_" + tripId : "",
       createdAtTimestamp: timestamp,
     };
-    await db.ref("trips/" + tripId).set(trip);
+    const payment = {
+      entityType: "TRIP",
+      entityId: tripId,
+      clientId: uid,
+      provider: paymentMethod === "GCASH" ? "XENDIT" : "CASH",
+      providerReference: paymentMethod === "CASH" ? "cash_" + tripId : "",
+      channelCode: paymentMethod,
+      status: "UNPAID",
+      amount: fare,
+      amountCentavos: fareCentavos,
+      breakdown: rideBreakdown,
+      pricingVersion: config.version,
+      currency: "PHP",
+      checkoutUrl: "",
+      createdAtTimestamp: timestamp,
+      updatedAtTimestamp: timestamp,
+    };
+    const updates: Record<string, unknown> = {};
+    updates["trips/" + tripId] = trip;
+    updates["payments/" + tripId] = payment;
+    await db.ref().update(updates);
 
-    logger.info("Server created trip from locked pricing quote", { tripId, quoteId, uid, pricingVersion: config.version });
+    logger.info("Server created trip from locked pricing quote", { tripId, quoteId, uid, pricingVersion: config.version, paymentMethod });
     return {
       tripId,
+      paymentId: asString(payment.providerReference),
+      paymentStatus: "UNPAID",
       fareCentavos,
+      amountCentavos: fareCentavos,
       fare,
+      amount: fare,
       distanceMeters: route.distanceMeters,
       distanceKm: Number((route.distanceMeters / 1000).toFixed(3)),
       pricingVersion: config.version,
       breakdown: rideBreakdown,
+      checkoutUrl: null,
       reused: false,
     };
   }
@@ -2647,123 +2273,9 @@ function validCallbackToken(received: string, expected: string): boolean {
   return timingSafeEqual(receivedHash, expectedHash);
 }
 
-export const xenditWebhook = onRequest(
-  { region: REGION, secrets: [XENDIT_WEBHOOK_TOKEN] },
-  async (request, response) => {
-    if (request.method !== "POST") {
-      response.status(405).send("Method not allowed");
-      return;
-    }
-
-    const receivedToken = asString(request.get("x-callback-token"));
-    if (!validCallbackToken(receivedToken, XENDIT_WEBHOOK_TOKEN.value())) {
-      response.status(401).send("Invalid callback token");
-      return;
-    }
-
-    const body = asRecord(request.body);
-    const data = asRecord(body.data);
-    const referenceId = asString(data.reference_id) || asString(body.reference_id);
-    const status = (asString(data.status) || asString(body.status)).toUpperCase();
-    const match = /^(order|trip)_([A-Za-z0-9_-]{12,80})$/.exec(referenceId);
-
-    if (!match) {
-      // Acknowledge unrelated Xendit events so the integration does not retry them forever.
-      response.status(200).send("Ignored");
-      return;
-    }
-
-    const entityType = match[1];
-    const entityId = match[2];
-    const paymentSnapshot = await db.ref("payments/" + entityId).get();
-    if (!paymentSnapshot.exists()) {
-      logger.warn("Payment webhook arrived before the payment record existed", { referenceId, status });
-      response.status(503).send("Payment record not ready");
-      return;
-    }
-
-    const payment = asRecord(paymentSnapshot.val());
-    const providerReference = asString(data.payment_request_id);
-    if (
-      providerReference &&
-      asString(payment.providerReference) &&
-      providerReference !== asString(payment.providerReference)
-    ) {
-      logger.error("Xendit payment reference did not match the stored payment", { referenceId });
-      response.status(400).send("Payment reference mismatch");
-      return;
-    }
-
-    const eventAmount = Number(data.request_amount);
-    const expectedAmount = Number(payment.amount);
-    const eventCurrency = asString(data.currency).toUpperCase();
-    const expectedCurrency = asString(payment.currency).toUpperCase();
-    if (
-      !Number.isFinite(eventAmount) ||
-      !Number.isFinite(expectedAmount) ||
-      roundMoney(eventAmount) !== roundMoney(expectedAmount) ||
-      eventCurrency !== expectedCurrency
-    ) {
-      logger.error("Xendit webhook amount or currency did not match the stored payment", {
-        referenceId,
-        eventAmount,
-        eventCurrency,
-      });
-      response.status(400).send("Payment amount or currency mismatch");
-      return;
-    }
-
-    const providerUpdatedAt = asString(data.updated);
-    const incomingUpdatedAt = Date.parse(providerUpdatedAt);
-    const previousUpdatedAt = Date.parse(asString(payment.providerUpdatedAt));
-    if (
-      Number.isFinite(incomingUpdatedAt) &&
-      Number.isFinite(previousUpdatedAt) &&
-      incomingUpdatedAt < previousUpdatedAt
-    ) {
-      response.status(200).send("Older payment event ignored");
-      return;
-    }
-
-    const succeeded = ["SUCCEEDED", "COMPLETED", "PAID"].includes(status);
-    const failed = ["FAILED", "EXPIRED", "CANCELED", "CANCELLED"].includes(status);
-    if (!succeeded && !failed) {
-      response.status(200).send("No terminal payment update");
-      return;
-    }
-
-    const paymentStatus = succeeded
-      ? "PAID"
-      : status === "EXPIRED"
-        ? "EXPIRED"
-        : ["CANCELED", "CANCELLED"].includes(status)
-          ? "CANCELLED"
-          : "FAILED";
-    const updates: Record<string, unknown> = {};
-    updates["payments/" + entityId + "/status"] = paymentStatus;
-    updates["payments/" + entityId + "/updatedAtTimestamp"] = Date.now();
-    updates["payments/" + entityId + "/providerUpdatedAt"] = providerUpdatedAt;
-    updates["payments/" + entityId + "/webhookEvent"] = asString(body.event);
-
-    if (entityType === "order") {
-      updates["orders/" + entityId + "/paymentStatus"] = paymentStatus;
-      updates["orders/" + entityId + "/status"] = succeeded ? "PLACED" : "CANCELLED";
-    } else {
-      updates["trips/" + entityId + "/paymentStatus"] = paymentStatus;
-      updates["trips/" + entityId + "/status"] = succeeded ? "REQUESTED" : "CANCELLED";
-    }
-
-    await db.ref().update(updates);
-    response.status(200).send("OK");
-  }
-);
-
-
 // -----------------------------------------------------------------------------
-// Xendit GCash lifecycle. A successful payment is recognized only from a
-// provider-authenticated payment.capture event or a server-to-server status read.
-// GCash uses automatic checkout collection; there is no card-style authorization
-// hold or later capture step.
+// Xendit GCash lifecycle. Collection is confirmed only by the verified webhook
+// or server-to-server reconciliation; the Android return URL is never proof.
 // -----------------------------------------------------------------------------
 
 type GcashEntityType = "ORDER" | "TRIP";
@@ -3088,6 +2600,9 @@ export const createGcashPayment = onCall(
     const entity = asRecord(entitySnapshot.val());
     if (paymentOwnerId(entityType, entity) !== uid) {
       throw new HttpsError("permission-denied", "This payment does not belong to the signed-in customer.");
+    }
+    if (asString(entity.paymentMethod).toUpperCase() !== "GCASH") {
+      throw new HttpsError("failed-precondition", "This order or trip was not created for GCash checkout.");
     }
     const amountCentavos = paymentAmountCentavos(entityType, entity);
     const amount = phpFromCents(amountCentavos);
@@ -3564,6 +3079,8 @@ async function markWebhookEventProcessed(key: string): Promise<void> {
   const now = Date.now();
   await db.ref("processedWebhookEvents/" + key).update({ status: "PROCESSED", processedAtTimestamp: now, updatedAtTimestamp: now, leaseUntilTimestamp: 0 });
 }
+
+
 
 export const xenditPaymentWebhook = onRequest(
   { region: REGION, secrets: [XENDIT_WEBHOOK_TOKEN] },

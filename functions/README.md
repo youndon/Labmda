@@ -14,7 +14,7 @@ pricing configuration from Realtime Database; clients never send order totals or
    `PAYMENT_SUCCESS_RETURN_URL` and `PAYMENT_FAILURE_RETURN_URL` in the Functions
    environment (see `.env.example`).
 5. Configure the Xendit Payment Request webhook to point to the deployed
-   `xenditWebhook` function URL.
+   `xenditPaymentWebhook` function URL.
 
 The callable and webhook functions are deployed in `asia-southeast1`. The payment currency is
 PHP and the online channel in this first collection flow is GCash.
@@ -26,9 +26,9 @@ The initial quote-first API is:
 | Callable | Purpose | Input |
 |---|---|---|
 | `quoteOrder` | Validates a food/goods basket, reads the approved merchant/shop catalogue, obtains road distance and returns a locked order quote | `orderType`, `sourceId`, `items[]`, `dropoffLocation`, `dropoffLat`, `dropoffLng` |
-| `createOrder` | Rechecks merchant approval, item availability and stock, then creates an order from the unexpired server-issued quote | `quoteId`, `idempotencyKey` |
+| `createOrder` | Rechecks merchant approval, item availability and stock, creates the order and its payment record from the unexpired quote | `quoteId`, `idempotencyKey`, `paymentMethod` (`GCASH` or `CASH`) |
 | `quoteTrip` | Calculates a ride quote from server route distance and the configured service rate | `pickupLat`, `pickupLng`, `dropoffLat`, `dropoffLng`, optional `serviceType` |
-| `createTrip` | Creates a trip using the unexpired ride quote and its pricing snapshot | `quoteId`, `idempotencyKey`, optional passenger/driver display fields |
+| `createTrip` | Creates the trip and its payment record from the unexpired ride quote | `quoteId`, `idempotencyKey`, `paymentMethod`, optional passenger/driver display fields |
 | `adminUpdatePricing` | Publishes the complete pricing configuration | `configuration` |
 | `adminSetCommissionRules` | Updates one or more commission rates without changing other pricing rules | `commissions.foodBps`, `goodsBps`, `deliveryBps`, `ridesBps` |
 
@@ -41,10 +41,12 @@ Quote records are created by the server and expire after 10 minutes. `createOrde
 saved price and pricing-rule snapshot. Reusing an idempotency key returns the existing record
 for the same authenticated owner.
 
-The original payment-compatible callables (`createOrderPayment`, `createTripPayment`) remain
-available for older Android screens. The quote-first `createOrder`/`createTrip` API creates
-the authoritative order/trip data; the payment lifecycle can then be started through the
-payment-specific flow.
+Both CASH and GCash use the same quote-first path. The server creates the order/trip and
+a payment record using the quote's locked PHP-centavo total and pricing snapshot. CASH is
+immediately available for fulfilment and is recorded as unpaid cash collection; GCash remains
+hidden from fulfilment until `createGcashPayment` starts checkout and the verified Xendit
+webhook confirms payment. The client cannot submit prices or totals. There are no legacy
+`createOrderPayment` or `createTripPayment` callables.
 
 ## Local Firebase emulators
 
@@ -261,8 +263,8 @@ The endpoint verifies the x-callback-token header against the XENDIT_WEBHOOK_TOK
 secret, validates the stored payment request/reference, amount, currency and GCash channel, and
 applies status changes transactionally. Duplicate notifications are idempotent. Older provider
 events cannot reverse a confirmed payment.
-The old xenditWebhook endpoint remains only for the previous integration; configure new GCash
-events on xenditPaymentWebhook.
+The `xenditPaymentWebhook` endpoint is the only Xendit collection/refund webhook; the legacy
+`xenditWebhook` endpoint has been removed.
 
 Set the callback-token secret:
 

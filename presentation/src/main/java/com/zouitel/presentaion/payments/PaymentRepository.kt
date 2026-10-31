@@ -230,12 +230,14 @@ class PaymentRepository {
     /** Creates an order from a locked quote; no client amount or unit price is accepted. */
     suspend fun createOrderFromQuote(
         quoteId: String,
-        idempotencyKey: String
+        idempotencyKey: String,
+        paymentMethod: String
     ): PaymentCreationResult {
         val response = functions.httpsCallable("createOrder")(
             mapOf(
                 "quoteId" to quoteId,
-                "idempotencyKey" to idempotencyKey
+                "idempotencyKey" to idempotencyKey,
+                "paymentMethod" to paymentMethod.toPaymentCode()
             )
         )
         return response.data<Map<String, Any?>>().toPaymentCreationResult("orderId")
@@ -294,7 +296,8 @@ class PaymentRepository {
         passengerName: String,
         passengerPhone: String,
         targetDriverId: String? = null,
-        serviceType: String = "ride"
+        serviceType: String = "ride",
+        paymentMethod: String
     ): PaymentCreationResult {
         val response = functions.httpsCallable("createTrip")(
             mapOf(
@@ -305,7 +308,8 @@ class PaymentRepository {
                 "dropoffLocation" to dropoffLocation,
                 "passengerName" to passengerName,
                 "passengerPhone" to passengerPhone,
-                "targetDriverId" to targetDriverId
+                "targetDriverId" to targetDriverId,
+                "paymentMethod" to paymentMethod.toPaymentCode()
             )
         )
         return response.data<Map<String, Any?>>().toPaymentCreationResult("tripId")
@@ -478,49 +482,43 @@ class PaymentRepository {
         dropoffLng: Double,
         pricingQuoteId: String? = null
     ): PaymentCreationResult {
-        val payload = mutableMapOf<String, Any>(
-            "idempotencyKey" to idempotencyKey,
-            "orderType" to orderType,
-            "sourceId" to sourceId,
-            "items" to items,
-            "paymentMethod" to paymentMethod.toPaymentCode(),
-            "pickupLocation" to pickupLocation,
-            "pickupLat" to pickupLat,
-            "pickupLng" to pickupLng,
-            "dropoffLocation" to dropoffLocation,
-            "dropoffLat" to dropoffLat,
-            "dropoffLng" to dropoffLng
+        // Both CASH and GCASH use the same server-issued catalogue + road-distance quote.
+        val quote = quoteOrder(
+            orderType = orderType,
+            sourceId = sourceId,
+            items = items,
+            dropoffLocation = dropoffLocation,
+            dropoffLat = dropoffLat,
+            dropoffLng = dropoffLng
         )
-        pricingQuoteId?.takeIf { it.isNotBlank() }?.let { payload["pricingQuoteId"] = it }
-
-        if (paymentMethod.toPaymentCode() == "GCASH") {
-            val quote = quoteOrder(
-                orderType = orderType,
-                sourceId = sourceId,
-                items = items,
-                dropoffLocation = dropoffLocation,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng
-            )
-            // Retrying with the same order key returns the same order even if a new short-lived
-            // quote had to be requested after a previous checkout initiation failure.
-            val order = createOrderFromQuote(quote.quoteId, idempotencyKey)
-            val checkout = createGcashPayment(
-                entityType = "ORDER",
-                entityId = order.entityId,
-                idempotencyKey = idempotencyKey.take(72) + "_gcash"
-            )
-            return checkout.copy(
-                amount = order.amount,
-                amountCentavos = order.amountCentavos,
-                distanceMeters = order.distanceMeters,
-                pricingVersion = order.pricingVersion,
-                breakdown = order.breakdown
+        val method = paymentMethod.toPaymentCode()
+        val order = createOrderFromQuote(
+            quoteId = quote.quoteId,
+            idempotencyKey = idempotencyKey,
+            paymentMethod = method
+        )
+        if (method != "GCASH") {
+            return order.copy(
+                amount = quote.amount,
+                amountCentavos = quote.totalCentavos,
+                distanceMeters = quote.distanceMeters,
+                pricingVersion = quote.pricingVersion,
+                breakdown = quote.breakdown
             )
         }
 
-        val response = functions.httpsCallable("createOrderPayment")(payload)
-        return response.data<Map<String, Any?>>().toPaymentCreationResult("orderId")
+        val checkout = createGcashPayment(
+            entityType = "ORDER",
+            entityId = order.entityId,
+            idempotencyKey = idempotencyKey.take(72) + "_gcash"
+        )
+        return checkout.copy(
+            amount = quote.amount,
+            amountCentavos = quote.totalCentavos,
+            distanceMeters = quote.distanceMeters,
+            pricingVersion = quote.pricingVersion,
+            breakdown = quote.breakdown
+        )
     }
 
     suspend fun createTrip(
@@ -538,58 +536,40 @@ class PaymentRepository {
         paymentMethod: String,
         pricingQuoteId: String? = null
     ): PaymentCreationResult {
-        val payload = mutableMapOf<String, Any?>(
-            "idempotencyKey" to idempotencyKey,
-            "serviceType" to serviceType,
-            "pickupLocation" to pickupLocation,
-            "pickupLat" to pickupLat,
-            "pickupLng" to pickupLng,
-            "dropoffLocation" to dropoffLocation,
-            "dropoffLat" to dropoffLat,
-            "dropoffLng" to dropoffLng,
-            "passengerName" to passengerName,
-            "passengerPhone" to passengerPhone,
-            "targetDriverId" to targetDriverId,
-            "paymentMethod" to paymentMethod.toPaymentCode()
+        // Use the quote already shown to the passenger; request one only for older callers.
+        val quoteId = pricingQuoteId?.takeIf { it.isNotBlank() } ?: quoteTrip(
+            pickupLat = pickupLat,
+            pickupLng = pickupLng,
+            dropoffLat = dropoffLat,
+            dropoffLng = dropoffLng,
+            serviceType = serviceType.trim().lowercase()
+        ).quoteId
+        val method = paymentMethod.toPaymentCode()
+        val trip = createTripFromQuote(
+            quoteId = quoteId,
+            idempotencyKey = idempotencyKey,
+            pickupLocation = pickupLocation,
+            dropoffLocation = dropoffLocation,
+            passengerName = passengerName,
+            passengerPhone = passengerPhone,
+            targetDriverId = targetDriverId,
+            serviceType = serviceType.trim().lowercase(),
+            paymentMethod = method
         )
-        pricingQuoteId?.takeIf { it.isNotBlank() }?.let { payload["pricingQuoteId"] = it }
+        if (method != "GCASH") return trip
 
-        if (paymentMethod.toPaymentCode() == "GCASH") {
-            // Reuse the exact quote reviewed by the passenger. Only request a replacement
-            // when this call was initiated without a previously generated quote.
-            val quoteId = pricingQuoteId?.takeIf { it.isNotBlank() } ?: quoteTrip(
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                serviceType = serviceType.trim().lowercase()
-            ).quoteId
-            val trip = createTripFromQuote(
-                quoteId = quoteId,
-                idempotencyKey = idempotencyKey,
-                pickupLocation = pickupLocation,
-                dropoffLocation = dropoffLocation,
-                passengerName = passengerName,
-                passengerPhone = passengerPhone,
-                targetDriverId = targetDriverId,
-                serviceType = serviceType.trim().lowercase()
-            )
-            val checkout = createGcashPayment(
-                entityType = "TRIP",
-                entityId = trip.entityId,
-                idempotencyKey = idempotencyKey.take(72) + "_gcash"
-            )
-            return checkout.copy(
-                amount = trip.amount,
-                amountCentavos = trip.amountCentavos,
-                distanceMeters = trip.distanceMeters,
-                pricingVersion = trip.pricingVersion,
-                breakdown = trip.breakdown
-            )
-        }
-
-        val response = functions.httpsCallable("createTripPayment")(payload)
-        return response.data<Map<String, Any?>>().toPaymentCreationResult("tripId")
+        val checkout = createGcashPayment(
+            entityType = "TRIP",
+            entityId = trip.entityId,
+            idempotencyKey = idempotencyKey.take(72) + "_gcash"
+        )
+        return checkout.copy(
+            amount = trip.amount,
+            amountCentavos = trip.amountCentavos,
+            distanceMeters = trip.distanceMeters,
+            pricingVersion = trip.pricingVersion,
+            breakdown = trip.breakdown
+        )
     }
 
     private fun String.toPaymentCode(): String {
