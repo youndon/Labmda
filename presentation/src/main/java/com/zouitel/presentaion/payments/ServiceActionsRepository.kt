@@ -21,4 +21,11 @@ class ServiceActionsRepository {
     suspend fun transitionTripStatus(tripId: String, nextStatus: String) {
         functions.httpsCallable("transitionTripStatus")(mapOf("tripId" to tripId, "nextStatus" to nextStatus))
     }
+    suspend fun requestPaymentRefund(entityType: String, entityId: String, idempotencyKey: String, reason: String = "REQUESTED_BY_CUSTOMER", note: String = ""): String {
+        val response = functions.httpsCallable("requestPaymentRefund")(
+            mapOf("entityType" to entityType, "entityId" to entityId, "idempotencyKey" to idempotencyKey, "reason" to reason, "note" to note)
+        )
+        val result = response.data<Map<String, Any?>>()
+        return result["status"] as? String ?: "PENDING_REVIEW"
+    }
 }
