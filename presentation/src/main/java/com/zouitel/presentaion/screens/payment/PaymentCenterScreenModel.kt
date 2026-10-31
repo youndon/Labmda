@@ -60,16 +60,14 @@ class PaymentCenterScreenModel : ScreenModel {
             return
         }
         val ref = db.child("payments")
+        // Payment records expose scoped customer and merchant queries. Provider payouts
+        // for couriers and drivers are shown in their wallet transfer history instead.
         val customer = ref.orderByChild("clientId").equalTo(currentUid).valueEvents
         val merchant = ref.orderByChild("merchantId").equalTo(currentUid).valueEvents
-        val courier = ref.orderByChild("deliveryId").equalTo(currentUid).valueEvents
-        val driver = ref.orderByChild("driverId").equalTo(currentUid).valueEvents
 
         screenModelScope.launch {
             runCatching {
-                val customerAndMerchant = combine(customer, merchant) { a, b -> a.children + b.children }
-                val courierAndDriver = combine(courier, driver) { a, b -> a.children + b.children }
-                customerAndMerchant.combine(courierAndDriver) { first, second -> first + second }
+                combine(customer, merchant) { a, b -> a.children + b.children }
                     .collect { snapshots ->
                         _payments.value = snapshots.distinctBy { it.key }.mapNotNull { snapshot ->
                             val id = snapshot.key ?: return@mapNotNull null
