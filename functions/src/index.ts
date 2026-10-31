@@ -6732,6 +6732,22 @@ export const reconcilePayouts = onSchedule(
   }
 );
 
+export const removePublicRestaurantManagerPhones = onCall({ region: REGION }, async (request) => {
+  requireAdmin(request);
+  const snapshot = await db.ref("restaurants").get();
+  const updates: Record<string, null> = {};
+  snapshot.forEach((restaurant) => {
+    if (restaurant.child("managers").exists()) {
+      updates[`${restaurant.key}/managers`] = null;
+    }
+    return false;
+  });
+  const removedCount = Object.keys(updates).length;
+  if (removedCount > 0) await db.ref("restaurants").update(updates);
+  logger.info("Removed public restaurant manager phone fields", { removedCount });
+  return { removedCount };
+});
+
 export const syncPublicShop = onValueWritten({ ref: "/shops/{shopId}", region: REGION }, async (event) => {
   const id = event.params.shopId, after = event.data.after, target = db.ref("publicShops/" + event.params.shopId);
   if (!after.exists()) { await target.remove(); return; }
