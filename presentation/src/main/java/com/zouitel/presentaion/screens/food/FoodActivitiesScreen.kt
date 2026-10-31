@@ -34,6 +34,7 @@ class FoodActivitiesScreen : Screen {
         val screenModel = rememberScreenModel { FoodActivitiesScreenModel() }
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val refundNotice by screenModel.refundNotice.collectAsState()
 
         Scaffold(
             topBar = {
@@ -99,11 +100,13 @@ class FoodActivitiesScreen : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    item { refundNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary) } }
                     items(orders, key = { it.id }) { order ->
                         ClientOrderHistoryCard(
                             order = order,
                             onTrackOrder = { navigator?.push(LiveOrderTrackingScreen(order.id)) },
-                            onCancelOrder = { screenModel.cancelOrder(order.id) }
+                            onCancelOrder = { screenModel.cancelOrder(order.id) },
+                            onRequestRefund = { screenModel.requestRefund(order.id) }
                         )
                     }
                 }
@@ -115,7 +118,8 @@ class FoodActivitiesScreen : Screen {
     private fun ClientOrderHistoryCard(
         order: Order,
         onTrackOrder: () -> Unit,
-        onCancelOrder: () -> Unit
+        onCancelOrder: () -> Unit,
+        onRequestRefund: () -> Unit
     ) {
         val formattedDate = remember(order.createdAtTimestamp) {
             val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
@@ -230,7 +234,16 @@ class FoodActivitiesScreen : Screen {
                         Text("Track Status")
                     }
 
-                    if (order.status == OrderStatus.PLACED) {
+                    if (order.paymentMethod.equals("GCASH", ignoreCase = true) &&
+                        order.paymentStatus.equals("PAID", ignoreCase = true) &&
+                        order.status != OrderStatus.CANCELLED) {
+                        OutlinedButton(
+                            onClick = onRequestRefund,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) { Text("Request refund") }
+                    }
+                    if (order.status == OrderStatus.PLACED && !order.paymentStatus.equals("PAID", ignoreCase = true)) {
                         OutlinedButton(
                             onClick = onCancelOrder,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
