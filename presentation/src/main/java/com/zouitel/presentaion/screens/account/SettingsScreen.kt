@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.res.stringResource
+import com.zouitel.presentaion.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -87,7 +89,7 @@ class SettingsScreen : Screen {
                 }
                 item {
                     SettingsCard {
-                        SettingsNavigationRow(Icons.Filled.Language, "App Language", preferences.languageLabel()) {
+                        SettingsNavigationRow(Icons.Filled.Language, stringResource(R.string.app_language), preferences.languageLabel()) {
                             showLanguageDialog = true
                         }
                         HorizontalDivider()
@@ -113,10 +115,15 @@ class SettingsScreen : Screen {
         if (showLanguageDialog) {
             AlertDialog(
                 onDismissRequest = { showLanguageDialog = false },
-                title = { Text("App language") },
+                title = { Text(stringResource(R.string.app_language_dialog_title)) },
                 text = {
                     Column {
-                        listOf("system" to "System default", "en" to "English").forEach { (code, label) ->
+                        listOf(
+                            "system" to stringResource(R.string.language_system_default),
+                            "en" to "English",
+                            "fil" to "Filipino",
+                            "ceb" to "Cebuano"
+                        ).forEach { (code, label) ->
                             Row(
                                 Modifier.fillMaxWidth().clickable { model.setLanguage(code); showLanguageDialog = false }.padding(vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -130,7 +137,7 @@ class SettingsScreen : Screen {
                         }
                     }
                 },
-                confirmButton = { TextButton(onClick = { showLanguageDialog = false }) { Text("Close") } }
+                confirmButton = { TextButton(onClick = { showLanguageDialog = false }) { Text(stringResource(R.string.close)) } }
             )
         }
     }
@@ -138,6 +145,8 @@ class SettingsScreen : Screen {
 
 private fun AccountPreferences.languageLabel(): String = when (language) {
     "en" -> "English"
+    "fil" -> "Filipino"
+    "ceb" -> "Cebuano"
     else -> "System default"
 }
 
