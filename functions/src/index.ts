@@ -382,6 +382,9 @@ async function loadOrderCatalog(
   const pickupLat = asNumber(shop.latitude, "Shop pickup latitude");
   const pickupLng = asNumber(shop.longitude, "Shop pickup longitude");
   validateCoordinates(pickupLat, pickupLng, "Shop pickup");
+  if (pickupLat === 0 && pickupLng === 0) {
+    throw new HttpsError("failed-precondition", "This shop has no valid pickup location yet. Ask the shop owner to update its map location before placing an order.");
+  }
 
   return {
     sourceName: asString(shop.name) || "Shop",
@@ -6763,7 +6766,21 @@ export const syncPublicShop = onValueWritten({ ref: "/shops/{shopId}", region: R
   if (!after.exists()) { await target.remove(); return; }
   const shop = asRecord(after.val());
   if (!["APPROVED", "ACTIVE"].includes(asString(shop.status).toUpperCase())) { await target.remove(); return; }
-  await target.set({ id, name: asString(shop.name), description: asString(shop.description), category: asString(shop.category), phone: asString(shop.phone), address: asString(shop.address), latitude: Number(shop.latitude), longitude: Number(shop.longitude), imageUrl: asString(shop.imageUrl), status: "APPROVED", createdAtTimestamp: Number(shop.createdAtTimestamp ?? 0), isOnline: shop.isOnline === true });
+  const latitude = Number(shop.latitude);
+  const longitude = Number(shop.longitude);
+  await target.set({
+    id,
+    name: asString(shop.name),
+    description: asString(shop.description),
+    category: asString(shop.category),
+    phone: asString(shop.phone),
+    address: asString(shop.address),
+    ...(Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : {}),
+    imageUrl: asString(shop.imageUrl),
+    status: "APPROVED",
+    createdAtTimestamp: Number(shop.createdAtTimestamp ?? 0),
+    isOnline: shop.isOnline === true,
+  });
 });
 export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", region: REGION }, async (event) => {
   const uid = event.params.uid, after = event.data.after, target = db.ref("publicDrivers/" + event.params.uid);
