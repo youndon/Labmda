@@ -6,6 +6,7 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.model.VehicleInfo
 import com.zouitel.presentaion.model.VehicleType
 import com.zouitel.presentaion.payments.PaymentCreationResult
 import com.zouitel.presentaion.payments.PaymentRepository
@@ -88,6 +89,9 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
+                            serviceType = str("serviceType"),
+                            routeDuration = str("routeDuration"),
+                            routePolyline = str("routePolyline"),
                             driverId = str("driverId"),
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
@@ -137,6 +141,7 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
                             phoneNumber = phone,
 
                             driverService = DriverAccountInfo(
+                                vehicleInfo = VehicleInfo(type = vehicleType),
                                 currentLocation = DriverLocation(latitude = lat, longitude = lng, heading = heading),
                                 isOnline = true,
                             )
@@ -160,6 +165,8 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
         passengerName: String,
         passengerPhone: String,
         targetDriver: UserProfile? = null,
+        serviceType: String,
+        pricingQuoteId: String,
         paymentMethod: String = "CASH",
         onSuccess: (PaymentCreationResult) -> Unit = {},
         onFailure: (String) -> Unit = {}
@@ -175,7 +182,8 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
             paymentMethod.trim().uppercase(),
             pickupAddress, pickupLat.toString(), pickupLng.toString(),
             dropoffAddress, dropoffLat.toString(), dropoffLng.toString(),
-            passengerName, passengerPhone, targetDriver?.uid.orEmpty()
+            passengerName, passengerPhone, targetDriver?.uid.orEmpty(),
+            serviceType.trim().lowercase(), pricingQuoteId
         ).joinToString("|")
         if (pendingTripFingerprint != fingerprint) {
             pendingTripFingerprint = fingerprint
@@ -193,7 +201,7 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
                 // from server-managed service pricing and the submitted route coordinates.
                 val result = payments.createTrip(
                     idempotencyKey = idempotencyKey,
-                    serviceType = "RIDE",
+                    serviceType = serviceType.trim().lowercase(),
                     pickupLocation = pickupAddress,
                     pickupLat = pickupLat,
                     pickupLng = pickupLng,
@@ -203,7 +211,8 @@ class PassengerScreenModel(private val payments: PaymentRepository = PaymentRepo
                     passengerName = passengerName.ifBlank { "Passenger" },
                     passengerPhone = passengerPhone,
                     targetDriverId = targetDriver?.uid,
-                    paymentMethod = paymentMethod
+                    paymentMethod = paymentMethod,
+                    pricingQuoteId = pricingQuoteId
                 )
                 pendingTripFingerprint = null
                 pendingTripIdempotencyKey = null
