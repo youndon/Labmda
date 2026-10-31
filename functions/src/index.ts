@@ -1232,6 +1232,27 @@ export const quoteTrip = onCall(
   async (request) => buildRouteQuote(requireUid(request), asRecord(request.data), "RIDE")
 );
 
+/** Returns a road route for an authenticated customer tracking an assigned courier. */
+export const getTrackingRoute = onCall(
+  { region: REGION, secrets: [GOOGLE_ROUTES_API_KEY] },
+  async (request) => {
+    requireUid(request);
+    const data = asRecord(request.data);
+    const pickupLat = asNumber(data.pickupLat, "courier latitude");
+    const pickupLng = asNumber(data.pickupLng, "courier longitude");
+    const dropoffLat = asNumber(data.dropoffLat, "drop-off latitude");
+    const dropoffLng = asNumber(data.dropoffLng, "drop-off longitude");
+    validateCoordinates(pickupLat, pickupLng, "Courier");
+    validateCoordinates(dropoffLat, dropoffLng, "Drop-off");
+    const route = await calculateGoogleRoute(pickupLat, pickupLng, dropoffLat, dropoffLng, "car");
+    return {
+      distanceMeters: route.distanceMeters,
+      duration: route.duration,
+      encodedPolyline: route.encodedPolyline,
+    };
+  }
+);
+
 
 // -----------------------------------------------------------------------------
 // Explicit quoteOrder/createOrder API. The quote stores trusted catalogue lines and
