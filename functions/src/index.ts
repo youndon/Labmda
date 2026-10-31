@@ -2369,6 +2369,108 @@ export const releaseDeliveryOrder = onCall({ region: REGION }, async (request) =
   return { orderId, status: "RELEASED" };
 });
 
+async function reserveShopOrderStock(orderId: string, order: Record<string, unknown>): Promise<void> {
+  if (asString(order.orderType).toUpperCase() !== "RETAIL") return;
+  const sourceId = asString(order.sourceId);
+  if (!sourceId) throw new HttpsError("failed-precondition", "The shop for this order is missing.");
+
+  const quantities = new Map<string, number>();
+  const rawItems = Array.isArray(order.items) ? order.items : [];
+  for (const raw of rawItems) {
+    const item = asRecord(raw);
+    const productId = asString(item.id);
+    const quantity = nonNegativeInteger(item.quantity, "ordered product quantity");
+    if (!productId || quantity <= 0) throw new HttpsError("failed-precondition", "The order contains an invalid product quantity.");
+    quantities.set(productId, (quantities.get(productId) ?? 0) + quantity);
+  }
+
+  const reservedProductIds: string[] = [];
+  try {
+    for (const [productId, quantity] of quantities) {
+      const productRef = db.ref("shops/" + sourceId + "/products/" + productId);
+      let failure = "";
+      const transaction = await productRef.transaction((rawValue) => {
+        if (!rawValue || typeof rawValue !== "object") {
+          failure = "A shop product in this order no longer exists.";
+          return;
+        }
+        const product = asRecord(rawValue);
+        const reservations = asRecord(product.stockReservations);
+        const existingReservation = Number(reservations[orderId] ?? 0);
+        if (existingReservation > 0) {
+          if (existingReservation !== quantity) failure = "This order already has a different stock reservation.";
+          return product;
+        }
+
+        // A missing/negative stockQuantity means the merchant tracks this item as unlimited.
+        if (product.stockQuantity === undefined || product.stockQuantity === null) return product;
+        const stock = Number(product.stockQuantity);
+        if (!Number.isFinite(stock) || stock < 0) return product;
+        if (!Number.isSafeInteger(stock) || stock < quantity) {
+          failure = asString(product.name) + " no longer has enough stock.";
+          return;
+        }
+        return {
+          ...product,
+          stockQuantity: stock - quantity,
+          stockReservations: { ...reservations, [orderId]: quantity },
+        };
+      });
+
+      if (failure) throw new HttpsError("failed-precondition", failure);
+      if (!transaction.committed) {
+        throw new HttpsError("failed-precondition", "A product's stock changed before it could be reserved. Refresh the order and try again.");
+      }
+      const savedProduct = asRecord(transaction.snapshot.val());
+      if (Number(asRecord(savedProduct.stockReservations)[orderId] ?? 0) === quantity) {
+        reservedProductIds.push(productId);
+      }
+    }
+  } catch (error) {
+    await releaseShopOrderStock(orderId, order, reservedProductIds);
+    throw error;
+  }
+}
+
+async function releaseShopOrderStock(
+  orderId: string,
+  order: Record<string, unknown>,
+  productIds?: string[]
+): Promise<void> {
+  if (asString(order.orderType).toUpperCase() !== "RETAIL") return;
+  const sourceId = asString(order.sourceId);
+  if (!sourceId) return;
+  const quantities = new Map<string, number>();
+  const rawItems = Array.isArray(order.items) ? order.items : [];
+  for (const raw of rawItems) {
+    const item = asRecord(raw);
+    const productId = asString(item.id);
+    const quantity = Number(item.quantity);
+    if (productId && Number.isSafeInteger(quantity) && quantity > 0) quantities.set(productId, (quantities.get(productId) ?? 0) + quantity);
+  }
+
+  for (const [productId] of quantities) {
+    if (productIds && !productIds.includes(productId)) continue;
+    const productRef = db.ref("shops/" + sourceId + "/products/" + productId);
+    await productRef.transaction((rawValue) => {
+      if (!rawValue || typeof rawValue !== "object") return;
+      const product = asRecord(rawValue);
+      const reservations = asRecord(product.stockReservations);
+      const reservedQuantity = Number(reservations[orderId] ?? 0);
+      if (!Number.isSafeInteger(reservedQuantity) || reservedQuantity <= 0) return;
+      const nextReservations = { ...reservations };
+      delete nextReservations[orderId];
+      const nextProduct: Record<string, unknown> = {
+        ...product,
+        stockQuantity: Number(product.stockQuantity) + reservedQuantity,
+      };
+      if (Object.keys(nextReservations).length > 0) nextProduct.stockReservations = nextReservations;
+      else delete nextProduct.stockReservations;
+      return nextProduct;
+    });
+  }
+}
+
 export const transitionOrderStatus = onCall({ region: REGION }, async (request) => {
   const uid = requireUid(request);
   const data = asRecord(request.data);
@@ -2394,7 +2496,7 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
   } else if (["ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY"].includes(next)) {
     if (asString(order.sourceId) !== uid && asString(order.merchantId) !== uid) throw new HttpsError("permission-denied", "Only this order's merchant can update its preparation status.");
     await requireApprovedMerchant(uid, order);
-    if (next === "ACCEPTED") from = ["PLACED"];
+    if (next === "ACCEPTED") from = ["PLACED", "ACCEPTING"];
     if (next === "PREPARING") from = ["ACCEPTED"];
     if (next === "OUT_FOR_DELIVERY") from = ["ACCEPTED", "PREPARING"];
     if (method === "GCASH") {
@@ -2413,8 +2515,61 @@ export const transitionOrderStatus = onCall({ region: REGION }, async (request) 
   } else throw new HttpsError("invalid-argument", "This order status transition is not supported.");
 
   if (!from.includes(current)) throw new HttpsError("failed-precondition", "This order cannot move from " + current + " to " + next + ".");
+  if (next === "ACCEPTED") {
+    // Claim the order before touching inventory so concurrent merchant actions cannot
+    // reserve the same stock twice. ACCEPTING is recoverable if the function is retried.
+    const claimToken = Date.now().toString(36) + "_" + uid;
+    const claim = await ref.transaction((rawValue) => {
+      if (!rawValue || typeof rawValue !== "object") return;
+      const latest = asRecord(rawValue);
+      const latestStatus = asString(latest.status).toUpperCase();
+      const leaseStartedAt = Number(latest.stockReservationStartedAt ?? 0);
+      const staleAcceptingLease = latestStatus === "ACCEPTING" &&
+        leaseStartedAt > 0 && Date.now() - leaseStartedAt > 5 * 60 * 1000;
+      if (latestStatus !== "PLACED" && !staleAcceptingLease) return;
+      return {
+        ...latest,
+        status: "ACCEPTING",
+        stockReservationStartedAt: Date.now(),
+        stockReservationToken: claimToken,
+      };
+    });
+    if (!claim.committed) throw new HttpsError("aborted", "This order is already being accepted. Refresh and try again.");
+    try {
+      await reserveShopOrderStock(orderId, order);
+    } catch (error) {
+      await ref.transaction((rawValue) => {
+        if (!rawValue || typeof rawValue !== "object") return;
+        const latest = asRecord(rawValue);
+        if (asString(latest.stockReservationToken) !== claimToken) return;
+        const restored: Record<string, unknown> = { ...latest, status: "PLACED" };
+        delete restored.stockReservationStartedAt;
+        delete restored.stockReservationToken;
+        return restored;
+      });
+      throw error;
+    }
+    const accepted = await ref.transaction((rawValue) => {
+      if (!rawValue || typeof rawValue !== "object") return;
+      const latest = asRecord(rawValue);
+      if (
+        asString(latest.status).toUpperCase() !== "ACCEPTING" ||
+        asString(latest.stockReservationToken) !== claimToken
+      ) return;
+      const saved: Record<string, unknown> = { ...latest, status: "ACCEPTED" };
+      delete saved.stockReservationStartedAt;
+      delete saved.stockReservationToken;
+      return saved;
+    });
+    if (!accepted.committed) {
+      throw new HttpsError("aborted", "The order changed while stock was being reserved. Refresh before retrying.");
+    }
+    return { orderId, previousStatus: current, status: "ACCEPTED" };
+  }
+
   const tx = await ref.child("status").transaction((value) => from.includes(asString(value).toUpperCase()) ? next : undefined);
   if (!tx.committed) throw new HttpsError("aborted", "The order changed before this action could be saved. Refresh and retry.");
+  if (next === "CANCELLED") await releaseShopOrderStock(orderId, order);
   return { orderId, previousStatus: current, status: next };
 });
 
