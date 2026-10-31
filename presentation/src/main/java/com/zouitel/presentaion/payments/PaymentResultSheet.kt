@@ -57,6 +57,19 @@ fun PaymentResultSheet(
                     }
                 )
             }
+            if (state.paymentStatus.uppercase() in setOf("FAILED", "INITIATION_FAILED", "EXPIRED", "CANCELLED")) {
+                val code = state.observedStatus?.failureCode.orEmpty()
+                Text(
+                    paymentIssueExplanation(state.paymentStatus, code),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (code.isNotBlank()) Text("Provider reference: $code", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (state.paymentStatus.uppercase() in setOf("PENDING", "CREATING")) {
+                Text("Payment confirmation is still pending. You can return here later; do not pay again while this request is being checked.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (state.selectedMethod == PaymentMethod.GCASH) {
                 Text("Complete the GCash checkout to finish payment. Status is updated by the payment service.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -73,6 +86,22 @@ fun PaymentResultSheet(
                 Text("Done")
             }
         }
+    }
+}
+
+private fun paymentIssueExplanation(status: String, code: String): String {
+    val normalized = code.uppercase()
+    return when {
+        status.equals("EXPIRED", true) || normalized.contains("EXPIRED") ->
+            "This checkout expired before payment was confirmed. Start a new checkout if you still want to place the order."
+        status.equals("CANCELLED", true) || normalized.contains("CANCEL") ->
+            "The payment was cancelled. No successful payment has been confirmed for this request."
+        normalized.contains("INSUFFICIENT") ->
+            "The provider reported insufficient funds. Check your GCash balance before trying again."
+        normalized.contains("LIMIT") ->
+            "The provider limit was reached. Try again later or contact your payment provider."
+        else ->
+            "The payment provider could not complete checkout. Check your GCash app and transaction history before retrying."
     }
 }
 
