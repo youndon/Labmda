@@ -2164,6 +2164,14 @@ function validCallbackToken(received: string, expected: string): boolean {
   return timingSafeEqual(receivedHash, expectedHash);
 }
 
+// -----------------------------------------------------------------------------
+// Xendit GCash lifecycle. Collection is confirmed only by the verified webhook
+// or server-to-server reconciliation; the Android return URL is never proof.
+// -----------------------------------------------------------------------------
+
+type GcashEntityType = "ORDER" | "TRIP";
+type GcashTerminalStatus = "PAID" | "FAILED" | "CANCELLED" | "EXPIRED";
+
 function parseGcashEntityType(value: unknown): GcashEntityType {
   const type = asString(value).toUpperCase();
   if (type === "ORDER" || type === "TRIP") return type;
