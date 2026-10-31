@@ -164,19 +164,9 @@ class PaymentRepository {
     }
 
     /** Fetches a road route for live courier tracking; does not create a price quote. */
-    suspend fun getTrackingRoute(
-        pickupLat: Double,
-        pickupLng: Double,
-        dropoffLat: Double,
-        dropoffLng: Double
-    ): TrackingRouteResult {
+    suspend fun getTrackingRoute(orderId: String): TrackingRouteResult {
         val response = functions.httpsCallable("getTrackingRoute")(
-            mapOf(
-                "pickupLat" to pickupLat,
-                "pickupLng" to pickupLng,
-                "dropoffLat" to dropoffLat,
-                "dropoffLng" to dropoffLng
-            )
+            mapOf("orderId" to orderId)
         )
         val result = response.data<Map<String, Any?>>()
         return TrackingRouteResult(
