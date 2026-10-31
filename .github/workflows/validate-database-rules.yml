@@ -1,0 +1,38 @@
+name: Validate Realtime Database rules
+
+on:
+  pull_request:
+    paths:
+      - "database.rules.json"
+      - "database.emulator.rules.json"
+      - "firebase.json"
+      - "firebase.emulator.json"
+      - ".github/workflows/validate-database-rules.yml"
+  push:
+    branches:
+      - master
+    paths:
+      - "database.rules.json"
+      - "database.emulator.rules.json"
+      - "firebase.json"
+      - "firebase.emulator.json"
+      - ".github/workflows/validate-database-rules.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+      - name: Validate production database rules in emulator
+        run: firebase emulators:exec --only database --project demo-labmda --config firebase.json "echo Production RTDB rules loaded successfully"
+      - name: Validate emulator database rules in emulator
+        run: firebase emulators:exec --only database --project demo-labmda --config firebase.emulator.json "echo Emulator RTDB rules loaded successfully"
