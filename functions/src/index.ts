@@ -376,11 +376,21 @@ async function loadOrderCatalog(
     };
   }));
 
+  if (shop.latitude === undefined || shop.latitude === null || shop.longitude === undefined || shop.longitude === null) {
+    throw new HttpsError("failed-precondition", "This shop has no pickup location yet. Ask the shop owner to update its map location before placing an order.");
+  }
+  const pickupLat = asNumber(shop.latitude, "Shop pickup latitude");
+  const pickupLng = asNumber(shop.longitude, "Shop pickup longitude");
+  validateCoordinates(pickupLat, pickupLng, "Shop pickup");
+  if (pickupLat === 0 && pickupLng === 0) {
+    throw new HttpsError("failed-precondition", "This shop has no valid pickup location yet. Ask the shop owner to update its map location before placing an order.");
+  }
+
   return {
     sourceName: asString(shop.name) || "Shop",
     pickupLocation: asString(shop.address),
-    pickupLat: Number(shop.latitude ?? 0),
-    pickupLng: Number(shop.longitude ?? 0),
+    pickupLat,
+    pickupLng,
     deliveryFee: 0,
     items,
     merchantId: asString(shop.ownerUid),
@@ -2260,6 +2270,9 @@ export const submitShopApplication = onCall({ region: REGION }, async (request) 
   const phone = asString(data.phone).slice(0, 40);
   const address = asString(data.address).slice(0, 300);
   const imageUrl = asString(data.imageUrl).slice(0, 2048);
+  const latitude = asNumber(data.latitude, "Shop pickup latitude");
+  const longitude = asNumber(data.longitude, "Shop pickup longitude");
+  validateCoordinates(latitude, longitude, "Shop pickup");
   if (!name || !category || !phone || !address) throw new HttpsError("invalid-argument", "Shop name, category, phone and address are required.");
   const existing = await db.ref("shops").orderByChild("ownerUid").equalTo(uid).get();
   const existingShops: DataSnapshot[] = [];
@@ -2278,7 +2291,7 @@ export const submitShopApplication = onCall({ region: REGION }, async (request) 
   const tx = await ref.transaction((currentValue) => {
     const current = asRecord(currentValue);
     if (currentValue !== null && currentValue !== undefined && asString(current.ownerUid) !== uid) return;
-    return { ...current, id: shopId, ownerUid: uid, name, description, category, phone, address, imageUrl, status: "PENDING", createdAtTimestamp: Number(current.createdAtTimestamp ?? now) || now, isOnline: false };
+    return { ...current, id: shopId, ownerUid: uid, name, description, category, phone, address, imageUrl, latitude, longitude, status: "PENDING", createdAtTimestamp: Number(current.createdAtTimestamp ?? now) || now, isOnline: false };
   });
   if (!tx.committed) throw new HttpsError("aborted", "Your shop application could not be saved. Please retry.");
   await db.ref("users/" + uid + "/shopStatus").set("PENDING");
@@ -6753,7 +6766,21 @@ export const syncPublicShop = onValueWritten({ ref: "/shops/{shopId}", region: R
   if (!after.exists()) { await target.remove(); return; }
   const shop = asRecord(after.val());
   if (!["APPROVED", "ACTIVE"].includes(asString(shop.status).toUpperCase())) { await target.remove(); return; }
-  await target.set({ id, name: asString(shop.name), description: asString(shop.description), category: asString(shop.category), phone: asString(shop.phone), address: asString(shop.address), imageUrl: asString(shop.imageUrl), status: "APPROVED", createdAtTimestamp: Number(shop.createdAtTimestamp ?? 0), isOnline: shop.isOnline === true });
+  const latitude = Number(shop.latitude);
+  const longitude = Number(shop.longitude);
+  await target.set({
+    id,
+    name: asString(shop.name),
+    description: asString(shop.description),
+    category: asString(shop.category),
+    phone: asString(shop.phone),
+    address: asString(shop.address),
+    ...(Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : {}),
+    imageUrl: asString(shop.imageUrl),
+    status: "APPROVED",
+    createdAtTimestamp: Number(shop.createdAtTimestamp ?? 0),
+    isOnline: shop.isOnline === true,
+  });
 });
 export const syncPublicDriverProfile = onValueWritten({ ref: "/users/{uid}", region: REGION }, async (event) => {
   const uid = event.params.uid, after = event.data.after, target = db.ref("publicDrivers/" + event.params.uid);

@@ -131,22 +131,23 @@ class ShopWorkplaceScreen : Screen {
                                 CircularProgressIndicator()
                             } else {
                                 when (val shop = userShop) {
-                                    null -> ShopRegistrationForm(
-                                        uploadState = imageUpload,
-                                        onUploadImage = { image, token -> screenModel.uploadShopImage(image, token) },
-                                        onUploadHandled = { screenModel.resetImageUpload() },
-                                        onSubmit = { name, desc, cat, phone, addr, img ->
-                                            screenModel.submitShopApplication(
-                                                name,
-                                                desc,
-                                                cat,
-                                                phone,
-                                                addr,
-                                                img,
-                                                isOnline
-                                            )
+                                    null -> Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Text(
+                                            "Register your store and pin its pickup location so delivery quotes can use the correct route.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Button(
+                                            onClick = { navigator?.push(ShopRegistrationScreen()) },
+                                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                                            shape = RoundedCornerShape(14.dp)
+                                        ) {
+                                            Text("Register Store", fontWeight = FontWeight.Bold)
                                         }
-                                    )
+                                    }
                                     else -> when (shop.status) {
                                         Status.PENDING -> PendingVerificationView(shop)
                                         Status.REJECTED -> RejectedApplicationView(shop)
