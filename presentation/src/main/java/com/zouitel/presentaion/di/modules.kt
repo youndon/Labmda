@@ -1,6 +1,8 @@
 package com.zouitel.presentaion.di
 
 import com.zouitel.presentaion.screens.account.AccountScreenModel
+import com.zouitel.presentaion.screens.account.AccountPreferencesStore
+import com.zouitel.presentaion.screens.account.AccountPreferencesScreenModel
 import com.zouitel.presentaion.screens.account.LogInScreenModel
 import com.zouitel.presentaion.screens.delivery.deliveryModule
 import com.zouitel.presentaion.screens.food.foodModule
@@ -18,6 +20,8 @@ import org.koin.dsl.module
 val presentationModule = module {
     includes(foodModule, shopsModule, rideModule, deliveryModule, paymentModule, walletModule)
 
+    single { AccountPreferencesStore(androidContext()) }
+    factoryOf(::AccountPreferencesScreenModel)
     factory {
         AccountScreenModel(androidContext(), get(), get())
     }
