@@ -2,8 +2,7 @@ package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.common.DriveImageUploader
-import com.zouitel.presentaion.common.DriveTokenProvider
+import com.zouitel.presentaion.common.FirebaseImageUploader
 import com.zouitel.presentaion.common.PickedImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -20,19 +19,19 @@ class MealWorkplaceScreenModel(
     val imageUpload: StateFlow<ImageUploadState> = _imageUpload.asStateFlow()
 
     /**
-     * Uploads a meal photo to the signed-in user's Google Drive and publishes the link to
+     * Uploads a meal photo to Firebase Storage and publishes the URL to
      * store/display through [imageUpload].
      */
-    fun uploadMealImage(image: PickedImage, accessToken: DriveTokenProvider) {
+    fun uploadMealImage(image: PickedImage) {
         if (_imageUpload.value is ImageUploadState.Uploading) return
         _imageUpload.value = ImageUploadState.Uploading
 
         screenModelScope.launch {
             try {
-                val url = DriveImageUploader.upload(
+                val url = FirebaseImageUploader.upload(
                     bytes = image.readBytes(),
-                    accessToken = accessToken(),
-                    label = "meal"
+                    ownerUid = auth.currentUser?.uid ?: throw IllegalStateException("Sign in to upload an image."),
+                    category = "meal"
                 )
                 _imageUpload.value = ImageUploadState.Success(url)
             } catch (e: CancellationException) {
