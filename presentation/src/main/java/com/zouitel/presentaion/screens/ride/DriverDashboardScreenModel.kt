@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 class DriverDashboardScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
@@ -31,11 +32,18 @@ class DriverDashboardScreenModel : ScreenModel {
     val activeTrips: StateFlow<List<Trip>> = _activeTrips.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
-    private val _cashActionError = MutableStateFlow<String?>(null)
-    val cashActionError: StateFlow<String?> = _cashActionError.asStateFlow()
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Mirrors users/{uid}/driverService/isOnline so the switch always shows the real stored value
+    private val _cashActionError = MutableStateFlow<String?>(null)
+    val cashActionError: StateFlow<String?> = _cashActionError.asStateFlow()
+
+    private val _actionMessage = MutableStateFlow<String?>(null)
+    val actionMessage: StateFlow<String?> = _actionMessage.asStateFlow()
+
+    private val _actionInProgressTripIds = MutableStateFlow<Set<String>>(emptySet())
+    val actionInProgressTripIds: StateFlow<Set<String>> = _actionInProgressTripIds.asStateFlow()
+
+    // Mirrors users/{uid}/driverService/isOnline so the switch always shows the stored value.
     private val _isOnline = MutableStateFlow(false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
@@ -59,7 +67,7 @@ class DriverDashboardScreenModel : ScreenModel {
 
         screenModelScope.launch {
             if (online) {
-                // If the app is killed or loses connection, Firebase flips the driver offline
+                // If the app is killed or loses connection, Firebase flips the driver offline.
                 runCatching { onlineRef.onDisconnect().setValue(false) }
                 onlineRef.setValue(true)
             } else {
@@ -78,15 +86,17 @@ class DriverDashboardScreenModel : ScreenModel {
         val trips = db.child("trips")
         val openRequests = db.child("availableRideRequests").valueEvents
         val assignedToDriver = trips.orderByChild("driverId").equalTo(uid).valueEvents
-        val driverVehicleType = db.child("users").child(uid).child("driverService").child("vehicleInfo").child("type").valueEvents
+        val driverVehicleType = db.child("users").child(uid).child("driverService")
+            .child("vehicleInfo").child("type").valueEvents
 
         screenModelScope.launch {
             combine(openRequests, assignedToDriver, driverVehicleType) { openSnapshot, assignedSnapshot, vehicleSnapshot ->
-                Pair(
+                Triple(
                     openSnapshot.children + assignedSnapshot.children,
-                    runCatching { vehicleSnapshot.value<String>() }.getOrDefault("").uppercase()
+                    runCatching { vehicleSnapshot.value<String>() }.getOrDefault("").uppercase(),
+                    uid
                 )
-            }.collect { (snapshots, currentVehicleType) ->
+            }.collect { (snapshots, currentVehicleType, driverUid) ->
                 val available = mutableListOf<Trip>()
                 val active = mutableListOf<Trip>()
 
@@ -97,25 +107,25 @@ class DriverDashboardScreenModel : ScreenModel {
                         fun str(key: String) = runCatching { child.child(key).value<String>() }.getOrDefault("")
                         fun dbl(key: String) = runCatching { child.child(key).value<Double>() }.getOrDefault(0.0)
 
-                        val driverId = str("driverId")
+                        val assignedDriverId = str("driverId")
                         val status = child.child("status").value<String>()
 
                         val trip = Trip(
                             id = id,
-                            passengerId = child.child("passengerId").value<String>(),
-                            passengerName = child.child("passengerName").value<String>(),
+                            passengerId = str("passengerId"),
+                            passengerName = str("passengerName"),
                             passengerPhone = str("passengerPhone"),
-                            pickupLocation = child.child("pickupLocation").value<String>(),
-                            dropoffLocation = child.child("dropoffLocation").value<String>(),
+                            pickupLocation = str("pickupLocation"),
+                            dropoffLocation = str("dropoffLocation"),
                             pickupLat = dbl("pickupLat"),
                             pickupLng = dbl("pickupLng"),
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
-                            fare = child.child("fare").value<Double>(),
+                            fare = dbl("fare"),
                             serviceType = str("serviceType"),
                             routeDuration = str("routeDuration"),
                             routePolyline = str("routePolyline"),
-                            driverId = driverId,
+                            driverId = assignedDriverId,
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
                             vehicleDetails = str("vehicleDetails"),
@@ -123,7 +133,7 @@ class DriverDashboardScreenModel : ScreenModel {
                             paymentMethod = str("paymentMethod"),
                             paymentStatus = str("paymentStatus").ifBlank { "UNPAID" },
                             paymentId = str("paymentId"),
-                            createdAtTimestamp = child.child("createdAtTimestamp").value<Long>(),
+                            createdAtTimestamp = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L),
                             cashCollectionStatus = str("cashCollectionStatus"),
                             cashCollectedBy = str("cashCollectedBy"),
                             cashCollectedByRole = str("cashCollectedByRole"),
@@ -137,21 +147,21 @@ class DriverDashboardScreenModel : ScreenModel {
 
                         if (
                             status == "REQUESTED" &&
-                            driverId.isBlank() &&
+                            assignedDriverId.isBlank() &&
                             (trip.serviceType.isBlank() || trip.serviceType.equals("RIDE", true) ||
                                 trip.serviceType.equals(currentVehicleType, true))
                         ) {
                             available.add(trip)
                         } else if (
-                            driverId == uid &&
+                            assignedDriverId == driverUid &&
                             status != "AWAITING_PAYMENT" &&
                             status != "COMPLETED" &&
                             status != "CANCELLED"
                         ) {
                             active.add(trip)
                         }
-                    } catch (e: Exception) {
-                        // ignore malformed nodes
+                    } catch (_: Exception) {
+                        // Ignore malformed or partially written trip nodes.
                     }
                 }
 
@@ -163,33 +173,78 @@ class DriverDashboardScreenModel : ScreenModel {
     }
 
     fun acceptTrip(trip: Trip) {
-        val driverUid = currentUser?.uid ?: return
-
-        screenModelScope.launch {
-            runCatching { serviceActions.claimTrip(trip.id) }
-                .onFailure { error -> _cashActionError.value = error.message ?: "This ride could not be accepted." }
+        performTripAction(
+            tripId = trip.id,
+            successMessage = "Ride accepted. Contact the passenger and head to pickup.",
+            fallbackMessage = "This ride could not be accepted."
+        ) {
+            serviceActions.claimTrip(trip.id)
         }
     }
 
     fun updateTripStatus(tripId: String, newStatus: String) {
-        screenModelScope.launch {
-            if (newStatus.equals("COMPLETED", ignoreCase = true)) {
+        val targetStatus = newStatus.uppercase()
+        val successMessage = when (targetStatus) {
+            "ARRIVED" -> "Arrival confirmed. You can start the trip."
+            "IN_PROGRESS" -> "Trip started."
+            "COMPLETED" -> "Trip completed."
+            else -> "Ride updated."
+        }
+
+        performTripAction(
+            tripId = tripId,
+            successMessage = successMessage,
+            fallbackMessage = "Ride status could not be updated."
+        ) {
+            if (targetStatus == "COMPLETED") {
                 val tripRef = db.child("trips").child(tripId)
                 val paymentMethod = runCatching {
                     tripRef.child("paymentMethod").valueEvents.first().value<String>()
                 }.getOrDefault("")
+
                 if (paymentMethod.equals("CASH", ignoreCase = true)) {
-                    // Driver identity, fare and split are verified/recomputed by Functions.
-                    runCatching { payments.confirmCashCollected("TRIP", tripId) }
-                        .onFailure { error ->
-                            _cashActionError.value = error.message ?: "Cash collection could not be confirmed."
-                        }
-                    return@launch
+                    // Server verifies the assigned driver, collected amount and ledger split.
+                    payments.confirmCashCollected("TRIP", tripId)
+                    return@performTripAction
                 }
             }
-            runCatching { serviceActions.transitionTripStatus(tripId, newStatus) }
-                .onFailure { error -> _cashActionError.value = error.message ?: "Ride status could not be updated." }
+            // Status transitions remain callable/server-authorized; the client never writes status.
+            serviceActions.transitionTripStatus(tripId, targetStatus)
         }
+    }
+
+    private fun performTripAction(
+        tripId: String,
+        successMessage: String,
+        fallbackMessage: String,
+        action: suspend () -> Unit
+    ) {
+        screenModelScope.launch {
+            if (tripId in _actionInProgressTripIds.value) return@launch
+
+            _cashActionError.value = null
+            _actionMessage.value = null
+            _actionInProgressTripIds.value = _actionInProgressTripIds.value + tripId
+
+            try {
+                action()
+                _actionMessage.value = successMessage
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _cashActionError.value = error.message?.takeIf { it.isNotBlank() } ?: fallbackMessage
+            } finally {
+                _actionInProgressTripIds.value = _actionInProgressTripIds.value - tripId
+            }
+        }
+    }
+
+    fun clearCashActionError() {
+        _cashActionError.value = null
+    }
+
+    fun clearActionMessage() {
+        _actionMessage.value = null
     }
 
     fun updateDriverLocation(latitude: Double, longitude: Double, heading: Float = 0f) {
