@@ -37,9 +37,6 @@
         },
         "isShopServiceOnline": {
           ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() !== true || (root.child('users').child($uid).child('shopStatus').val() === 'APPROVED' || root.child('users').child($uid).child('shopStatus').val() === 'ACTIVE'))))"
-        },
-        "currentLocation": {
-          ".validate": "auth != null && (auth.token.admin === true || (auth.uid === $uid && (newData.val() === data.val() || root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'ACTIVE')))"
         }
       },
       ".indexOn": [
@@ -311,6 +308,23 @@
         ".read": "auth != null && (auth.token.admin === true || auth.uid === $restaurantId)",
         ".write": "auth != null && auth.token.admin === true"
       }
+    },
+    "driverLocations": {
+      ".read": false,
+      ".write": false,
+      "$uid": {
+        ".read": false,
+        ".write": "auth != null && auth.uid === $uid && (root.child('users').child($uid).child('driverService').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('driverService').child('status').val() === 'ACTIVE' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'APPROVED' || root.child('users').child($uid).child('deliveryServices').child('status').val() === 'ACTIVE') && (root.child('users').child($uid).child('driverService').child('isOnline').val() === true || root.child('users').child($uid).child('deliveryServices').child('isOnline').val() === true)",
+        "latitude": {
+          ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
+        },
+        "longitude": {
+          ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+        },
+        "heading": {
+          ".validate": "newData.isNumber() && newData.val() >= -360 && newData.val() <= 360"
+        }
+      }
     }
   }
-}
+}\n
