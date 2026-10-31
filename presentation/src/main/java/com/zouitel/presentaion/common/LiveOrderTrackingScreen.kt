@@ -28,7 +28,6 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
-import kotlinx.coroutines.launch
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -47,7 +46,6 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
         val trackingRoute by screenModel.trackingRoute.collectAsState()
         val routeLoading by screenModel.routeLoading.collectAsState()
         val cameraState = rememberCameraPositionState()
-        val mapScope = rememberCoroutineScope()
 
         Scaffold(
             topBar = {
@@ -179,7 +177,9 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                                 Marker(
                                                     state = courierMarker,
                                                     title = currentOrder.deliveryName.ifBlank { "Courier" },
-                                                    snippet = "Live courier location"
+                                                    snippet = "Live courier location",
+                                                    rotation = courierLocation?.heading ?: 0f,
+                                                    flat = true
                                                 )
                                             }
                                             Marker(
