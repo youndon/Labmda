@@ -39,6 +39,7 @@ koin = "4.2.2"
 #Firebase.
 firebase = "2.7.0"
 firebaseDatabaseKtx = "22.0.2"
+firebaseAppCheck = "20.0.0"
 
 playServicesAuth = "22.0.0"
 
@@ -105,6 +106,8 @@ voyager-koin = { module = "cafe.adriel.voyager:voyager-koin", version.ref = "voy
 firebase-auth = { module = "dev.gitlive:firebase-auth", version.ref = "firebase" }
 firebase-firestore = { module = "dev.gitlive:firebase-firestore", version.ref = "firebase" }
 firebase-database = { module = "dev.gitlive:firebase-database", version.ref = "firebase" }
+firebase-appcheck-playintegrity = { module = "com.google.firebase:firebase-appcheck-playintegrity", version.ref = "firebaseAppCheck" }
+firebase-appcheck-debug = { module = "com.google.firebase:firebase-appcheck-debug", version.ref = "firebaseAppCheck" }
 firebase-storage = { module = "dev.gitlive:firebase-storage", version.ref = "firebase" }
 firebase-functions = { module = "dev.gitlive:firebase-functions", version.ref = "firebase" }
 
