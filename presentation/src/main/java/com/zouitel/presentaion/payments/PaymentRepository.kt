@@ -29,6 +29,13 @@ data class PaymentCreationResult(
     val expiresAtTimestamp: Long = 0L
 )
 
+/** Road route returned for a courier's current position to the customer. */
+data class TrackingRouteResult(
+    val distanceMeters: Long,
+    val duration: String,
+    val encodedPolyline: String
+)
+
 /** Server quote for a food or goods order. Monetary fields are PHP centavos. */
 data class PricingOrderQuoteResult(
     val quoteId: String,
@@ -153,6 +160,29 @@ class PaymentRepository {
             distanceKm = (result["distanceKm"] as? Number)?.toDouble() ?: 0.0,
             pricingVersion = (result["pricingVersion"] as? Number)?.toLong() ?: 0L,
             expiresAtTimestamp = (result["expiresAtTimestamp"] as? Number)?.toLong() ?: 0L
+        )
+    }
+
+    /** Fetches a road route for live courier tracking; does not create a price quote. */
+    suspend fun getTrackingRoute(
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffLat: Double,
+        dropoffLng: Double
+    ): TrackingRouteResult {
+        val response = functions.httpsCallable("getTrackingRoute")(
+            mapOf(
+                "pickupLat" to pickupLat,
+                "pickupLng" to pickupLng,
+                "dropoffLat" to dropoffLat,
+                "dropoffLng" to dropoffLng
+            )
+        )
+        val result = response.data<Map<String, Any?>>()
+        return TrackingRouteResult(
+            distanceMeters = (result["distanceMeters"] as? Number)?.toLong() ?: 0L,
+            duration = result["duration"] as? String ?: "",
+            encodedPolyline = result["encodedPolyline"] as? String ?: ""
         )
     }
 
