@@ -206,11 +206,12 @@ class RestaurantWorkplaceScreenModel(
             try {
                 val url = FirebaseImageUploader.upload(
                     bytes = image.readBytes(),
-                    label = "restaurant-cover"
+                    ownerUid = auth.currentUser?.uid ?: throw IllegalStateException("Sign in to upload an image."),
+                    category = "restaurant"
                 )
                 _imageUpload.value = ImageUploadState.Success(url)
             } catch (e: CancellationException) {
-                // Reset only when abandoned from outside (e.g. the consent screen closed);
+                // Reset only when abandoned from outside (e.g. the upload was cancelled);
                 // resetImageUpload() has already reset the state when it cancelled us.
                 if (isActive) _imageUpload.value = ImageUploadState.Idle
                 throw e
