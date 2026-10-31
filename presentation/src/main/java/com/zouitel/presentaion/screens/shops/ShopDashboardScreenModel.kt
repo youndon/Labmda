@@ -6,22 +6,30 @@ import com.zouitel.presentaion.common.DriveImageUploader
 import com.zouitel.presentaion.common.DriveTokenProvider
 import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.screens.food.ImageUploadState
-import com.zouitel.presentaion.model.OrderStatus
+import com.zouitel.presentaion.screens.food.MerchantDashboardMetrics
+import com.zouitel.presentaion.screens.food.MerchantOrderSnapshot
+import com.zouitel.presentaion.screens.food.calculateMerchantDashboardMetrics
 import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
     private val db = Firebase.database.reference()
+    private val currentUid = Firebase.auth.currentUser?.uid
 
     private val _products = MutableStateFlow<List<Product>>(emptyList())
     val products: StateFlow<List<Product>> = _products.asStateFlow()
+
+    private val _metrics = MutableStateFlow(MerchantDashboardMetrics())
+    val metrics: StateFlow<MerchantDashboardMetrics> = _metrics.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
@@ -32,41 +40,55 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
 
     init {
         listenToProducts()
+        listenToOrders()
     }
 
     private fun listenToProducts() {
         screenModelScope.launch {
-            db.child("shops").child(shopId).child("products").valueEvents.collect { snapshot ->
-                val list = snapshot.children.mapNotNull { child ->
-                    try {
-                        val id = child.key ?: return@mapNotNull null
-                        // Fixed: read "name" instead of "fullName"
-                        val name: String = child.child("name").value()
-                        val description: String = child.child("description").value()
-                        val price: Double = child.child("price").value()
-                        val category: String = child.child("category").value()
-                        val imageUrl: String = child.child("imageUrl").value()
-                        val isAvailable: Boolean = child.child("isAvailable").value()
-                        val stockQuantity: Int = child.child("stockQuantity").value()
-
-                        Product(
-                            id = id,
-                            shopId = shopId,
-                            name = name,
-                            description = description,
-                            price = price,
-                            category = category,
-                            imageUrl = imageUrl,
-                            isAvailable = isAvailable,
-                            stockQuantity = stockQuantity
-                        )
-                    } catch (e: Exception) {
-                        null
+            db.child("shops").child(shopId).child("products").valueEvents
+                .catch { _isLoading.value = false }
+                .collect { snapshot ->
+                    val list = snapshot.children.mapNotNull { child ->
+                        try {
+                            val id = child.key ?: return@mapNotNull null
+                            Product(
+                                id = id,
+                                shopId = shopId,
+                                name = child.child("name").value<String?>() ?: "",
+                                description = child.child("description").value<String?>() ?: "",
+                                price = child.child("price").value<Double?>() ?: 0.0,
+                                category = child.child("category").value<String?>() ?: "General",
+                                imageUrl = child.child("imageUrl").value<String?>() ?: "",
+                                isAvailable = child.child("isAvailable").value<Boolean?>() ?: true,
+                                stockQuantity = child.child("stockQuantity").value<Int?>() ?: 0
+                            )
+                        } catch (_: Exception) {
+                            null
+                        }
                     }
+                    _products.value = list
+                    _isLoading.value = false
                 }
-                _products.value = list
-                _isLoading.value = false
-            }
+        }
+    }
+
+    private fun listenToOrders() {
+        val uid = currentUid ?: return
+        screenModelScope.launch {
+            db.child("orders").orderByChild("merchantId").equalTo(uid).valueEvents
+                .catch { _metrics.value = MerchantDashboardMetrics() }
+                .collect { snapshot ->
+                    val orders = snapshot.children.mapNotNull { child ->
+                        runCatching {
+                            MerchantOrderSnapshot(
+                                status = child.child("status").value<String?>() ?: "PLACED",
+                                totalPrice = child.child("totalPrice").value<Double?>() ?: 0.0,
+                                createdAtTimestamp = child.child("createdAtTimestamp").value<Long?>() ?: 0L
+                            )
+                        }.getOrNull()
+                    }
+                    _metrics.value = calculateMerchantDashboardMetrics(orders)
+                }
         }
     }
 
@@ -80,50 +102,39 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
         stockQuantity: Int,
         onSuccess: () -> Unit
     ) {
+        if (name.isBlank() || price < 0.0 || stockQuantity < 0) return
         screenModelScope.launch {
             val productRef = if (productId.isNullOrBlank()) {
                 db.child("shops").child(shopId).child("products").push()
             } else {
                 db.child("shops").child(shopId).child("products").child(productId)
             }
-
             val pId = productRef.key ?: System.currentTimeMillis().toString()
+            val existing = _products.value.firstOrNull { it.id == productId }
             val product = Product(
                 id = pId,
                 shopId = shopId,
-                name = name,
-                description = description,
+                name = name.trim(),
+                description = description.trim(),
                 price = price,
-                category = category,
+                category = category.trim().ifBlank { "General" },
                 imageUrl = imageUrl,
-                isAvailable = true,
+                isAvailable = if (stockQuantity == 0) false else (existing?.isAvailable ?: true),
                 stockQuantity = stockQuantity
             )
-
             productRef.setValue(product)
             onSuccess()
         }
     }
 
-    /**
-     * Uploads a product photo to the signed-in user's Google Drive and exposes the link to
-     * store/display via [imageUpload].
-     */
     fun uploadProductImage(image: PickedImage, accessToken: DriveTokenProvider) {
         if (_imageUpload.value is ImageUploadState.Uploading) return
         _imageUpload.value = ImageUploadState.Uploading
-
         uploadJob = screenModelScope.launch {
             try {
-                val url = DriveImageUploader.upload(
-                    bytes = image.readBytes(),
-                    accessToken = accessToken(),
-                    label = "product"
-                )
+                val url = DriveImageUploader.upload(bytes = image.readBytes(), accessToken = accessToken(), label = "product")
                 _imageUpload.value = ImageUploadState.Success(url)
             } catch (e: CancellationException) {
-                // Reset only when abandoned from outside (e.g. the consent screen closed);
-                // resetImageUpload() has already reset the state when it cancelled us.
                 if (isActive) _imageUpload.value = ImageUploadState.Idle
                 throw e
             } catch (e: Exception) {
@@ -132,7 +143,6 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
         }
     }
 
-    /** Clears the upload state and cancels an upload still in flight, so its result can't leak into the next form. */
     fun resetImageUpload() {
         uploadJob?.cancel()
         uploadJob = null
@@ -141,37 +151,15 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
 
     fun toggleProductAvailability(product: Product) {
         screenModelScope.launch {
+            val available = !product.isAvailable && product.stockQuantity > 0
             db.child("shops").child(shopId).child("products").child(product.id)
-                .child("isAvailable").setValue(!product.isAvailable)
+                .child("isAvailable").setValue(available)
         }
     }
 
     fun deleteProduct(productId: String) {
         screenModelScope.launch {
             db.child("shops").child(shopId).child("products").child(productId).removeValue()
-        }
-    }
-
-    fun updateShopOrderStatus(orderId: String, nextStatus: OrderStatus, order: ShopOrder) {
-        if (nextStatus == OrderStatus.DELIVERED) return
-
-        screenModelScope.launch {
-            db.child("shop_orders").child(orderId).child("status").setValue(nextStatus.name)
-
-//            if (nextStatus == OrderStatus.OUT_FOR_DELIVERY) {
-//                val courierRecord = mapOf(
-//                    "id" to order.id,
-//                    "orderId" to order.id,
-//                    "sourceId" to order.shopId,
-//                    "sourceName" to order.shopName,
-//                    "customerAddress" to order.fromLocation,
-//                    "totalPrice" to order.totalPrice,
-//                    "deliveryFee" to order.deliveryFee,
-//                    "status" to OrderStatus.OUT_FOR_DELIVERY.name,
-//                    "dispatchedAtTimestamp" to System.currentTimeMillis()
-//                )
-//                db.child("couriers").child(order.id).setValue(courierRecord)
-//            }
         }
     }
 }
