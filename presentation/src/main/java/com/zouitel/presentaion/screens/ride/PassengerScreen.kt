@@ -1,13 +1,14 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.common.decodeRoutePolyline
+import com.zouitel.presentaion.common.reverseGeocode
+
 import com.zouitel.presentaion.model.formatPhpPesos
 import com.zouitel.presentaion.model.formatPhpCentavos
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.pm.PackageManager
-import android.location.Geocoder
 import android.location.Location
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -65,9 +66,7 @@ import com.zouitel.presentaion.payments.PricingQuoteResult
 import com.zouitel.presentaion.payments.PaymentResultSheet
 import com.zouitel.presentaion.payments.PaymentScreenModel
 import org.koin.core.context.GlobalContext
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -1137,37 +1136,6 @@ private fun distanceKm(a: LatLng, b: LatLng): Double {
     return result[0] / 1000.0
 }
 
-private fun decodeRoutePolyline(encoded: String): List<LatLng> {
-    if (encoded.isBlank()) return emptyList()
-    val points = mutableListOf<LatLng>()
-    var index = 0
-    var latitude = 0
-    var longitude = 0
-
-    fun decodeDelta(): Int {
-        var result = 0
-        var shift = 0
-        while (true) {
-            require(index < encoded.length) { "Incomplete encoded route polyline." }
-            val value = encoded[index++].code - 63
-            require(value in 0..63 && shift <= 30) { "Invalid encoded route polyline." }
-            result = result or ((value and 0x1f) shl shift)
-            shift += 5
-            if (value < 0x20) break
-        }
-        return if ((result and 1) != 0) (result shr 1).inv() else result shr 1
-    }
-
-    return runCatching {
-        while (index < encoded.length) {
-            latitude += decodeDelta()
-            longitude += decodeDelta()
-            points += LatLng(latitude / 1e5, longitude / 1e5)
-        }
-        points
-    }.getOrDefault(emptyList())
-}
-
 private fun formatRouteEta(duration: String): String {
     // Google Routes returns protobuf durations such as "754s" and may include decimals.
     val seconds = duration.removeSuffix("s").toDoubleOrNull() ?: return "ETA unavailable"
@@ -1189,14 +1157,3 @@ private fun FareDetailRow(label: String, value: String) {
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
     }
 }
-
-private suspend fun reverseGeocode(context: Context, point: LatLng): String =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            @Suppress("DEPRECATION")
-            Geocoder(context, Locale.getDefault())
-                .getFromLocation(point.latitude, point.longitude, 1)
-                ?.firstOrNull()
-                ?.getAddressLine(0)
-        }.getOrNull() ?: "%.5f, %.5f".format(point.latitude, point.longitude)
-    }
