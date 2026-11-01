@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -109,7 +112,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     }
                                 ) {
                                     Text(
-                                        "Fee: ₱${"%.2f".format(restaurant.deliveryFee)}",
+                                        "Fee: ₱${formatPhpPesos(restaurant.deliveryFee)}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -174,7 +177,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    "₱${"%.2f".format(subtotal)}",
+                                    "₱${formatPhpPesos(subtotal)}",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -259,7 +262,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(meal.name, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
                                 Text(
-                                    "₱${"%.2f".format(meal.basePrice)} × $qty = ₱${"%.2f".format(meal.basePrice * qty)}",
+                                    "₱${formatPhpPesos(meal.basePrice)} × $qty = ₱${formatPhpPesos(meal.basePrice * qty)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -332,7 +335,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Estimated item subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${formatPhpPesos(subtotal)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Text(
                             "Final catalogue prices, route-based delivery charges and order total are calculated by Labmda before checkout.",
@@ -446,7 +449,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         maxLines = 1
                     )
                     Text(
-                        text = "₱${"%.2f".format(meal.basePrice)}",
+                        text = "₱${formatPhpPesos(meal.basePrice)}",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.primary
                     )
