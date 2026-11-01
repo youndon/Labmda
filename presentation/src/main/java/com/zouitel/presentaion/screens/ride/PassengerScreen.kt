@@ -36,7 +36,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -83,8 +82,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
         val uriHandler = LocalUriHandler.current
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        val paymentRepository = remember { GlobalContext.get().get<PaymentRepository>() }
-        val screenModel = rememberScreenModel { PassengerScreenModel(paymentRepository) }
+        val screenModel = koinScreenModel<PassengerScreenModel>()
         val paymentScreenModel = koinScreenModel<PaymentScreenModel>()
         val paymentUiState by paymentScreenModel.uiState.collectAsState()
 
