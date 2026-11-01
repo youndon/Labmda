@@ -25,7 +25,7 @@ val presentationModule = module {
 
     single { AccountPreferencesStore(androidContext()) }
     factoryOf(::AccountPreferencesScreenModel)
-    factory { AccountScreenModel(androidContext(), get(), get()) }
+    factory { AccountScreenModel(get(), get()) }
     factoryOf(::LogInScreenModel)
 
     single { Firebase.auth }
