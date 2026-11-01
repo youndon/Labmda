@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -116,15 +119,15 @@ class ShopOrdersScreen() : Screen {
                 Text("Payment Status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (order.cashCollectionStatus == "COLLECTED") {
                     Text(
-                        "Cash collected by ${order.cashCollectedByRole.lowercase()}: ₱${"%.2f".format(order.cashCollectedAmountCentavos / 100.0)}",
+                        "Cash collected by ${order.cashCollectedByRole.lowercase()}: ₱${formatPhpCentavos(order.cashCollectedAmountCentavos)}",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        "Merchant payable: ₱${"%.2f".format(order.cashMerchantOwedCentavos / 100.0)} · Platform: ₱${"%.2f".format(order.cashPlatformOwedCentavos / 100.0)}",
+                        "Merchant payable: ₱${formatPhpCentavos(order.cashMerchantOwedCentavos)} · Platform: ₱${formatPhpCentavos(order.cashPlatformOwedCentavos)}",
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
-                        "Remitted: ₱${"%.2f".format(order.cashRemittedCentavos / 100.0)} · Remaining due: ₱${"%.2f".format(order.cashOutstandingRemittanceCentavos / 100.0)}",
+                        "Remitted: ₱${formatPhpCentavos(order.cashRemittedCentavos)} · Remaining due: ₱${formatPhpCentavos(order.cashOutstandingRemittanceCentavos)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.tertiary
                     )
@@ -142,7 +145,7 @@ class ShopOrdersScreen() : Screen {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                        Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                        Text("₱${formatPhpPesos(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                     }
                 }
 
@@ -150,7 +153,7 @@ class ShopOrdersScreen() : Screen {
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("Total Price", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                    Text("₱${"%.2f".format(order.totalPrice)}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                    Text("₱${formatPhpPesos(order.totalPrice)}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
