@@ -1,6 +1,8 @@
 package com.zouitel.presentaion.screens.shops
 
 import com.zouitel.presentaion.data.repository.OrdersRepository
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.auth.auth
 import com.zouitel.presentaion.payments.ServiceActionsRepository
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
@@ -16,7 +18,7 @@ class ShopActivitiesScreenModel(
     private val ordersRepository: OrdersRepository
 ) : ScreenModel {
     private val serviceActions = ServiceActionsRepository()
-    private val currentUserId = dev.gitlive.firebase.Firebase.auth.currentUser?.uid
+    private val currentUserId: String? = Firebase.auth.currentUser?.uid
 
     private val _activities = MutableStateFlow<List<Order>>(emptyList())
     val activities: StateFlow<List<Order>> = _activities.asStateFlow()
