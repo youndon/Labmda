@@ -17,7 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.model.Order
@@ -30,7 +30,7 @@ class ShopOrdersScreen() : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = rememberScreenModel { ShopOrdersScreenModel() }
+        val screenModel = koinScreenModel<ShopOrdersScreenModel>()
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
