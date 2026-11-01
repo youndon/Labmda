@@ -1,25 +1,21 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.data.repository.OrdersRepository
 import com.zouitel.presentaion.payments.ServiceActionsRepository
-import com.zouitel.presentaion.screens.food.toOrderOrNull
-
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
-import com.zouitel.presentaion.model.OrderType
-import dev.gitlive.firebase.Firebase
-import dev.gitlive.firebase.auth.auth
-import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class ShopOrdersScreenModel : ScreenModel {
-    private val db = Firebase.database.reference()
-    private val serviceActions = ServiceActionsRepository()
-    private val currentUid = Firebase.auth.currentUser?.uid
+class ShopOrdersScreenModel(
+    private val ordersRepository: OrdersRepository,
+    private val serviceActions: ServiceActionsRepository = ServiceActionsRepository()
+) : ScreenModel {
+    private val currentUid = dev.gitlive.firebase.Firebase.auth.currentUser?.uid
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders.asStateFlow()
@@ -39,12 +35,8 @@ class ShopOrdersScreenModel : ScreenModel {
             return
         }
         screenModelScope.launch {
-            db.child("orders").orderByChild("merchantId").equalTo(uid).valueEvents.collect { snapshot ->
-                val fetchedOrders = snapshot.children
-                    .mapNotNull { it.toOrderOrNull(defaultOrderType = OrderType.RETAIL) }
-                    .sortedByDescending { it.createdAtTimestamp }
-
-                _orders.value = fetchedOrders
+            ordersRepository.observeShopOrders(uid).collect {
+                _orders.value = it
                 _isLoading.value = false
             }
         }
@@ -52,7 +44,6 @@ class ShopOrdersScreenModel : ScreenModel {
 
     fun updateOrderStatus(order: Order, nextStatus: OrderStatus) {
         if (nextStatus == OrderStatus.DELIVERED) return
-
         screenModelScope.launch {
             serviceActions.transitionOrderStatus(order.id, nextStatus.name)
         }
