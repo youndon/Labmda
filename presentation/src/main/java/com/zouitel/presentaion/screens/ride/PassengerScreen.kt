@@ -207,7 +207,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
             }
             isQuotingRide = true
             try {
-                rideQuote = paymentRepository.quoteTrip(
+                rideQuote = screenModel.quoteTrip(
                     pickupLat = p.latitude,
                     pickupLng = p.longitude,
                     dropoffLat = d.latitude,
