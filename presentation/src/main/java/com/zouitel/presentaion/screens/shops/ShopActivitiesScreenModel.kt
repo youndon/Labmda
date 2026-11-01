@@ -1,26 +1,22 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.data.repository.OrdersRepository
 import com.zouitel.presentaion.payments.ServiceActionsRepository
-import com.zouitel.presentaion.screens.food.toOrderOrNull
-
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
-import com.zouitel.presentaion.model.OrderType
-import dev.gitlive.firebase.Firebase
-import dev.gitlive.firebase.auth.auth
-import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-class ShopActivitiesScreenModel : ScreenModel {
-    private val db = Firebase.database.reference()
+class ShopActivitiesScreenModel(
+    private val ordersRepository: OrdersRepository
+) : ScreenModel {
     private val serviceActions = ServiceActionsRepository()
-    private val currentUserId = Firebase.auth.currentUser?.uid
+    private val currentUserId = dev.gitlive.firebase.Firebase.auth.currentUser?.uid
 
     private val _activities = MutableStateFlow<List<Order>>(emptyList())
     val activities: StateFlow<List<Order>> = _activities.asStateFlow()
@@ -31,9 +27,7 @@ class ShopActivitiesScreenModel : ScreenModel {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    init {
-        listenToUserShopActivities()
-    }
+    init { listenToUserShopActivities() }
 
     private fun listenToUserShopActivities() {
         val uid = currentUserId
@@ -43,18 +37,8 @@ class ShopActivitiesScreenModel : ScreenModel {
             return
         }
         screenModelScope.launch {
-            db.child("orders").orderByChild("clientId").equalTo(uid).valueEvents.collect { snapshot ->
-                val fetchedOrders = snapshot.children.mapNotNull { child ->
-                    val order = child.toOrderOrNull(defaultOrderType = OrderType.RETAIL)
-                        ?: return@mapNotNull null
-                    if (currentUserId != null && order.clientId.isNotBlank() && order.clientId != currentUserId) {
-                        null
-                    } else {
-                        order
-                    }
-                }.sortedByDescending { it.createdAtTimestamp }
-
-                _activities.value = fetchedOrders
+            ordersRepository.observeClientShopOrders(uid).collect {
+                _activities.value = it
                 _isLoading.value = false
             }
         }
