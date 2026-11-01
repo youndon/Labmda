@@ -51,7 +51,6 @@ dependencies {
     implementation(libs.androidx.material.icons.core)
     implementation(libs.androidx.material.icons.extended)
 
-    implementation(projects.domain)
     implementation(libs.coroutines.core)
 
     implementation(libs.koin.core)
