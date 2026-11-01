@@ -1,6 +1,7 @@
 package com.zouitel.presentaion.screens.shops
 
 import com.zouitel.presentaion.data.repository.OrdersRepository
+import dev.gitlive.firebase.auth.auth
 import com.zouitel.presentaion.payments.ServiceActionsRepository
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
