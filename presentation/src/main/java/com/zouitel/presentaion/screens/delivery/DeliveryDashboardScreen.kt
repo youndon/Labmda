@@ -25,6 +25,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.common.AppTheme
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -40,6 +41,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
@@ -203,6 +205,11 @@ class DeliveryDashboardScreen : Screen {
                         .padding(horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    DeliveryOverviewHero(
+                        availableCount = activeDeliveries.size,
+                        completedCount = completedDeliveries.size
+                    )
+
                     // Modern Segmented Pill Tabs
                     SingleChoiceSegmentedButtonRow(
                         modifier = Modifier.fillMaxWidth()
@@ -690,6 +697,92 @@ class DeliveryDashboardScreen : Screen {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DeliveryOverviewHero(
+    availableCount: Int,
+    completedCount: Int
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AppTheme.extras.gradient, RoundedCornerShape(24.dp))
+            .padding(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            Text(
+                text = "Your delivery hub",
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+            Text(
+                text = "Pick up nearby orders and keep every handoff moving.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.9f)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DeliveryOverviewMetric(
+                    label = "Available",
+                    count = availableCount,
+                    modifier = Modifier.weight(1f)
+                )
+                DeliveryOverviewMetric(
+                    label = "Completed",
+                    count = completedCount,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        Surface(
+            modifier = Modifier.size(52.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = Color.White.copy(alpha = 0.16f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.DirectionsBike,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = Color.White
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeliveryOverviewMetric(
+    label: String,
+    count: Int,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.White.copy(alpha = 0.18f),
+        contentColor = Color.White,
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = count.toString(),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1
+            )
         }
     }
 }
