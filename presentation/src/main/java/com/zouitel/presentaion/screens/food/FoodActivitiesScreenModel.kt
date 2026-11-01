@@ -1,15 +1,11 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.data.repository.OrdersRepository
 import com.zouitel.presentaion.payments.ServiceActionsRepository
-
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
-import com.zouitel.presentaion.model.OrderType
-import dev.gitlive.firebase.Firebase
-import dev.gitlive.firebase.auth.auth
-import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,10 +13,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.util.UUID
 
-class FoodActivitiesScreenModel : ScreenModel {
-    private val db = Firebase.database.reference()
+class FoodActivitiesScreenModel(
+    private val ordersRepository: OrdersRepository
+) : ScreenModel {
     private val serviceActions = ServiceActionsRepository()
-    private val currentUserId = Firebase.auth.currentUser?.uid
+    private val currentUserId = dev.gitlive.firebase.Firebase.auth.currentUser?.uid
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders.asStateFlow()
@@ -31,9 +28,7 @@ class FoodActivitiesScreenModel : ScreenModel {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    init {
-        listenToUserOrders()
-    }
+    init { listenToUserOrders() }
 
     private fun listenToUserOrders() {
         val uid = currentUserId
@@ -43,15 +38,13 @@ class FoodActivitiesScreenModel : ScreenModel {
             return
         }
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").orderByChild("clientId").equalTo(uid).valueEvents.collect { snapshot ->
-                _orders.value = snapshot.children
-                    .mapNotNull { it.toOrderOrNull() }
-                    .filter { it.orderType == OrderType.FOOD }
-                    .sortedByDescending { it.createdAtTimestamp }
+            ordersRepository.observeClientFoodOrders(uid).collect {
+                _orders.value = it
                 _isLoading.value = false
             }
         }
     }
+
     fun cancelOrder(orderId: String) {
         screenModelScope.launch(Dispatchers.IO) {
             runCatching { serviceActions.transitionOrderStatus(orderId, OrderStatus.CANCELLED.name) }
