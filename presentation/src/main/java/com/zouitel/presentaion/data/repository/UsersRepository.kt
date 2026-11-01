@@ -2,6 +2,11 @@ package com.zouitel.presentaion.data.repository
 
 import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.model.VehicleInfo
+import com.zouitel.presentaion.model.VehicleType
+import com.zouitel.presentaion.screens.ride.DriverAccountInfo
+import com.zouitel.presentaion.screens.ride.DriverLocation
+import dev.gitlive.firebase.database.DataSnapshot
 import dev.gitlive.firebase.database.DatabaseReference
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -44,6 +49,34 @@ class UsersRepository(
         database.child("users").child(uid).updateChildren(mapOf("foodMode" to mode.name))
     }
 
+    fun observeOnlineDrivers(): Flow<List<UserProfile>> =
+        database.child("publicDrivers").valueEvents.map { snapshot ->
+            snapshot.children.mapNotNull { driver ->
+                val uid = driver.key ?: return@mapNotNull null
+                val online = runCatching { driver.child("isOnline").value<Boolean>() }.getOrDefault(false)
+                if (!online) return@mapNotNull null
+
+                val location = driver.child("currentLocation")
+                val vehicle = driver.child("vehicleInfo")
+                val typeName = readString(vehicle.child("type")).ifBlank { "CAR" }
+                val type = runCatching { VehicleType.valueOf(typeName) }.getOrDefault(VehicleType.CAR)
+                UserProfile(
+                    uid = uid,
+                    fullName = readString(driver.child("fullName")).ifBlank { "Driver" },
+                    phoneNumber = "",
+                    driverService = DriverAccountInfo(
+                        vehicleInfo = VehicleInfo(type = type),
+                        currentLocation = DriverLocation(
+                            latitude = readDouble(location.child("latitude")),
+                            longitude = readDouble(location.child("longitude")),
+                            heading = readFloat(location.child("heading"))
+                        ),
+                        isOnline = true
+                    )
+                )
+            }
+        }
+
     fun observePassengerInfo(uid: String): Flow<Pair<String, String>> =
         database.child("users").child(uid).valueEvents.map { snapshot ->
             val name = readString(snapshot.child("fullName")).ifBlank {
@@ -56,5 +89,11 @@ class UsersRepository(
         }
 }
 
-private fun readString(snapshot: dev.gitlive.firebase.database.DataSnapshot): String =
+private fun readDouble(snapshot: DataSnapshot): Double =
+    runCatching { snapshot.value<Double>() }.getOrDefault(0.0)
+
+private fun readFloat(snapshot: DataSnapshot): Float =
+    runCatching { snapshot.value<Float>() }.getOrDefault(0f)
+
+private fun readString(snapshot: DataSnapshot): String =
     runCatching { snapshot.value<String>() }.getOrDefault("")
