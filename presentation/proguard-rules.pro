@@ -20,11 +20,8 @@
 }
 
 # ------------------------------------------------------------------
-# Domain Models & Firebase GitLive Rules
+# Firebase GitLive Rules
 # ------------------------------------------------------------------
-# Keep all data models inside your domain package
--keep class com.zouitel.domain.model.** { *; }
-
 # Keep GitLive and Native Firebase SDK wrappers
 -keep class dev.gitlive.firebase.** { *; }
 -keep class com.google.firebase.** { *; }
