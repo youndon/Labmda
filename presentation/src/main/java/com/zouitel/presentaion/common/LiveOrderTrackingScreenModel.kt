@@ -2,13 +2,12 @@ package com.zouitel.presentaion.common
 
 import com.zouitel.presentaion.payments.ServiceActionsRepository
 import com.zouitel.presentaion.payments.PaymentRepository
+import com.zouitel.presentaion.screens.food.toOrderOrNull
 import com.zouitel.presentaion.payments.TrackingRouteResult
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.model.Order
-import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
@@ -61,61 +60,9 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                 }
 
                 try {
-                    val id = snapshot.key ?: orderId
-
-                    fun str(key: String) = runCatching { snapshot.child(key).value<String>() }.getOrDefault("")
-                    fun dbl(key: String) = runCatching { snapshot.child(key).value<Double>() }.getOrDefault(0.0)
-
-                    val statusStr = str("status")
-                    val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(OrderStatus.PLACED)
-                    val orderType = runCatching { OrderType.valueOf(str("orderType")) }.getOrDefault(OrderType.RETAIL)
-
-                    val items = snapshot.child("items").children.map { itemChild ->
-                        CartItem(
-                            id = runCatching { itemChild.child("id").value<String>() }.getOrDefault(""),
-                            name = runCatching { itemChild.child("name").value<String>() }.getOrDefault("Item"),
-                            basePrice = runCatching { itemChild.child("basePrice").value<Double>() }.getOrDefault(0.0),
-                            quantity = runCatching { itemChild.child("quantity").value<Int>() }.getOrDefault(1),
-                            specialInstructions = runCatching { itemChild.child("specialInstructions").value<String>() }.getOrDefault("")
-                        )
-                    }
-
-                    _order.value = Order(
-                        id = id,
-                        clientId = str("clientId"),
-                        orderType = orderType,
-                        sourceId = str("sourceId"),
-                        sourceName = str("sourceName"),
-                        items = items,
-                        subtotal = dbl("subtotal"),
-                        deliveryFee = dbl("deliveryFee"),
-                        totalPrice = dbl("totalPrice"),
-                        status = status,
-                        pickupLocation = str("pickupLocation"),
-                        pickupLat = dbl("pickupLat"),
-                        pickupLng = dbl("pickupLng"),
-                        dropoffLocation = str("dropoffLocation"),
-                        dropoffLat = dbl("dropoffLat"),
-                        dropoffLng = dbl("dropoffLng"),
-                        createdAtTimestamp = runCatching { snapshot.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L),
-                        paymentMethod = str("paymentMethod"),
-                        paymentStatus = str("paymentStatus").ifBlank { "UNPAID" },
-                        paymentId = str("paymentId"),
-                        deliveryId = str("deliveryId"),
-                        deliveryName = str("deliveryName"),
-                        deliveryPhone = str("deliveryPhone"),
-                        cashCollectionStatus = str("cashCollectionStatus"),
-                        cashCollectedBy = str("cashCollectedBy"),
-                        cashCollectedByRole = str("cashCollectedByRole"),
-                        cashCollectedAmountCentavos = runCatching { snapshot.child("cashCollectedAmountCentavos").value<Long>() }.getOrDefault(0L),
-                        cashMerchantOwedCentavos = runCatching { snapshot.child("cashMerchantOwedCentavos").value<Long>() }.getOrDefault(0L),
-                        cashPlatformOwedCentavos = runCatching { snapshot.child("cashPlatformOwedCentavos").value<Long>() }.getOrDefault(0L),
-                        cashCollectorEarningsCentavos = runCatching { snapshot.child("cashCollectorEarningsCentavos").value<Long>() }.getOrDefault(0L),
-                        cashRemittedCentavos = runCatching { snapshot.child("cashRemittedCentavos").value<Long>() }.getOrDefault(0L),
-                        cashOutstandingRemittanceCentavos = runCatching { snapshot.child("cashOutstandingRemittanceCentavos").value<Long>() }.getOrDefault(0L),
-                        cashRemittanceStatus = str("cashRemittanceStatus")
-                    )
-                    val courierId = str("deliveryId")
+                    val parsedOrder = snapshot.toOrderOrNull(defaultOrderType = OrderType.RETAIL)
+                    _order.value = parsedOrder
+                    val courierId = parsedOrder?.deliveryId.orEmpty()
                     if (courierId != observedCourierId) {
                         observedCourierId = courierId
                         courierLocationJob?.cancel()
