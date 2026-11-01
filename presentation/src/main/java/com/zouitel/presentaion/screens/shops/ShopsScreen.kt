@@ -49,6 +49,8 @@ import coil3.compose.AsyncImage
 import com.zouitel.presentaion.common.MarketplaceAvailabilityBadge
 import com.zouitel.presentaion.common.MarketplaceAvailabilityFilters
 import com.zouitel.presentaion.common.MarketplaceEmptyState
+import com.zouitel.presentaion.common.MarketplaceErrorState
+import com.zouitel.presentaion.common.MarketplaceInlineError
 import com.zouitel.presentaion.common.MarketplaceInfo
 import com.zouitel.presentaion.common.MarketplaceSearchField
 
@@ -60,6 +62,7 @@ class ShopsScreen : Screen {
         val screenModel = rememberScreenModel { ShopsScreenModel() }
         val approvedShops by screenModel.approvedShops.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val error by screenModel.error.collectAsState()
 
         var query by remember { mutableStateOf("") }
         var showOpenOnly by remember { mutableStateOf(false) }
@@ -152,6 +155,14 @@ class ShopsScreen : Screen {
                             CircularProgressIndicator()
                         }
                     }
+                } else if (error != null && approvedShops.isEmpty()) {
+                    item {
+                        MarketplaceErrorState(
+                            title = "Shops unavailable",
+                            message = error ?: "Shops could not be loaded.",
+                            onRetry = screenModel::refresh
+                        )
+                    }
                 } else if (visibleShops.isEmpty()) {
                     item {
                         MarketplaceEmptyState(
@@ -165,6 +176,9 @@ class ShopsScreen : Screen {
                         )
                     }
                 } else {
+                    if (error != null) {
+                        item { MarketplaceInlineError(error ?: "", screenModel::refresh) }
+                    }
                     items(visibleShops, key = { it.id }) { shop ->
                         ShopCardItem(
                             shop = shop,
