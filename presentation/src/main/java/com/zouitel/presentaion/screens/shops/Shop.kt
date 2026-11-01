@@ -15,7 +15,7 @@ data class Shop(
     val imageUrl: String = "",
     val status: Status = Status.PENDING,
     val createdAtTimestamp: Long = 0L,
-    val isOnline: Boolean,
+    val isOnline: Boolean = false,
     val latitude: Double? = null,
     val longitude: Double? = null
 )
