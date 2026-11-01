@@ -11,6 +11,9 @@ import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class ShopsScreenModel : ScreenModel {
@@ -29,17 +32,31 @@ class ShopsScreenModel : ScreenModel {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    private var loadJob: Job? = null
+
     init {
         loadData()
     }
 
+    fun refresh() {
+        loadData()
+    }
+
     private fun loadData() {
+        loadJob?.cancel()
         val uid = auth.currentUser?.uid
 
-        screenModelScope.launch {
+        loadJob = screenModelScope.launch {
+            _error.value = null
+            _isLoading.value = _approvedShops.value.isEmpty()
             if (uid != null) {
                 launch {
-                    db.child("users").child(uid).valueEvents.collect { snapshot ->
+                    db.child("users").child(uid).valueEvents
+                        .catch { cause -> if (cause is CancellationException) throw cause }
+                        .collect { snapshot ->
                         val shopModeStr = runCatching {
                             snapshot.child("shopMode").value<String>()
                         }.getOrDefault("CLIENT")
@@ -51,7 +68,9 @@ class ShopsScreenModel : ScreenModel {
                     }
                 }
                 launch {
-                    db.child("shops").orderByChild("ownerUid").equalTo(uid).valueEvents.collect { snapshot ->
+                    db.child("shops").orderByChild("ownerUid").equalTo(uid).valueEvents
+                        .catch { cause -> if (cause is CancellationException) throw cause }
+                        .collect { snapshot ->
                         val ownedShop = snapshot.children.firstNotNullOfOrNull { child ->
                             runCatching {
                                 val id = child.key ?: return@runCatching null
@@ -83,7 +102,13 @@ class ShopsScreenModel : ScreenModel {
             }
 
             launch {
-                db.child("publicShops").valueEvents.collect { snapshot ->
+                db.child("publicShops").valueEvents
+                    .catch { cause ->
+                        if (cause is CancellationException) throw cause
+                        _error.value = cause.message ?: "Shops could not be loaded. Check your connection and try again."
+                        _isLoading.value = false
+                    }
+                    .collect { snapshot ->
                     val list = mutableListOf<Shop>()
                     snapshot.children.forEach { child ->
                         try {
@@ -125,6 +150,7 @@ class ShopsScreenModel : ScreenModel {
 
                     _approvedShops.value = list
                     _isLoading.value = false
+                    _error.value = null
                 }
             }
         }
