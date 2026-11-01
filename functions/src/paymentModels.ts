@@ -6,13 +6,16 @@
 export type PaymentMethod = "GCASH" | "CASH";
 
 export type PaymentStatus =
-  | "CREATED"
+  | "UNPAID"
+  | "CREATING"
+  | "INITIATION_FAILED"
   | "PENDING"
-  | "PROCESSING"
-  | "SUCCEEDED"
+  | "PAID"
+  | "COLLECTED"
   | "FAILED"
   | "CANCELLED"
   | "EXPIRED"
+  | "REFUND_PENDING"
   | "PARTIALLY_REFUNDED"
   | "REFUNDED";
 
@@ -31,7 +34,7 @@ export type LedgerEntryType =
   | "PAYOUT_REVERSAL"
   | "ADJUSTMENT";
 export type LedgerDirection = "DEBIT" | "CREDIT";
-export type PayoutStatus = "REQUESTED" | "PENDING" | "PROCESSING" | "PAID" | "FAILED" | "CANCELLED";
+export type PayoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "ON_HOLD";
 export type RefundStatus = "REQUESTED" | "PENDING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
 export type CashCollectionStatus =
   | "EXPECTED"
