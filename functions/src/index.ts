@@ -1108,6 +1108,7 @@ async function buildRouteQuote(
     let feeKind: "deliveryFeeCentavos" | "fareCentavos";
     let additionalChargesCentavos = 0;
     let deliveryFeeCentavos = 0;
+    let breakdown: Record<string, number>;
     let snapshot: Record<string, unknown>;
 
     if (quoteType === "DELIVERY") {
@@ -1115,9 +1116,31 @@ async function buildRouteQuote(
       additionalChargesCentavos = config.additionalCharges.deliveryCentavos;
       amountCentavos = deliveryFeeCentavos + additionalChargesCentavos;
       feeKind = "deliveryFeeCentavos";
+      const deliveryCommissionCentavos = commissionCentavos(
+        deliveryFeeCentavos,
+        config.commissions.deliveryBps
+      );
+      breakdown = {
+        subtotal: 0,
+        deliveryFee: deliveryFeeCentavos,
+        serviceFee: additionalChargesCentavos,
+        discount: 0,
+        tax: 0,
+        total: amountCentavos,
+        merchantShare: 0,
+        courierShare: deliveryFeeCentavos - deliveryCommissionCentavos,
+        driverShare: 0,
+        platformShare: deliveryCommissionCentavos + additionalChargesCentavos,
+        gatewayFee: 0,
+        merchantCommission: 0,
+        deliveryCommission: deliveryCommissionCentavos,
+        rideCommission: 0,
+      };
       snapshot = pricingSnapshot(config, "DELIVERY", route, {
         deliveryFeeCentavos,
         additionalChargesCentavos,
+        commissionRatesBps: { delivery: config.commissions.deliveryBps },
+        breakdown,
       });
     } else {
       if (!isSupportedRideType(serviceType)) {
@@ -1131,9 +1154,31 @@ async function buildRouteQuote(
       amountCentavos = fare.fareCentavos;
       additionalChargesCentavos = fare.optionalChargesCentavos;
       feeKind = "fareCentavos";
+      const rideCommissionCentavos = commissionCentavos(
+        fare.fareCentavos,
+        config.commissions.ridesBps
+      );
+      breakdown = {
+        subtotal: fare.fareCentavos - fare.optionalChargesCentavos,
+        deliveryFee: 0,
+        serviceFee: fare.optionalChargesCentavos,
+        discount: 0,
+        tax: 0,
+        total: fare.fareCentavos,
+        merchantShare: 0,
+        courierShare: 0,
+        driverShare: fare.fareCentavos - rideCommissionCentavos,
+        platformShare: rideCommissionCentavos,
+        gatewayFee: 0,
+        merchantCommission: 0,
+        deliveryCommission: 0,
+        rideCommission: rideCommissionCentavos,
+      };
       snapshot = pricingSnapshot(config, "RIDES", route, {
         serviceType,
         optionalChargesCentavos: fare.optionalChargesCentavos,
+        commissionRatesBps: { rides: config.commissions.ridesBps },
+        breakdown,
         fareBreakdown: {
           baseFareCentavos: fare.baseFareCentavos,
           distanceChargeCentavos: fare.distanceChargeCentavos,
@@ -1165,6 +1210,7 @@ async function buildRouteQuote(
       routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       fareBreakdown: asRecord(snapshot.fareBreakdown),
+      breakdown,
       [feeKind]: feeKind === "deliveryFeeCentavos" ? deliveryFeeCentavos : amountCentavos,
       additionalChargesCentavos,
       amountCentavos,
@@ -1190,6 +1236,7 @@ async function buildRouteQuote(
       routeTravelMode: route.travelMode,
       routePolyline: route.encodedPolyline,
       fareBreakdown: asRecord(snapshot.fareBreakdown),
+      breakdown,
       pricingVersion: config.version,
       expiresAtTimestamp: quote.expiresAtTimestamp,
     };
