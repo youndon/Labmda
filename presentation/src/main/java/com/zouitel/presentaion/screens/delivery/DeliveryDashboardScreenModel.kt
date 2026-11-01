@@ -1,10 +1,10 @@
 package com.zouitel.presentaion.screens.delivery
 
 import com.zouitel.presentaion.payments.ServiceActionsRepository
+import com.zouitel.presentaion.screens.food.toOrderOrNull
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
@@ -71,91 +71,13 @@ class DeliveryDashboardScreenModel : ScreenModel {
             }.collect { snapshots ->
                 val orderSnapshots = snapshots.distinctBy { it.key }
                 val allTasks = orderSnapshots.mapNotNull { child ->
-                    try {
-                        val id = child.key ?: return@mapNotNull null
+                    val deliveryType = runCatching { child.child("deliveryType").value<String>() }.getOrDefault("")
+                    if (deliveryType == "FREIGHT") return@mapNotNull null
 
-                        val deliveryType: String = runCatching { child.child("deliveryType").value<String>() }
-                            .getOrElse { runCatching { child.child("deliveryType").value<String>() }.getOrDefault("") }
-                        if (deliveryType == "FREIGHT") return@mapNotNull null
-
-                        val statusStr: String = runCatching { child.child("status").value<String>() }.getOrDefault("PLACED")
-                        val status = runCatching { OrderStatus.valueOf(statusStr) }.getOrDefault(OrderStatus.PLACED)
-
-                        if (status != OrderStatus.OUT_FOR_DELIVERY && status != OrderStatus.DELIVERED) {
-                            return@mapNotNull null
-                        }
-
-                        val clientId: String = runCatching { child.child("clientId").value<String>() }.getOrDefault("")
-                        val sourceId: String = runCatching { child.child("shopId").value<String>() }
-                            .getOrElse { runCatching { child.child("sourceId").value<String>() }.getOrDefault("") }
-
-                        val sourceName: String = runCatching { child.child("shopName").value<String>() }
-                            .getOrElse { runCatching { child.child("sourceName").value<String>() }.getOrDefault("Store / Restaurant") }
-
-                        val deliveryId: String = runCatching { child.child("deliveryId").value<String>() }.getOrDefault("")
-                        val deliveryName: String = runCatching { child.child("deliveryName").value<String>() }.getOrDefault("")
-                        val deliveryPhone: String = runCatching { child.child("deliveryPhone").value<String>() }.getOrDefault("")
-
-                        val clientAddress: String = runCatching { child.child("fromLocation").value<String>() }.getOrDefault("")
-                        val subtotal: Double = runCatching { child.child("subtotal").value<Double>() }.getOrDefault(0.0)
-                        val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
-                        val deliveryFee: Double = runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(3.0)
-                        val createdAt: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
-                        val paymentMethod: String = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("")
-
-                        val pickupLocation: String = runCatching { child.child("pickupLocation").value<String>() }.getOrDefault("")
-                        val pickupLat: Double = runCatching { child.child("pickupLat").value<Double>() }.getOrDefault(0.0)
-                        val pickupLng: Double = runCatching { child.child("pickupLng").value<Double>() }.getOrDefault(0.0)
-                        val dropoffLocation: String = runCatching { child.child("dropoffLocation").value<String>() }.getOrDefault("")
-                        val dropoffLat: Double = runCatching { child.child("dropoffLat").value<Double>() }.getOrDefault(0.0)
-                        val dropoffLng: Double = runCatching { child.child("dropoffLng").value<Double>() }.getOrDefault(0.0)
-
-                        val items = child.child("items").children.map { itemChild ->
-                            CartItem(
-                                id = runCatching { itemChild.child("productId").value<String>() }
-                                    .getOrElse { runCatching { itemChild.child("mealId").value<String>() }.getOrDefault("") },
-                                name = runCatching { itemChild.child("productName").value<String>() }
-                                    .getOrElse { runCatching { itemChild.child("mealName").value<String>() }.getOrDefault("Item") },
-                                basePrice = runCatching { itemChild.child("price").value<Double>() }
-                                    .getOrElse { runCatching { itemChild.child("basePrice").value<Double>() }.getOrDefault(0.0) },
-                                quantity = runCatching { itemChild.child("quantity").value<Int>() }.getOrDefault(1)
-                            )
-                        }
-
-                        Order(
-                            id = id,
-                            clientId = clientId,
-                            orderType = OrderType.RETAIL,
-                            sourceId = sourceId,
-                            sourceName = sourceName,
-                            items = items,
-                            subtotal = subtotal,
-                            deliveryFee = deliveryFee,
-                            totalPrice = totalPrice,
-                            status = status,
-                            createdAtTimestamp = createdAt,
-                            paymentMethod = paymentMethod,
-                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault("UNPAID"),
-                            paymentId = runCatching { child.child("paymentId").value<String>() }.getOrDefault(""),
-                            deliveryId = deliveryId,
-                            deliveryName = deliveryName,
-                            deliveryPhone = deliveryPhone,
-                            deliveryStage = runCatching { child.child("deliveryStage").value<String>() }.getOrDefault("TO_PICKUP"),
-                            cashCollectionStatus = runCatching { child.child("cashCollectionStatus").value<String>() }.getOrDefault(""),
-                            cashCollectedBy = runCatching { child.child("cashCollectedBy").value<String>() }.getOrDefault(""),
-                            cashCollectedByRole = runCatching { child.child("cashCollectedByRole").value<String>() }.getOrDefault(""),
-                            cashCollectedAmountCentavos = runCatching { child.child("cashCollectedAmountCentavos").value<Long>() }.getOrDefault(0L),
-                            cashMerchantOwedCentavos = runCatching { child.child("cashMerchantOwedCentavos").value<Long>() }.getOrDefault(0L),
-                            cashPlatformOwedCentavos = runCatching { child.child("cashPlatformOwedCentavos").value<Long>() }.getOrDefault(0L),
-                            cashCollectorEarningsCentavos = runCatching { child.child("cashCollectorEarningsCentavos").value<Long>() }.getOrDefault(0L),
-                            cashRemittedCentavos = runCatching { child.child("cashRemittedCentavos").value<Long>() }.getOrDefault(0L),
-                            cashOutstandingRemittanceCentavos = runCatching { child.child("cashOutstandingRemittanceCentavos").value<Long>() }.getOrDefault(0L),
-                            cashRemittanceStatus = runCatching { child.child("cashRemittanceStatus").value<String>() }.getOrDefault(""),
-                            pickupLocation = pickupLocation, pickupLat = pickupLat, pickupLng = pickupLng,
-                            dropoffLocation = dropoffLocation, dropoffLat = dropoffLat, dropoffLng = dropoffLng,
-                        )
-                    } catch (e: Exception) {
-                        null
+                    val order = child.toOrderOrNull(defaultOrderType = OrderType.RETAIL)
+                        ?: return@mapNotNull null
+                    order.takeIf {
+                        it.status == OrderStatus.OUT_FOR_DELIVERY || it.status == OrderStatus.DELIVERED
                     }
                 }
 

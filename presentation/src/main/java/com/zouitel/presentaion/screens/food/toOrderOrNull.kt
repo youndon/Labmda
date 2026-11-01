@@ -6,26 +6,57 @@ import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.database.DataSnapshot
 
-/** Tolerant parser: a missing or oddly typed field never drops the whole order. */
-internal fun DataSnapshot.toOrderOrNull(): Order? {
+/** Tolerant shared parser for current and legacy order records. */
+internal fun DataSnapshot.toOrderOrNull(
+    defaultOrderType: OrderType = OrderType.FOOD
+): Order? {
     val id = key ?: return null
 
-    fun str(name: String) = runCatching { child(name).value<String>() }.getOrDefault("")
-    fun dbl(snap: DataSnapshot, name: String): Double =
-        runCatching { snap.child(name).value<Double>() }
-            .getOrElse { runCatching { snap.child(name).value<Long>().toDouble() }.getOrDefault(0.0) }
+    fun str(vararg names: String, default: String = ""): String {
+        names.forEach { name ->
+            val value = runCatching { child(name).value<String>() }.getOrNull()
+            if (!value.isNullOrBlank()) return value
+        }
+        return default
+    }
 
-    val status = runCatching { OrderStatus.valueOf(str("status")) }.getOrDefault(OrderStatus.PLACED)
-    val orderType = runCatching { OrderType.valueOf(str("orderType")) }.getOrDefault(OrderType.FOOD)
+    fun number(vararg names: String): Double {
+        names.forEach { name ->
+            runCatching { child(name).value<Double>() }.getOrNull()?.let { return it }
+            runCatching { child(name).value<Long>().toDouble() }.getOrNull()?.let { return it }
+            runCatching { child(name).value<Int>().toDouble() }.getOrNull()?.let { return it }
+        }
+        return 0.0
+    }
 
-    val items = child("items").children.map { itemChild ->
+    fun long(vararg names: String): Long {
+        names.forEach { name ->
+            runCatching { child(name).value<Long>() }.getOrNull()?.let { return it }
+            runCatching { child(name).value<Int>().toLong() }.getOrNull()?.let { return it }
+        }
+        return 0L
+    }
+
+    fun int(snapshot: DataSnapshot, vararg names: String): Int {
+        names.forEach { name ->
+            runCatching { snapshot.child(name).value<Int>() }.getOrNull()?.let { return it }
+            runCatching { snapshot.child(name).value<Long>().toInt() }.getOrNull()?.let { return it }
+        }
+        return 1
+    }
+
+    val status = runCatching { OrderStatus.valueOf(str("status")) }
+        .getOrDefault(OrderStatus.PLACED)
+    val orderType = runCatching { OrderType.valueOf(str("orderType")) }
+        .getOrDefault(defaultOrderType)
+
+    val items = child("items").children.map { item ->
         CartItem(
-            id = runCatching { itemChild.child("id").value<String>() }.getOrDefault(""),
-            name = runCatching { itemChild.child("name").value<String>() }.getOrDefault("Item"),
-            basePrice = dbl(itemChild, "basePrice"),
-            quantity = runCatching { itemChild.child("quantity").value<Int>() }
-                .getOrElse { runCatching { itemChild.child("quantity").value<Long>().toInt() }.getOrDefault(1) },
-            specialInstructions = runCatching { itemChild.child("specialInstructions").value<String>() }.getOrDefault("")
+            id = strFrom(item, "id", "productId", "mealId"),
+            name = strFrom(item, "name", "productName", "mealName", default = "Item"),
+            basePrice = numberFrom(item, "basePrice", "price"),
+            quantity = int(item, "quantity"),
+            specialInstructions = runCatching { item.child("specialInstructions").value<String>() }.getOrDefault("")
         )
     }
 
@@ -33,35 +64,53 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
         id = id,
         clientId = str("clientId"),
         orderType = orderType,
-        sourceId = str("sourceId"),
-        sourceName = str("sourceName"),
+        sourceId = str("sourceId", "shopId"),
+        sourceName = str("sourceName", "shopName", default = "Store / Restaurant"),
         items = items,
-        subtotal = dbl(this, "subtotal"),
-        deliveryFee = dbl(this, "deliveryFee"),
-        totalPrice = dbl(this, "totalPrice"),
+        subtotal = number("subtotal"),
+        deliveryFee = number("deliveryFee", "courierFee"),
+        totalPrice = number("totalPrice"),
         status = status,
         pickupLocation = str("pickupLocation"),
-        pickupLat = dbl(this, "pickupLat"),
-        pickupLng = dbl(this, "pickupLng"),
-        dropoffLocation = str("dropoffLocation"),
-        dropoffLat = dbl(this, "dropoffLat"),
-        dropoffLng = dbl(this, "dropoffLng"),
-        createdAtTimestamp = runCatching { child("createdAtTimestamp").value<Long>() }.getOrDefault(0L),
+        pickupLat = number("pickupLat"),
+        pickupLng = number("pickupLng"),
+        dropoffLocation = str("dropoffLocation", "deliveryAddress", "fromLocation"),
+        dropoffLat = number("dropoffLat"),
+        dropoffLng = number("dropoffLng"),
+        createdAtTimestamp = long("createdAtTimestamp", "createdAt"),
         paymentMethod = str("paymentMethod"),
-        paymentStatus = str("paymentStatus").ifBlank { "UNPAID" },
+        paymentStatus = str("paymentStatus", default = "UNPAID"),
         paymentId = str("paymentId"),
         deliveryId = str("deliveryId"),
         deliveryName = str("deliveryName"),
         deliveryPhone = str("deliveryPhone"),
+        deliveryStage = str("deliveryStage", default = "TO_PICKUP"),
         cashCollectionStatus = str("cashCollectionStatus"),
         cashCollectedBy = str("cashCollectedBy"),
         cashCollectedByRole = str("cashCollectedByRole"),
-        cashCollectedAmountCentavos = runCatching { child("cashCollectedAmountCentavos").value<Long>() }.getOrDefault(0L),
-        cashMerchantOwedCentavos = runCatching { child("cashMerchantOwedCentavos").value<Long>() }.getOrDefault(0L),
-        cashPlatformOwedCentavos = runCatching { child("cashPlatformOwedCentavos").value<Long>() }.getOrDefault(0L),
-        cashCollectorEarningsCentavos = runCatching { child("cashCollectorEarningsCentavos").value<Long>() }.getOrDefault(0L),
-        cashRemittedCentavos = runCatching { child("cashRemittedCentavos").value<Long>() }.getOrDefault(0L),
-        cashOutstandingRemittanceCentavos = runCatching { child("cashOutstandingRemittanceCentavos").value<Long>() }.getOrDefault(0L),
+        cashCollectedAmountCentavos = long("cashCollectedAmountCentavos"),
+        cashMerchantOwedCentavos = long("cashMerchantOwedCentavos"),
+        cashPlatformOwedCentavos = long("cashPlatformOwedCentavos"),
+        cashCollectorEarningsCentavos = long("cashCollectorEarningsCentavos"),
+        cashRemittedCentavos = long("cashRemittedCentavos"),
+        cashOutstandingRemittanceCentavos = long("cashOutstandingRemittanceCentavos"),
         cashRemittanceStatus = str("cashRemittanceStatus")
     )
+}
+
+private fun strFrom(snapshot: DataSnapshot, vararg names: String, default: String = ""): String {
+    names.forEach { name ->
+        val value = runCatching { snapshot.child(name).value<String>() }.getOrNull()
+        if (!value.isNullOrBlank()) return value
+    }
+    return default
+}
+
+private fun numberFrom(snapshot: DataSnapshot, vararg names: String): Double {
+    names.forEach { name ->
+        runCatching { snapshot.child(name).value<Double>() }.getOrNull()?.let { return it }
+        runCatching { snapshot.child(name).value<Long>().toDouble() }.getOrNull()?.let { return it }
+        runCatching { snapshot.child(name).value<Int>().toDouble() }.getOrNull()?.let { return it }
+    }
+    return 0.0
 }
