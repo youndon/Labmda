@@ -39,14 +39,45 @@ class ShopsScreenModel : ScreenModel {
         screenModelScope.launch {
             if (uid != null) {
                 launch {
-                    db.child("user_profiles").child(uid).valueEvents.collect { snapshot ->
-                        if (snapshot.exists) {
-                            val shopModeStr = runCatching { snapshot.child("shopMode").value<String>() }.getOrDefault("CLIENT")
-                            _userProfile.value = UserProfile(
-                                uid = uid,
-                                shopMode = runCatching { UserMode.valueOf(shopModeStr) }.getOrDefault(UserMode.CLIENT),
-                            )
+                    db.child("users").child(uid).valueEvents.collect { snapshot ->
+                        val shopModeStr = runCatching {
+                            snapshot.child("shopMode").value<String>()
+                        }.getOrDefault("CLIENT")
+                        _userProfile.value = UserProfile(
+                            uid = uid,
+                            shopMode = runCatching { UserMode.valueOf(shopModeStr) }
+                                .getOrDefault(UserMode.CLIENT),
+                        )
+                    }
+                }
+                launch {
+                    db.child("shops").orderByChild("ownerUid").equalTo(uid).valueEvents.collect { snapshot ->
+                        val ownedShop = snapshot.children.firstNotNullOfOrNull { child ->
+                            runCatching {
+                                val id = child.key ?: return@runCatching null
+                                val ownerUid = child.child("ownerUid").value<String>()
+                                if (ownerUid != uid) return@runCatching null
+                                val statusStr = runCatching {
+                                    child.child("status").value<String>()
+                                }.getOrDefault("PENDING")
+                                Shop(
+                                    id = id,
+                                    ownerUid = ownerUid,
+                                    name = runCatching { child.child("name").value<String>() }.getOrDefault(""),
+                                    description = runCatching { child.child("description").value<String>() }.getOrDefault(""),
+                                    category = runCatching { child.child("category").value<String>() }.getOrDefault("General Store"),
+                                    phone = runCatching { child.child("phone").value<String>() }.getOrDefault(""),
+                                    address = runCatching { child.child("address").value<String>() }.getOrDefault(""),
+                                    imageUrl = runCatching { child.child("imageUrl").value<String>() }.getOrDefault(""),
+                                    status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.PENDING),
+                                    createdAtTimestamp = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L),
+                                    isOnline = runCatching { child.child("isOnline").value<Boolean>() }.getOrDefault(false),
+                                    latitude = runCatching { child.child("latitude").value<Double>() }.getOrNull(),
+                                    longitude = runCatching { child.child("longitude").value<Double>() }.getOrNull()
+                                )
+                            }.getOrNull()
                         }
+                        _managerShop.value = ownedShop?.takeIf { it.status == Status.APPROVED }
                     }
                 }
             }
@@ -54,12 +85,9 @@ class ShopsScreenModel : ScreenModel {
             launch {
                 db.child("publicShops").valueEvents.collect { snapshot ->
                     val list = mutableListOf<Shop>()
-                    var ownedShop: Shop? = null
-
                     snapshot.children.forEach { child ->
                         try {
                             val id = child.key ?: return@forEach
-                            val ownerUid: String = ""
                             val name: String = child.child("name").value()
                             val description: String = child.child("description").value()
                             val category: String = child.child("category").value()
@@ -76,7 +104,6 @@ class ShopsScreenModel : ScreenModel {
 
                             val shop = Shop(
                                 id = id,
-                                ownerUid = ownerUid,
                                 name = name,
                                 description = description,
                                 category = category,
@@ -88,10 +115,6 @@ class ShopsScreenModel : ScreenModel {
                                 isOnline = isOnline
                             )
 
-                            if (uid != null && ownerUid == uid && status == Status.APPROVED) {
-                                ownedShop = shop
-                            }
-
                             if (status == Status.APPROVED) {
                                 list.add(shop)
                             }
@@ -101,7 +124,6 @@ class ShopsScreenModel : ScreenModel {
                     }
 
                     _approvedShops.value = list
-                    _managerShop.value = ownedShop
                     _isLoading.value = false
                 }
             }
