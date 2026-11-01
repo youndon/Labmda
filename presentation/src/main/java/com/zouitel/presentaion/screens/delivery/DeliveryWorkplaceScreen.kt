@@ -10,7 +10,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -76,13 +75,13 @@ class DeliveryWorkplaceScreen : Screen {
                             modifier = Modifier
                                 .size(72.dp)
                                 .clip(RoundedCornerShape(20.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
+                                .background(AppTheme.extras.gradient),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.DirectionsBike,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                tint = Color.White,
                                 modifier = Modifier.size(36.dp)
                             )
                         }
