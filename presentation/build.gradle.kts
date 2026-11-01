@@ -65,6 +65,7 @@ dependencies {
 
     implementation(libs.kmp.maps.compose)
     implementation(libs.kmp.maps.compose.utils)
+    implementation("com.google.maps.android:android-maps-utils:6.1.0")
     api("io.github.mirzemehdi:kmpauth-google:3.0.6")
 
     api(libs.firebase.auth)
