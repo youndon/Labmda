@@ -1,7 +1,5 @@
 package com.zouitel.presentaion.common
 
-import android.content.Context
-import android.location.Geocoder
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -23,10 +21,7 @@ import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.util.Locale
 
 /**
  * Full-screen map: tap to drop a pin, or search an address. Never uses the user's own location.
@@ -152,25 +147,3 @@ fun LocationPickerDialog(
         }
     }
 }
-
-suspend fun reverseGeocode(context: Context, point: LatLng): String =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            @Suppress("DEPRECATION")
-            Geocoder(context, Locale.getDefault())
-                .getFromLocation(point.latitude, point.longitude, 1)
-                ?.firstOrNull()
-                ?.getAddressLine(0)
-        }.getOrNull() ?: "%.5f, %.5f".format(point.latitude, point.longitude)
-    }
-
-suspend fun forwardGeocode(context: Context, address: String): LatLng? =
-    withContext(Dispatchers.IO) {
-        runCatching {
-            @Suppress("DEPRECATION")
-            Geocoder(context, Locale.getDefault())
-                .getFromLocationName(address, 1)
-                ?.firstOrNull()
-                ?.let { LatLng(it.latitude, it.longitude) }
-        }.getOrNull()
-    }
