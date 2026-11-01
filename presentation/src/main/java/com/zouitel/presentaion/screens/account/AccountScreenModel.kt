@@ -107,7 +107,7 @@ class AccountScreenModel(
         db.child("users")
             .child(uid)
             .updateChildren(
-                mapOf("foodMode" to mode)
+                mapOf("foodMode" to mode.name)
             )
     }
 
