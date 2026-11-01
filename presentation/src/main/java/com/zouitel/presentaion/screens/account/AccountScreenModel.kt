@@ -4,28 +4,25 @@ import android.content.Context
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.UserMode
+import com.zouitel.presentaion.data.repository.UsersRepository
 import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.auth.FirebaseAuth
 import dev.gitlive.firebase.auth.FirebaseUser
-import dev.gitlive.firebase.database.DatabaseReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class AccountScreenModel(
     private val context: Context,
     private val auth: FirebaseAuth,
-    private val db: DatabaseReference
-): ScreenModel {
-
+    private val usersRepository: UsersRepository
+) : ScreenModel {
     private val _currentUser: MutableStateFlow<FirebaseUser?> = MutableStateFlow(auth.currentUser)
     val currentUser: StateFlow<FirebaseUser?> = _currentUser
 
@@ -33,20 +30,7 @@ class AccountScreenModel(
     val profile: StateFlow<UserProfile?> = currentUser
         .flatMapLatest { user ->
             val uid = user?.uid
-            if (uid.isNullOrEmpty()) {
-                flowOf(null)
-            } else {
-                db.child("users")
-                    .child(uid)
-                    .valueEvents
-                    .map { snapshot ->
-                        if (snapshot.exists) {
-                            runCatching { snapshot.value<UserProfile>() }.getOrNull()
-                        } else {
-                            null
-                        }
-                    }
-            }
+            if (uid.isNullOrEmpty()) flowOf(null) else usersRepository.observeProfile(uid)
         }
         .stateIn(
             scope = screenModelScope,
@@ -62,53 +46,18 @@ class AccountScreenModel(
         }
     }
 
-    // Save or update user profile
     suspend fun saveUserProfile(userProfile: UserProfile) {
         if (userProfile.uid.isBlank() || auth.currentUser?.uid != userProfile.uid) return
-        db.child("users").child(userProfile.uid).updateChildren(
-            mapOf("uid" to userProfile.uid, "fullName" to userProfile.fullName, "email" to userProfile.email,
-                "phoneNumber" to userProfile.phoneNumber, "photoUrl" to userProfile.photoUrl)
-        )
+        usersRepository.saveProfile(userProfile)
     }
 
-    // Fetch user profile
-    fun getUserProfile(uid: String): Flow<UserProfile?> {
-        if (uid.isBlank()) return flowOf(null)
-        return try {
-            db.child("users")
-                .child(uid)
-                .valueEvents
-                .map { snapshot ->
-                    if (snapshot.exists) {
-                        runCatching { snapshot.value<UserProfile>() }.getOrNull()
-                    } else {
-                        null
-                    }
-                }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            flowOf(null)
-        }
-    }
+    fun getUserProfile(uid: String) = usersRepository.observeProfile(uid)
 
-    // Toggle active ride user mode in Realtime Database
     suspend fun updateUserMode(uid: String, mode: UserMode) {
-        if (uid.isBlank()) return
-        db.child("users")
-            .child(uid)
-            .updateChildren(
-                mapOf("driveMode" to mode)
-            )
+        usersRepository.updateUserMode(uid, mode)
     }
 
-    // Toggle active food user mode in Realtime Database
     suspend fun updateFoodUserMode(uid: String, mode: UserMode) {
-        if (uid.isBlank()) return
-        db.child("users")
-            .child(uid)
-            .updateChildren(
-                mapOf("foodMode" to mode.name)
-            )
+        usersRepository.updateFoodUserMode(uid, mode)
     }
-
 }
