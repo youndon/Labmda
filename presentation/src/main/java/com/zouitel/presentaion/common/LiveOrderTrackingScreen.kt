@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.common
 
+import com.zouitel.presentaion.common.decodeRoutePolyline
+
 import com.zouitel.presentaion.model.formatPhpPesos
 import com.zouitel.presentaion.model.formatPhpCentavos
 
@@ -99,7 +101,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             val destination = LatLng(currentOrder.dropoffLat, currentOrder.dropoffLng)
                             val courier = courierLocation?.let { LatLng(it.latitude, it.longitude) }
                             val routePoints = remember(trackingRoute?.encodedPolyline) {
-                                decodeTrackingPolyline(trackingRoute?.encodedPolyline.orEmpty())
+                                decodeRoutePolyline(trackingRoute?.encodedPolyline.orEmpty())
                             }
                             val courierMarker = rememberUpdatedMarkerState(
                                 position = courier ?: destination
@@ -494,33 +496,6 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
             }
         }
     }
-}
-
-private fun decodeTrackingPolyline(encoded: String): List<LatLng> {
-    if (encoded.isBlank()) return emptyList()
-    val points = mutableListOf<LatLng>()
-    var index = 0
-    var lat = 0
-    var lng = 0
-    fun delta(): Int {
-        var result = 0
-        var shift = 0
-        while (index < encoded.length) {
-            val value = encoded[index++].code - 63
-            result = result or ((value and 0x1f) shl shift)
-            shift += 5
-            if (value < 0x20) break
-        }
-        return if ((result and 1) != 0) (result shr 1).inv() else result shr 1
-    }
-    return runCatching {
-        while (index < encoded.length) {
-            lat += delta()
-            lng += delta()
-            points += LatLng(lat / 1e5, lng / 1e5)
-        }
-        points
-    }.getOrDefault(emptyList())
 }
 
 private fun formatTrackingEta(duration: String): String {
