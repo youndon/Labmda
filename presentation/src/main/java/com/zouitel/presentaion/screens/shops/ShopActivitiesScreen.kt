@@ -39,7 +39,7 @@ class ShopActivitiesScreen : Screen {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("My Store Order Activities", fontWeight = FontWeight.Bold) },
+                    title = { Text("Shop activity", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -53,13 +53,14 @@ class ShopActivitiesScreen : Screen {
                     CircularProgressIndicator()
                 }
             } else if (activities.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "You have no active store orders right now.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
+                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(28.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.padding(20.dp).size(34.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                        Text("Your shop orders will appear here", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text("Once you place an order with a store, you can follow its progress and manage available order actions from this screen.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
                 }
             } else {
                 LazyColumn(
@@ -67,7 +68,27 @@ class ShopActivitiesScreen : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    item { refundNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary) } }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Your orders, all in one place", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                Text("Track store preparation, delivery progress and payment updates.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                ActivitySummaryTile("Active", activities.count { it.status == OrderStatus.PLACED || it.status == OrderStatus.ACCEPTED || it.status == OrderStatus.PREPARING || it.status == OrderStatus.OUT_FOR_DELIVERY || it.status == OrderStatus.AWAITING_PAYMENT }, Modifier.weight(1f), MaterialTheme.colorScheme.primaryContainer)
+                                ActivitySummaryTile("Delivered", activities.count { it.status == OrderStatus.DELIVERED }, Modifier.weight(1f), MaterialTheme.colorScheme.secondaryContainer)
+                                ActivitySummaryTile("Cancelled", activities.count { it.status == OrderStatus.CANCELLED }, Modifier.weight(1f), MaterialTheme.colorScheme.surfaceContainerHigh)
+                            }
+                        }
+                    }
+                    item {
+                        refundNotice?.let {
+                            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(14.dp), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+                                Text(it, modifier = Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                    item { Text("Recent orders", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
                     items(activities, key = { it.id }) { order ->
                         ClientActivityCard(
                             order = order,
@@ -81,6 +102,22 @@ class ShopActivitiesScreen : Screen {
         }
     }
 
+
+    @Composable
+    private fun ActivitySummaryTile(
+        label: String,
+        count: Int,
+        modifier: Modifier = Modifier,
+        containerColor: androidx.compose.ui.graphics.Color
+    ) {
+        Card(modifier = modifier, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = containerColor), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(count.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+        }
+    }
+
     @Composable
     private fun ClientActivityCard(order: Order, onTrackOrder: () -> Unit, onCancelOrder: () -> Unit, onRequestRefund: () -> Unit) {
         val formattedDate = remember(order.createdAtTimestamp) {
@@ -90,9 +127,9 @@ class ShopActivitiesScreen : Screen {
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -104,14 +141,25 @@ class ShopActivitiesScreen : Screen {
                     Text(formattedDate, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
 
-                Text("Demand #${order.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Order #${order.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 StatusChip(order.status)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Text("Delivery Address: ${order.dropoffLocation.ifBlank { "Address not provided" }}", style = MaterialTheme.typography.bodyMedium)
-                Text("Payment Method: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
-                Text("Payment Status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Delivery address", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(order.dropoffLocation.ifBlank { "Address not provided" }, style = MaterialTheme.typography.bodyMedium)
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Payment method", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(order.paymentMethod.ifBlank { "Cash on Delivery" }, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    }
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Payment status", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(order.paymentStatus.replace('_', ' '), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 
