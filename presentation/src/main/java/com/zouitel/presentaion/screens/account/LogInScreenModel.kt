@@ -1,39 +1,33 @@
 package com.zouitel.presentaion.screens.account
 
 import cafe.adriel.voyager.core.model.ScreenModel
+import com.zouitel.presentaion.data.repository.UsersRepository
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.screens.ride.DataOrException
-import dev.gitlive.firebase.database.DatabaseReference
 
 class LogInScreenModel(
-    private val usersRef: DatabaseReference
-): ScreenModel {
+    private val usersRepository: UsersRepository
+) : ScreenModel {
     suspend fun saveUserProfile(userProfile: UserProfile): DataOrException<Unit, Exception> {
         val result = DataOrException<Unit, Exception>()
-        try {
-            // Creates a path like: /users/{uid}
-            val userNode = usersRef.child("users").child(userProfile.uid)
-
-            // RTDB uses setValue() for serialized classes
-            userNode.updateChildren(mapOf("uid" to userProfile.uid, "fullName" to userProfile.fullName, "email" to userProfile.email, "phoneNumber" to userProfile.phoneNumber, "photoUrl" to userProfile.photoUrl))
-
+        return try {
+            usersRepository.saveProfile(userProfile)
             result.data = Unit
-        } catch (e: Exception) {
-            e.printStackTrace()
-            result.e = Exception(e.message, e)
+            result
+        } catch (error: Exception) {
+            result.e = Exception(error.message, error)
+            result
         }
-        return result
     }
 
-    // Example of reading a profile from RTDB
     suspend fun getUserProfile(uid: String): DataOrException<UserProfile?, Exception> {
         val result = DataOrException<UserProfile?, Exception>()
-        try {
-            val snapshot = usersRef.child("users").child(uid).get()
-            result.data = if (snapshot.exists) runCatching { snapshot.value<UserProfile>() }.getOrNull() else null
-        } catch (e: Exception) {
-            result.e = Exception(e.message, e)
+        return try {
+            result.data = usersRepository.getProfile(uid)
+            result
+        } catch (error: Exception) {
+            result.e = Exception(error.message, error)
+            result
         }
-        return result
     }
 }
