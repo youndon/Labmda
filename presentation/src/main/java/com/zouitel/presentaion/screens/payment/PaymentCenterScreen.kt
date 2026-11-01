@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.payment
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -108,7 +111,7 @@ class PaymentCenterScreen : Screen {
 private fun PaymentActivityCard(payment: PaymentActivityItem) {
     var expanded by remember(payment.id) { mutableStateOf(false) }
     val date = rememberPaymentDate(payment.createdAtTimestamp)
-    val amount = String.format(Locale.US, "%.2f", payment.amountCentavos / 100.0)
+    val amount = formatPhpCentavos(payment.amountCentavos)
     Card(
         modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
         shape = RoundedCornerShape(16.dp),
@@ -155,12 +158,12 @@ private fun PaymentActivityCard(payment: PaymentActivityItem) {
                 }
                 if (payment.refundedCentavos > 0L || payment.pendingRefundCentavos > 0L || payment.refunds.isNotEmpty()) {
                     Text("Refunds", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    if (payment.refundedCentavos > 0L) Text("Refunded: ₱${String.format(Locale.US, "%.2f", payment.refundedCentavos / 100.0)}")
-                    if (payment.pendingRefundCentavos > 0L) Text("Refund pending: ₱${String.format(Locale.US, "%.2f", payment.pendingRefundCentavos / 100.0)}")
+                    if (payment.refundedCentavos > 0L) Text("Refunded: ₱${formatPhpCentavos(payment.refundedCentavos)}")
+                    if (payment.pendingRefundCentavos > 0L) Text("Refund pending: ₱${formatPhpCentavos(payment.pendingRefundCentavos)}")
                     if (payment.refundStatus.isNotBlank()) Text("Refund status: ${payment.refundStatus.replace('_', ' ')}")
                     payment.refunds.forEach { refund ->
                         Text(
-                            "Refund ${refund.id.takeLast(10)} · ₱${String.format(Locale.US, "%.2f", refund.amountCentavos / 100.0)} · ${refund.status.replace('_', ' ')}",
+                            "Refund ${refund.id.takeLast(10)} · ₱${formatPhpCentavos(refund.amountCentavos)} · ${refund.status.replace('_', ' ')}",
                             style = MaterialTheme.typography.bodySmall
                         )
                         if (refund.failureCode.isNotBlank()) Text("Refund issue: ${paymentFailureExplanation(refund.failureCode)}", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
