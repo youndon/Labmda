@@ -38,7 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.google.android.gms.location.LocationCallback
@@ -66,7 +66,7 @@ class DriverDashboardScreen : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = rememberScreenModel { DriverDashboardScreenModel() }
+        val screenModel = koinScreenModel<DriverDashboardScreenModel>()
         val availableTrips by screenModel.availableTrips.collectAsState()
         val activeTrips by screenModel.activeTrips.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
