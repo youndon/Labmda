@@ -271,19 +271,32 @@ class AboutAppScreen : Screen {
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text("Explore Labmda", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            services.forEach { service ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            services.take(2).forEach { service ->
                                 Surface(
+                                    modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(50),
                                     color = MaterialTheme.colorScheme.secondaryContainer
                                 ) {
                                     Text(
                                         service,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            services.drop(2).forEach { service ->
+                                Surface(
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(50),
+                                    color = MaterialTheme.colorScheme.secondaryContainer
+                                ) {
+                                    Text(
+                                        service,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                         style = MaterialTheme.typography.labelLarge,
                                         color = MaterialTheme.colorScheme.onSecondaryContainer
                                     )
