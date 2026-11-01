@@ -160,7 +160,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             ) {
                                 Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("View Demand Card", fontWeight = FontWeight.Bold)
+                                Text("View cart", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -168,12 +168,21 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
             }
         ) { paddingValues ->
             Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-                Text(
-                    text = "Store Products Catalog",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Shop the essentials",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Browse the latest products from ${shop.name}. Add your favourites to the cart.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 if (isLoading) {
                     Box(modifier = Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
@@ -243,7 +252,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                             contentPadding = PaddingValues(0.dp)
                                         ) {
-                                            Text("Add to Card", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                            Text("Add to cart", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                                         }
                                     } else {
                                         Row(
@@ -274,7 +283,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("Store Demand Card Summary", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                        Text("Your cart", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                         LazyColumn(
@@ -349,7 +358,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         )
 
                         PayButton(
-                            label = "Place Goods Order",
+                            label = "Continue to checkout",
                             enabled = dropoff != null && deliveryAddress.isNotBlank() && cartItems.isNotEmpty(),
                             isLoading = isSubmitting || paymentUiState.isSubmitting,
                             onClick = {
