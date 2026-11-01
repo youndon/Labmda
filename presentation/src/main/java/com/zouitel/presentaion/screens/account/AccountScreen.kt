@@ -14,7 +14,6 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocalShipping
@@ -28,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -92,75 +92,17 @@ class AccountScreen : Screen {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
-                // --- 1. Profile Banner Card ---
+                // --- 1. Profile Overview ---
                 item {
-                    ElevatedCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val photoUrl = user?.photoURL
-                            if (!photoUrl.isNullOrEmpty()) {
-                                AsyncImage(
-                                    model = photoUrl,
-                                    contentDescription = "Profile photo",
-                                    modifier = Modifier
-                                        .size(68.dp)
-                                        .clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(68.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primaryContainer),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Outlined.Person,
-                                        contentDescription = "Profile photo",
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.size(36.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(Modifier.width(16.dp))
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = user?.displayName?.takeIf { it.isNotBlank() } ?: profile?.fullName ?: "Guest User",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = user?.email ?: user?.phoneNumber ?: "Not signed in",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { /* Navigate to Edit Profile */ },
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Edit Profile",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
+                    val displayName = user?.displayName?.takeIf { it.isNotBlank() }
+                        ?: profile?.fullName?.takeIf { it.isNotBlank() }
+                        ?: "Welcome to Labmda"
+                    val contact = user?.email ?: user?.phoneNumber ?: "Your account"
+                    AccountProfileHero(
+                        name = displayName,
+                        contact = contact,
+                        photoUrl = user?.photoURL
+                    )
                 }
 
                 // --- 2. Business Portals (2x2 Super-App Grid) ---
@@ -290,6 +232,83 @@ class AccountScreen : Screen {
 }
 
 @Composable
+private fun AccountProfileHero(
+    name: String,
+    contact: String,
+    photoUrl: String?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary
+                        )
+                    )
+                )
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            if (!photoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = photoUrl,
+                    contentDescription = "Profile photo",
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Person,
+                        contentDescription = "Profile photo",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(38.dp)
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text(
+                    "YOUR LABMDA ACCOUNT",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f),
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    name,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    contact,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun BusinessGridCard(
     modifier: Modifier = Modifier,
     icon: ImageVector,
@@ -297,22 +316,22 @@ private fun BusinessGridCard(
     status: Status,
     onClick: () -> Unit
 ) {
-    val (statusText, statusColor) = when (status) {
-        Status.APPROVED -> "Active" to MaterialTheme.colorScheme.primary
-        Status.PENDING -> "Pending" to MaterialTheme.colorScheme.tertiary
-        Status.REJECTED -> "Declined" to MaterialTheme.colorScheme.error
-        else -> "Apply" to MaterialTheme.colorScheme.outline
+    val (statusText, statusColor, statusDescription) = when (status) {
+        Status.APPROVED -> Triple("Active", MaterialTheme.colorScheme.primary, "Your service is ready")
+        Status.PENDING -> Triple("Pending", MaterialTheme.colorScheme.tertiary, "Application under review")
+        Status.REJECTED -> Triple("Declined", MaterialTheme.colorScheme.error, "Review your application")
+        else -> Triple("Apply", MaterialTheme.colorScheme.outline, "Set up this service")
     }
 
     OutlinedCard(
         modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(18.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -321,8 +340,8 @@ private fun BusinessGridCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
@@ -330,28 +349,35 @@ private fun BusinessGridCard(
                         imageVector = icon,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(23.dp)
                     )
                 }
 
                 Surface(
                     color = statusColor.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(50)
                 ) {
                     Text(
                         text = statusText,
                         color = statusColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
                     )
                 }
             }
 
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold)
+                )
+                Text(
+                    text = statusDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
