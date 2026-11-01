@@ -1,6 +1,5 @@
 package com.zouitel.presentaion.screens.account
 
-import android.content.Context
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.UserMode
@@ -19,7 +18,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class AccountScreenModel(
-    private val context: Context,
     private val auth: FirebaseAuth,
     private val usersRepository: UsersRepository
 ) : ScreenModel {
