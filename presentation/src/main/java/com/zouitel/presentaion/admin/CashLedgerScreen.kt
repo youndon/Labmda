@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.admin
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -181,7 +184,7 @@ private fun CashCollectionCard(
     onRemit: (String, String, (Boolean) -> Unit) -> Unit
 ) {
     var amount by remember(row.collectionId) {
-        mutableStateOf((row.outstandingRemittanceCentavos / 100.0).let { "%.2f".format(it) })
+        mutableStateOf((row.outstandingRemittanceCentavos / 100.0).let { formatPhpPesos(it) })
     }
     var requestKey by remember(row.collectionId) {
         mutableStateOf(UUID.randomUUID().toString())
@@ -242,4 +245,4 @@ private fun CashCollectionCard(
     }
 }
 
-private fun peso(centavos: Long): String = "%.2f".format(centavos / 100.0)
+private fun peso(centavos: Long): String = formatPhpCentavos(centavos)
