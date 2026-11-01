@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.common.decodeRoutePolyline
+
 import com.zouitel.presentaion.model.formatPhpPesos
 import com.zouitel.presentaion.model.formatPhpCentavos
 
@@ -128,7 +130,7 @@ class DriverDashboardScreen : Screen {
         val focusedTrip = currentList.firstOrNull { it.id == focusedTripId }
             ?: currentList.firstOrNull()
         val routePoints = remember(focusedTrip?.routePolyline) {
-            decodeDriverRoutePolyline(focusedTrip?.routePolyline.orEmpty())
+            decodeRoutePolyline(focusedTrip?.routePolyline.orEmpty())
         }
 
         LaunchedEffect(selectedTab, currentList.map { it.id }) {
@@ -1005,37 +1007,6 @@ private fun Trip.pickupPoint(): LatLng? =
 
 private fun Trip.dropoffPoint(): LatLng? =
     if (dropoffLat != 0.0 || dropoffLng != 0.0) LatLng(dropoffLat, dropoffLng) else null
-
-private fun decodeDriverRoutePolyline(encoded: String): List<LatLng> {
-    if (encoded.isBlank()) return emptyList()
-    val points = mutableListOf<LatLng>()
-    var index = 0
-    var latitude = 0
-    var longitude = 0
-
-    fun decodeDelta(): Int {
-        var result = 0
-        var shift = 0
-        while (true) {
-            require(index < encoded.length) { "Incomplete encoded route polyline." }
-            val value = encoded[index++].code - 63
-            require(value in 0..63 && shift <= 30) { "Invalid encoded route polyline." }
-            result = result or ((value and 0x1f) shl shift)
-            shift += 5
-            if (value < 0x20) break
-        }
-        return if ((result and 1) != 0) (result shr 1).inv() else result shr 1
-    }
-
-    return runCatching {
-        while (index < encoded.length) {
-            latitude += decodeDelta()
-            longitude += decodeDelta()
-            points += LatLng(latitude / 1e5, longitude / 1e5)
-        }
-        points
-    }.getOrDefault(emptyList())
-}
 
 private fun formatDriverEta(duration: String): String {
     val seconds = duration.removeSuffix("s").toDoubleOrNull() ?: return "ETA unavailable"
