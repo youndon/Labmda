@@ -184,7 +184,7 @@ private fun CashCollectionCard(
     onRemit: (String, String, (Boolean) -> Unit) -> Unit
 ) {
     var amount by remember(row.collectionId) {
-        mutableStateOf((row.outstandingRemittanceCentavos / 100.0).let { formatPhpPesos(it) })
+        mutableStateOf(formatPhpCentavos(row.outstandingRemittanceCentavos))
     }
     var requestKey by remember(row.collectionId) {
         mutableStateOf(UUID.randomUUID().toString())
