@@ -1,7 +1,7 @@
 package com.zouitel.presentaion.screens.shops
 
-import android.content.Context
-import android.location.Geocoder
+import com.zouitel.presentaion.common.reverseGeocode
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,9 +30,6 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.ImagePicker
 import com.zouitel.presentaion.screens.food.ImageUploadState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.util.Locale
 
 data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
