@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.payments
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,7 +42,7 @@ fun PaymentResultSheet(
             Text("Payment details", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Amount", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("₱${String.format(Locale.US, "%.2f", amount)}", fontWeight = FontWeight.Bold)
+                Text("₱${formatPhpPesos(amount)}", fontWeight = FontWeight.Bold)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Method", color = MaterialTheme.colorScheme.onSurfaceVariant)
