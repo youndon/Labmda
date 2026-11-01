@@ -9,6 +9,7 @@ val foodModule = module {
     factoryOf(::MealWorkplaceScreenModel)
     factoryOf(::RestaurantWorkplaceScreenModel)
     factory { FoodOrdersScreenModel(get()) }
+    factory { FoodActivitiesScreenModel(get()) }
 
     single { FoodRepository() }
 }
