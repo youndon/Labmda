@@ -54,6 +54,8 @@ import coil3.compose.AsyncImage
 import com.zouitel.presentaion.common.MarketplaceAvailabilityBadge
 import com.zouitel.presentaion.common.MarketplaceAvailabilityFilters
 import com.zouitel.presentaion.common.MarketplaceEmptyState
+import com.zouitel.presentaion.common.MarketplaceErrorState
+import com.zouitel.presentaion.common.MarketplaceInlineError
 import com.zouitel.presentaion.common.MarketplaceInfo
 import com.zouitel.presentaion.common.MarketplaceSearchField
 import com.zouitel.presentaion.common.UserMode
@@ -69,6 +71,7 @@ class RestaurantsScreen : Screen {
         val accountModel = koinScreenModel<AccountScreenModel>()
         val restaurants by screenModel.restaurants.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val error by screenModel.error.collectAsState()
         val profile by accountModel.profile.collectAsState()
 
         var query by remember { mutableStateOf("") }
@@ -172,6 +175,14 @@ class RestaurantsScreen : Screen {
                             CircularProgressIndicator()
                         }
                     }
+                } else if (error != null && restaurants.isEmpty()) {
+                    item {
+                        MarketplaceErrorState(
+                            title = "Restaurants unavailable",
+                            message = error ?: "Restaurants could not be loaded.",
+                            onRetry = screenModel::refresh
+                        )
+                    }
                 } else if (visibleRestaurants.isEmpty()) {
                     item {
                         MarketplaceEmptyState(
@@ -185,6 +196,9 @@ class RestaurantsScreen : Screen {
                         )
                     }
                 } else {
+                    if (error != null) {
+                        item { MarketplaceInlineError(error ?: "", screenModel::refresh) }
+                    }
                     items(visibleRestaurants, key = { it.id }) { restaurant ->
                         RestaurantCardItem(
                             restaurant = restaurant,
