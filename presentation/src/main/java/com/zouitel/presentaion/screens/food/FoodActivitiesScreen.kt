@@ -20,7 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
@@ -34,7 +34,7 @@ class FoodActivitiesScreen : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
-        val screenModel = rememberScreenModel { FoodActivitiesScreenModel() }
+        val screenModel = koinScreenModel<FoodActivitiesScreenModel>()
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
         val refundNotice by screenModel.refundNotice.collectAsState()
