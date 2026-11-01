@@ -68,7 +68,7 @@ data class MealScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "$${formatPhpPesos(calculatedTotalPrice)}",
+                                text = "₱${formatPhpPesos(calculatedTotalPrice)}",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -126,7 +126,7 @@ data class MealScreen(
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(text = meal.name, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
                         Text(
-                            text = "$${formatPhpPesos(meal.basePrice)}",
+                            text = "₱${formatPhpPesos(meal.basePrice)}",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )
