@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -276,7 +279,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     requestSheetDriver = null
                     scope.launch {
                         snackbarHostState.showSnackbar(
-                            "Ride requested. Server fare: ₱${"%.2f".format(result.amount)}"
+                            "Ride requested. Server fare: ₱${formatPhpPesos(result.amount)}"
                         )
                     }
                 },
@@ -689,7 +692,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         Column(horizontalAlignment = Alignment.End) {
                             Text("Server quote", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(
-                                "₱${"%.2f".format(quote.amount)}",
+                                "₱${formatPhpPesos(quote.amount)}",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -801,7 +804,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Server fare", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.weight(1f))
-                            Text("₱${"%.2f".format(quote.amount)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            Text("₱${formatPhpPesos(quote.amount)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
                     } else {
                         Text(
@@ -899,7 +902,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     Text("Distance: ${"%.1f".format(tripDistanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (fare > 0.0) {
                         Text(
-                            "Server quote ₱${"%.2f".format(fare)}",
+                            "Server quote ₱${formatPhpPesos(fare)}",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -993,7 +996,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (fare > 0.0) {
                         Text(
-                            "Server quote ₱${"%.2f".format(fare)}",
+                            "Server quote ₱${formatPhpPesos(fare)}",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -1079,7 +1082,7 @@ class PassengerScreen(private val openHistoryOnStart: Boolean = false) : Screen 
                 ) {
                     Text("Server fare", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "₱${"%.2f".format(trip.fare)}",
+                        "₱${formatPhpPesos(trip.fare)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -1173,7 +1176,7 @@ private fun formatRouteEta(duration: String): String {
     return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
 }
 
-private fun formatPhp(centavos: Long): String = "₱${"%.2f".format(centavos / 100.0)}"
+private fun formatPhp(centavos: Long): String = "₱${formatPhpCentavos(centavos)}"
 
 @Composable
 private fun FareDetailRow(label: String, value: String) {
