@@ -36,7 +36,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Labmda"
 include(":app")
-include(":domain")
-include("core:datastore")
-include("core:repository")
 include(":presentation")
