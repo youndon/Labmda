@@ -3,7 +3,6 @@ package com.zouitel.presentaion.screens.account
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
@@ -76,11 +75,9 @@ class SettingsScreen : Screen {
                             onCheckedChange = model::setNotificationsEnabled
                         )
                         HorizontalDivider()
-                        SettingsSwitchRow(
-                            icon = Icons.Filled.DarkMode,
-                            label = "Dark Mode Theme",
-                            checked = preferences.darkModeEnabled ?: isSystemInDarkTheme(),
-                            onCheckedChange = model::setDarkModeEnabled
+                        SettingsAppearanceRow(
+                            selectedMode = preferences.darkModeEnabled,
+                            onModeSelected = model::setDarkModeEnabled
                         )
                     }
                 }
@@ -170,6 +167,54 @@ private fun SettingsSwitchRow(
         Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
         Text(label, modifier = Modifier.weight(1f).padding(horizontal = 14.dp), style = MaterialTheme.typography.bodyMedium)
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun SettingsAppearanceRow(
+    selectedMode: Boolean?,
+    onModeSelected: (Boolean?) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.DarkMode, contentDescription = null, modifier = Modifier.size(22.dp))
+            Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                Text("Appearance", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    when (selectedMode) {
+                        null -> "Following your device setting"
+                        true -> "Dark theme"
+                        false -> "Light theme"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FilterChip(
+                selected = selectedMode == null,
+                onClick = { onModeSelected(null) },
+                label = { Text("System") }
+            )
+            FilterChip(
+                selected = selectedMode == false,
+                onClick = { onModeSelected(false) },
+                label = { Text("Light") }
+            )
+            FilterChip(
+                selected = selectedMode == true,
+                onClick = { onModeSelected(true) },
+                label = { Text("Dark") }
+            )
+        }
     }
 }
 
