@@ -50,7 +50,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Store Manager Dashboard", fontWeight = FontWeight.Bold) },
+                    title = { Text("Shop dashboard", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -81,13 +81,43 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Store overview", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "Your shop at a glance",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        "Track orders, review sales and keep your product catalogue up to date.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f)
+                                    )
+                                    Text(
+                                        "${products.size} products in your catalogue",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            Text("Order activity", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 SummaryTile("New", metrics.newOrders, Modifier.weight(1f))
                                 SummaryTile("Preparing", metrics.preparingOrders, Modifier.weight(1f))
                                 SummaryTile("On delivery", metrics.outForDeliveryOrders, Modifier.weight(1f))
                             }
+                            Text("Sales performance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 SalesTile("Today · ${metrics.todayOrders} orders", metrics.todaySales, Modifier.weight(1f))
                                 SalesTile("Last 7 days", metrics.weekSales, Modifier.weight(1f))
@@ -114,7 +144,27 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                     }
                                 }
                             }
-                            Text("Products · ${products.size}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("Product catalogue", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "${products.size} listed products",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    selectedProductToEdit = null
+                                    showAddEditDialog = true
+                                }) {
+                                    Icon(Icons.Default.Add, contentDescription = null)
+                                    Text("Add")
+                                }
+                            }
                             if (products.isEmpty()) {
                                 Text("No products yet. Tap + to add your first product.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -238,7 +288,12 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
 
     @Composable
     private fun SummaryTile(label: String, count: Int, modifier: Modifier = Modifier) {
-        Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Card(
+            modifier = modifier,
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(count.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -248,7 +303,12 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
 
     @Composable
     private fun SalesTile(label: String, amount: Double, modifier: Modifier = Modifier) {
-        Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+        Card(
+            modifier = modifier,
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("₱${formatPhpPesos(amount)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
