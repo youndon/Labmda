@@ -6,7 +6,7 @@ import org.koin.dsl.module
 val shopsModule = module {
     factoryOf(::ShopDashboardScreenModel)
     factoryOf(::ShopWorkplaceScreenModel)
-    factoryOf(::ShopOrdersScreenModel)
+    factory { ShopOrdersScreenModel(get()) }
     factoryOf(::ShopActivitiesScreenModel)
     factoryOf(::ShopsScreenModel)
     factoryOf(::StoreDetailsScreenModel)
