@@ -7,7 +7,7 @@ val shopsModule = module {
     factoryOf(::ShopDashboardScreenModel)
     factoryOf(::ShopWorkplaceScreenModel)
     factory { ShopOrdersScreenModel(get()) }
-    factoryOf(::ShopActivitiesScreenModel)
+    factory { ShopActivitiesScreenModel(get()) }
     factoryOf(::ShopsScreenModel)
     factoryOf(::StoreDetailsScreenModel)
 }
