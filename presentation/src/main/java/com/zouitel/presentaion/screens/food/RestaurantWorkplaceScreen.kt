@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -484,7 +487,7 @@ class RestaurantWorkplaceScreen : Screen {
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Text(
-                            text = "Delivery Fee: $${"%.2f".format(restaurantInfo.deliveryFee)}",
+                            text = "Delivery Fee: $${formatPhpPesos(restaurantInfo.deliveryFee)}",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
