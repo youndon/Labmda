@@ -19,6 +19,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
@@ -167,19 +169,14 @@ class LogInScreen : Screen {
             PhoneAuthProvider.verifyPhoneNumber(builder.build())
         }
 
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("") } // Clean minimal bar
-                )
-            }
-        ) { innerPadding ->
+        Scaffold { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 28.dp),
+                contentAlignment = Alignment.TopCenter
             ) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -205,13 +202,13 @@ class LogInScreen : Screen {
                     Spacer(Modifier.height(24.dp))
 
                     Text(
-                        text = "Get started with RideGo",
+                        text = "Welcome to Labmda",
                         style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Your ultimate ride, food & shopping experience",
+                        text = "One place for rides, food, shopping and delivery.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -234,7 +231,14 @@ class LogInScreen : Screen {
                         )
                     }
 
-                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        text = "Choose how you want to continue",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+
+                    Spacer(Modifier.height(20.dp))
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -267,7 +271,7 @@ class LogInScreen : Screen {
                                     value = phoneNumber,
                                     onValueChange = { input -> phoneNumber = input.filter { it.isDigit() || it == '+' } },
                                     label = { Text("Phone number") },
-                                    placeholder = { Text("+1 555 123 4567") },
+                                    placeholder = { Text("+63 9XX XXX XXXX") },
                                     singleLine = true,
                                     shape = RoundedCornerShape(12.dp),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
