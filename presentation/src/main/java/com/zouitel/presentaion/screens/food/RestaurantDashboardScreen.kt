@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -135,7 +138,7 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
     private fun RestaurantSalesTile(label: String, amount: Double, modifier: Modifier = Modifier) {
         Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("₱${"%.2f".format(amount)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text("₱${formatPhpPesos(amount)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text("Delivered orders", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
             }
@@ -198,7 +201,7 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
 
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = "₱${"%.2f".format(meal.basePrice)}",
+                        text = "₱${formatPhpPesos(meal.basePrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )

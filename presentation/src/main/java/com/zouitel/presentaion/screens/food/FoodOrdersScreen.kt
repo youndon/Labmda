@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -129,15 +132,15 @@ class FoodOrdersScreen : Screen {
                     Text(text = "Payment status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall)
                     if (order.cashCollectionStatus == "COLLECTED") {
                         Text(
-                            text = "Cash collected by ${order.cashCollectedByRole.lowercase()}: ₱${"%.2f".format(order.cashCollectedAmountCentavos / 100.0)}",
+                            text = "Cash collected by ${order.cashCollectedByRole.lowercase()}: ₱${formatPhpCentavos(order.cashCollectedAmountCentavos)}",
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
-                            text = "Merchant payable: ₱${"%.2f".format(order.cashMerchantOwedCentavos / 100.0)} · Platform: ₱${"%.2f".format(order.cashPlatformOwedCentavos / 100.0)}",
+                            text = "Merchant payable: ₱${formatPhpCentavos(order.cashMerchantOwedCentavos)} · Platform: ₱${formatPhpCentavos(order.cashPlatformOwedCentavos)}",
                             style = MaterialTheme.typography.bodySmall
                         )
                         Text(
-                            text = "Remitted: ₱${"%.2f".format(order.cashRemittedCentavos / 100.0)} · Remaining due: ₱${"%.2f".format(order.cashOutstandingRemittanceCentavos / 100.0)}",
+                            text = "Remitted: ₱${formatPhpCentavos(order.cashRemittedCentavos)} · Remaining due: ₱${formatPhpCentavos(order.cashOutstandingRemittanceCentavos)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.tertiary
                         )
@@ -176,7 +179,7 @@ class FoodOrdersScreen : Screen {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("₱${formatPhpPesos(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -191,7 +194,7 @@ class FoodOrdersScreen : Screen {
                 ) {
                     Text("Total Amount", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "₱${"%.2f".format(order.totalPrice)}",
+                        "₱${formatPhpPesos(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )

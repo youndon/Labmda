@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -197,7 +200,7 @@ class FoodActivitiesScreen : Screen {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("₱${formatPhpPesos(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -212,7 +215,7 @@ class FoodActivitiesScreen : Screen {
                 ) {
                     Text("Total Amount", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "₱${"%.2f".format(order.totalPrice)}",
+                        "₱${formatPhpPesos(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )

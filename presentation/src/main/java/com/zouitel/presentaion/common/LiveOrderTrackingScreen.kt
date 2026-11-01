@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.common
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -366,7 +369,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodyMedium)
-                            Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${formatPhpPesos(item.totalPrice)}", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
 
@@ -377,7 +380,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium)
-                            Text("₱${"%.2f".format(currentOrder.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${formatPhpPesos(currentOrder.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
@@ -386,7 +389,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                         ) {
                             Text("Total", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "₱${"%.2f".format(currentOrder.totalPrice)}",
+                                "₱${formatPhpPesos(currentOrder.totalPrice)}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )

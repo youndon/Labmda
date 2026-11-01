@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -144,7 +147,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "₱${"%.2f".format(subtotal)}",
+                                    text = "₱${formatPhpPesos(subtotal)}",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -224,7 +227,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                         )
 
                                         Text(
-                                            text = "₱${"%.2f".format(product.price)}",
+                                            text = "₱${formatPhpPesos(product.price)}",
                                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                             maxLines = 1,
                                             color = MaterialTheme.colorScheme.primary
@@ -286,7 +289,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(text = item.productName, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
-                                        Text(text = "₱${"%.2f".format(item.price)} × ${item.quantity} = ₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(text = "₱${formatPhpPesos(item.price)} × ${item.quantity} = ₱${formatPhpPesos(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     IconButton(onClick = { cartItems.remove(item.productId) }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
@@ -337,7 +340,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Estimated item subtotal", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            Text("₱${formatPhpPesos(subtotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
                         Text(
                             "Final catalogue prices, route-based delivery charges and order total are calculated by Labmda before checkout.",

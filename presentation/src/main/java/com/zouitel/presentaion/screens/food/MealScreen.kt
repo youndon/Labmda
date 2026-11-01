@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,7 +68,7 @@ data class MealScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = "$${"%.2f".format(calculatedTotalPrice)}",
+                                text = "₱${formatPhpPesos(calculatedTotalPrice)}",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -123,7 +126,7 @@ data class MealScreen(
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(text = meal.name, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
                         Text(
-                            text = "$${"%.2f".format(meal.basePrice)}",
+                            text = "₱${formatPhpPesos(meal.basePrice)}",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
                         )

@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.delivery
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -484,7 +487,7 @@ class DeliveryDashboardScreen : Screen {
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            "+₱${"%.2f".format(order.deliveryFee)}",
+                            "+₱${formatPhpPesos(order.deliveryFee)}",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
@@ -554,7 +557,7 @@ class DeliveryDashboardScreen : Screen {
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(text = "${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                    Text(text = "₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(text = "₱${formatPhpPesos(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -572,12 +575,12 @@ class DeliveryDashboardScreen : Screen {
                 )
                 if (order.cashCollectionStatus == "COLLECTED") {
                     Text(
-                        "Cash received: ₱${"%.2f".format(order.cashCollectedAmountCentavos / 100.0)} · Merchant owed: ₱${"%.2f".format(order.cashMerchantOwedCentavos / 100.0)} · Platform: ₱${"%.2f".format(order.cashPlatformOwedCentavos / 100.0)}",
+                        "Cash received: ₱${formatPhpCentavos(order.cashCollectedAmountCentavos)} · Merchant owed: ₱${formatPhpCentavos(order.cashMerchantOwedCentavos)} · Platform: ₱${formatPhpCentavos(order.cashPlatformOwedCentavos)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "Your courier earnings: ₱${"%.2f".format(order.cashCollectorEarningsCentavos / 100.0)} · Remittance outstanding: ₱${"%.2f".format(order.cashOutstandingRemittanceCentavos / 100.0)}",
+                        "Your courier earnings: ₱${formatPhpCentavos(order.cashCollectorEarningsCentavos)} · Remittance outstanding: ₱${formatPhpCentavos(order.cashOutstandingRemittanceCentavos)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.tertiary
                     )
@@ -593,7 +596,7 @@ class DeliveryDashboardScreen : Screen {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        "₱${"%.2f".format(order.totalPrice)}",
+                        "₱${formatPhpPesos(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )

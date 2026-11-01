@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.admin
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,7 +112,7 @@ class Restaurants : Screen {
                         Text(text = restaurant.name, style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Delivery Fee: $${"%.2f".format(restaurant.deliveryFee)} • ⭐ ${restaurant.rating}",
+                            text = "Delivery Fee: ₱${formatPhpPesos(restaurant.deliveryFee)} • ⭐ ${restaurant.rating}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
