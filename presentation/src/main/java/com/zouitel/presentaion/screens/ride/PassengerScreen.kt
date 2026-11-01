@@ -59,11 +59,9 @@ import com.zouitel.presentaion.model.VehicleType
 import com.zouitel.presentaion.payments.PayButton
 import com.zouitel.presentaion.payments.PaymentEventEffect
 import com.zouitel.presentaion.payments.PaymentMethodSelector
-import com.zouitel.presentaion.payments.PaymentRepository
 import com.zouitel.presentaion.payments.PricingQuoteResult
 import com.zouitel.presentaion.payments.PaymentResultSheet
 import com.zouitel.presentaion.payments.PaymentScreenModel
-import org.koin.core.context.GlobalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
