@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.common.reverseGeocode
+import com.zouitel.presentaion.common.forwardGeocode
+
 import com.zouitel.presentaion.model.formatPhpPesos
 import com.zouitel.presentaion.model.formatPhpCentavos
 
@@ -39,8 +42,6 @@ import com.zouitel.presentaion.payments.PaymentResultSheet
 import com.zouitel.presentaion.payments.PaymentScreenModel
 import org.koin.core.context.GlobalContext
 import kotlinx.coroutines.launch
-import android.content.Context
-import android.location.Geocoder
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.Close
@@ -57,9 +58,6 @@ import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.util.Locale
 
 data class StoreDetailsScreen(val shop: Shop) : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
