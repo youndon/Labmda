@@ -9,6 +9,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.payments.PaymentCreationResult
+import com.zouitel.presentaion.payments.PricingQuoteResult
 import com.zouitel.presentaion.payments.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -82,6 +83,20 @@ class PassengerScreenModel(
             }
         }
     }
+
+    suspend fun quoteTrip(
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffLat: Double,
+        dropoffLng: Double,
+        serviceType: String
+    ): PricingQuoteResult = payments.quoteTrip(
+        pickupLat = pickupLat,
+        pickupLng = pickupLng,
+        dropoffLat = dropoffLat,
+        dropoffLng = dropoffLng,
+        serviceType = serviceType
+    )
 
     fun requestTrip(
         pickupAddress: String,
