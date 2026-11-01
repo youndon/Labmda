@@ -487,7 +487,7 @@ class RestaurantWorkplaceScreen : Screen {
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Text(
-                            text = "Delivery Fee: $${formatPhpPesos(restaurantInfo.deliveryFee)}",
+                            text = "Delivery Fee: ₱${formatPhpPesos(restaurantInfo.deliveryFee)}",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text(
