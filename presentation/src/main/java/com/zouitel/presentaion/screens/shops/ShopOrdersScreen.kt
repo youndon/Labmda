@@ -37,7 +37,7 @@ class ShopOrdersScreen() : Screen {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Store Incoming Demand Cards", fontWeight = FontWeight.Bold) },
+                    title = { Text("Shop orders", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -53,7 +53,7 @@ class ShopOrdersScreen() : Screen {
             } else if (orders.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(32.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        "No customer demand cards received yet.",
+                        "New customer orders will appear here when they come in.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -65,6 +65,49 @@ class ShopOrdersScreen() : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    "Your order desk",
+                                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Text(
+                                    "Review incoming orders, prepare items and follow each handoff.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OrderSummaryTile(
+                                    label = "New",
+                                    count = orders.count { it.status == OrderStatus.PLACED },
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.primaryContainer
+                                )
+                                OrderSummaryTile(
+                                    label = "In progress",
+                                    count = orders.count {
+                                        it.status == OrderStatus.ACCEPTED ||
+                                            it.status == OrderStatus.PREPARING ||
+                                            it.status == OrderStatus.OUT_FOR_DELIVERY
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.secondaryContainer
+                                )
+                                OrderSummaryTile(
+                                    label = "Delivered",
+                                    count = orders.count { it.status == OrderStatus.DELIVERED },
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.tertiaryContainer
+                                )
+                            }
+                        }
+                    }
                     items(orders, key = { it.id }) { order ->
                         ManagerOrderCard(
                             order = order,
@@ -72,6 +115,39 @@ class ShopOrdersScreen() : Screen {
                         )
                     }
                 }
+            }
+        }
+    }
+
+
+    @Composable
+    private fun OrderSummaryTile(
+        label: String,
+        count: Int,
+        modifier: Modifier = Modifier,
+        color: androidx.compose.ui.graphics.Color
+    ) {
+        Card(
+            modifier = modifier,
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = color),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    count.toString(),
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
             }
         }
     }
