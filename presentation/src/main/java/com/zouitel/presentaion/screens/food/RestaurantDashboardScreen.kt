@@ -75,12 +75,28 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                 ) {
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Restaurant overview", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(24.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text("Your restaurant at a glance", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Text("Manage incoming orders, monitor sales and keep your menu ready for customers.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f))
+                                    Text("${meals.size} menu items listed", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                }
+                            }
+                            Text("Order activity", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 RestaurantMetricTile("New", metrics.newOrders, Modifier.weight(1f))
                                 RestaurantMetricTile("Preparing", metrics.preparingOrders, Modifier.weight(1f))
                                 RestaurantMetricTile("On delivery", metrics.outForDeliveryOrders, Modifier.weight(1f))
                             }
+                            Text("Sales performance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 RestaurantSalesTile("Today · ${metrics.todayOrders} orders", metrics.todaySales, Modifier.weight(1f))
                                 RestaurantSalesTile("Last 7 days", metrics.weekSales, Modifier.weight(1f))
@@ -103,8 +119,23 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                                     }
                                 }
                             }
-                            Text("Menu · ${meals.size} items", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            if (meals.isEmpty()) Text("No meals yet. Tap + to add your first menu item.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("Menu catalogue", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text("${meals.size} listed menu items", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            if (meals.isEmpty()) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                                ) {
+                                    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("Your menu starts here", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text("Add your first meal to start building your restaurant catalogue.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
                         }
                     }
                     items(meals, key = { it.id }) { meal ->
@@ -153,9 +184,9 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             Row(
                 modifier = Modifier
