@@ -5,6 +5,6 @@ import org.koin.dsl.module
 
 val rideModule = module {
     factoryOf(::DriverWorkplaceScreenModel)
-    factoryOf(::DriverDashboardScreenModel)
-    factoryOf(::PassengerScreenModel)
+    factory { DriverDashboardScreenModel(get()) }
+    factory { PassengerScreenModel(get(), get()) }
 }
