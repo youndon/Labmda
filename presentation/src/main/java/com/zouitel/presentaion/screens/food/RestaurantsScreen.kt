@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.food
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,6 +53,7 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import coil3.compose.AsyncImage
+import com.zouitel.presentaion.common.AppTheme
 import com.zouitel.presentaion.common.MarketplaceAvailabilityBadge
 import com.zouitel.presentaion.common.MarketplaceAvailabilityFilters
 import com.zouitel.presentaion.common.MarketplaceEmptyState
@@ -125,18 +128,10 @@ class RestaurantsScreen : Screen {
             ) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                "Find your next favourite",
-                                style = MaterialTheme.typography.headlineSmall,
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                            Text(
-                                "Explore local kitchens and order your meal.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        FoodDiscoveryHero(
+                            openCount = openCount,
+                            restaurantCount = restaurants.size
+                        )
 
                         MarketplaceSearchField(
                             query = query,
@@ -206,6 +201,76 @@ class RestaurantsScreen : Screen {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+
+@Composable
+private fun FoodDiscoveryHero(
+    openCount: Int,
+    restaurantCount: Int
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AppTheme.extras.gradient, RoundedCornerShape(28.dp))
+            .padding(20.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "Your next great meal",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White
+            )
+            Text(
+                text = "Discover local restaurants and order the dishes you love.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.9f)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    color = Color.White.copy(alpha = 0.18f),
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        text = "$openCount open now",
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+                Surface(
+                    color = Color.White.copy(alpha = 0.18f),
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        text = "$restaurantCount places",
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+        Surface(
+            modifier = Modifier.size(58.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White.copy(alpha = 0.16f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Outlined.Restaurant,
+                    contentDescription = null,
+                    modifier = Modifier.size(30.dp),
+                    tint = Color.White
+                )
             }
         }
     }
