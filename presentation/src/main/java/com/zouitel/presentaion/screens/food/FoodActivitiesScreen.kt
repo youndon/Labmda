@@ -42,7 +42,7 @@ class FoodActivitiesScreen : Screen {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("My Food Orders", fontWeight = FontWeight.Bold) },
+                    title = { Text("Food orders", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -86,9 +86,9 @@ class FoodActivitiesScreen : Screen {
                                 modifier = Modifier.size(36.dp)
                             )
                         }
-                        Text("No Food Orders Yet", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                        Text("Your food orders will appear here", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                         Text(
-                            "Explore restaurants and place your first food order to track it here.",
+                            "Discover a restaurant, place an order and follow every update from preparation to delivery.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -103,7 +103,27 @@ class FoodActivitiesScreen : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    item { refundNotice?.let { Text(it, color = MaterialTheme.colorScheme.primary) } }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Your meals, from kitchen to doorstep", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                Text("Keep track of restaurant preparation, courier progress and payment updates.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FoodActivitySummaryTile("Active", orders.count { it.status == OrderStatus.AWAITING_PAYMENT || it.status == OrderStatus.PLACED || it.status == OrderStatus.ACCEPTED || it.status == OrderStatus.PREPARING || it.status == OrderStatus.OUT_FOR_DELIVERY }, Modifier.weight(1f), MaterialTheme.colorScheme.primaryContainer)
+                                FoodActivitySummaryTile("Delivered", orders.count { it.status == OrderStatus.DELIVERED }, Modifier.weight(1f), MaterialTheme.colorScheme.secondaryContainer)
+                                FoodActivitySummaryTile("Cancelled", orders.count { it.status == OrderStatus.CANCELLED }, Modifier.weight(1f), MaterialTheme.colorScheme.surfaceContainerHigh)
+                            }
+                        }
+                    }
+                    item {
+                        refundNotice?.let {
+                            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(14.dp), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+                                Text(it, modifier = Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    }
+                    item { Text("Recent orders", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
                     items(orders, key = { it.id }) { order ->
                         ClientOrderHistoryCard(
                             order = order,
@@ -113,6 +133,21 @@ class FoodActivitiesScreen : Screen {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun FoodActivitySummaryTile(
+        label: String,
+        count: Int,
+        modifier: Modifier = Modifier,
+        containerColor: androidx.compose.ui.graphics.Color
+    ) {
+        Card(modifier = modifier, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = containerColor), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(count.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }
     }
@@ -131,9 +166,9 @@ class FoodActivitiesScreen : Screen {
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
@@ -160,20 +195,28 @@ class FoodActivitiesScreen : Screen {
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                // Delivery Info
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = "Delivery Details",
-                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(text = "Pickup: ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodySmall)
-                    Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodySmall)
-                    Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodySmall)
-                    Text(text = "Payment status: ${order.paymentStatus.replace('_', ' ')}", style = MaterialTheme.typography.bodySmall)
-
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Delivery details", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Pickup", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(order.pickupLocation.ifBlank { order.sourceName }, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Drop-off", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(order.dropoffLocation.ifBlank { "Not provided" }, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Payment method", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(order.paymentMethod.ifBlank { "Cash on Delivery" }, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                        }
+                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Payment status", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(order.paymentStatus.replace('_', ' '), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                     if (order.deliveryName.isNotBlank()) {
-                        Text(text = "Courier: ${order.deliveryName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                        Text("Courier · ${order.deliveryName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                     }
                 }
 
