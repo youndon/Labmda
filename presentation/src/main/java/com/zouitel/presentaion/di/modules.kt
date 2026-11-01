@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.di
 
+import com.zouitel.presentaion.data.repository.OrdersRepository
+import com.zouitel.presentaion.data.repository.TripsRepository
+import com.zouitel.presentaion.data.repository.UsersRepository
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.screens.account.AccountPreferencesStore
 import com.zouitel.presentaion.screens.account.AccountPreferencesScreenModel
@@ -22,11 +25,13 @@ val presentationModule = module {
 
     single { AccountPreferencesStore(androidContext()) }
     factoryOf(::AccountPreferencesScreenModel)
-    factory {
-        AccountScreenModel(androidContext(), get(), get())
-    }
+    factory { AccountScreenModel(androidContext(), get(), get()) }
     factoryOf(::LogInScreenModel)
 
     single { Firebase.auth }
     single { Firebase.database.reference() }
+
+    single { OrdersRepository(get()) }
+    single { TripsRepository(get()) }
+    single { UsersRepository(get()) }
 }
