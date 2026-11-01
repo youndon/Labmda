@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -144,7 +147,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                 ) {
                                     Text(text = product.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                     Text(
-                                        text = "₱${"%.2f".format(product.price)}",
+                                        text = "₱${formatPhpPesos(product.price)}",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -247,7 +250,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
     private fun SalesTile(label: String, amount: Double, modifier: Modifier = Modifier) {
         Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("₱${"%.2f".format(amount)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text("₱${formatPhpPesos(amount)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 Text("Delivered orders", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f))
             }
