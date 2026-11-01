@@ -38,7 +38,7 @@ class FoodOrdersScreen : Screen {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Manager Orders Dashboard", fontWeight = FontWeight.Bold) },
+                    title = { Text("Food orders", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -63,7 +63,7 @@ class FoodOrdersScreen : Screen {
                         .padding(paddingValues),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("No client orders received yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(28.dp)) { Text("No food orders yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("New customer orders will appear here when they are placed.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
                 }
             } else {
                 LazyColumn(
@@ -73,6 +73,20 @@ class FoodOrdersScreen : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Your order desk", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                Text("Review incoming orders, prepare meals and hand them over to your courier.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FoodOrderMetric("New", orders.count { it.status == OrderStatus.PLACED }, Modifier.weight(1f), MaterialTheme.colorScheme.primaryContainer)
+                                FoodOrderMetric("Preparing", orders.count { it.status == OrderStatus.ACCEPTED || it.status == OrderStatus.PREPARING }, Modifier.weight(1f), MaterialTheme.colorScheme.secondaryContainer)
+                                FoodOrderMetric("On the way", orders.count { it.status == OrderStatus.OUT_FOR_DELIVERY }, Modifier.weight(1f), MaterialTheme.colorScheme.surfaceContainerHigh)
+                            }
+                        }
+                    }
+                    item { Text("Incoming orders", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
                     items(orders, key = { it.id }) { order ->
                         ClientOrderCard(
                             order = order,
@@ -80,6 +94,16 @@ class FoodOrdersScreen : Screen {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun FoodOrderMetric(label: String, count: Int, modifier: Modifier, containerColor: androidx.compose.ui.graphics.Color) {
+        Card(modifier = modifier, shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = containerColor), elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)) {
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(count.toString(), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }
     }
@@ -96,9 +120,9 @@ class FoodOrdersScreen : Screen {
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(
@@ -121,11 +145,11 @@ class FoodOrdersScreen : Screen {
                 // Client & Delivery Info
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = "Client & Delivery Info",
+                        text = "Customer & delivery",
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
-                    Text(text = "Client ID: ${order.clientId.ifBlank { "Unavailable" }}", style = MaterialTheme.typography.bodySmall)
+                    Text(text = "Customer reference · ${order.clientId.takeLast(6).ifBlank { "Unavailable" }.uppercase()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(text = "Pickup: ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall)
