@@ -7,19 +7,6 @@ import kotlinx.serialization.Serializable
  * These records describe financial state; trusted backend code owns their writes.
  */
 @Serializable
-enum class PaymentStatus {
-    CREATED,
-    PENDING,
-    PROCESSING,
-    SUCCEEDED,
-    FAILED,
-    CANCELLED,
-    EXPIRED,
-    PARTIALLY_REFUNDED,
-    REFUNDED
-}
-
-@Serializable
 enum class PaymentEntityType { ORDER, TRIP, DELIVERY }
 
 @Serializable
@@ -42,9 +29,6 @@ enum class LedgerEntryType {
 enum class LedgerDirection { DEBIT, CREDIT }
 
 @Serializable
-enum class PayoutStatus { REQUESTED, PENDING, PROCESSING, PAID, FAILED, CANCELLED }
-
-@Serializable
 enum class RefundStatus { REQUESTED, PENDING, SUCCEEDED, FAILED, CANCELLED }
 
 @Serializable
@@ -65,7 +49,7 @@ data class Payment(
     val deliveryId: String? = null,
     val payerId: String = "",
     val paymentMethod: PaymentMethod = PaymentMethod.GCASH,
-    val status: PaymentStatus = PaymentStatus.CREATED,
+    val status: PaymentStatus = PaymentStatus.PENDING,
     val amountCentavos: Long = 0L,
     val refundedCentavos: Long = 0L,
     val currency: String = "PHP",
@@ -152,7 +136,7 @@ data class Payout(
     val beneficiaryId: String = "",
     val amountCentavos: Long = 0L,
     val currency: String = "PHP",
-    val status: PayoutStatus = PayoutStatus.REQUESTED,
+    val status: PayoutStatus = PayoutStatus.PENDING,
     val destinationAccountId: String? = null,
     val failureCode: String? = null,
     val requestedAtTimestamp: Long = 0L,
