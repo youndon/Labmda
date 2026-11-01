@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.model.formatPhpPesos
+import com.zouitel.presentaion.model.formatPhpCentavos
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -1041,7 +1044,7 @@ private fun formatDriverEta(duration: String): String {
     return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
 }
 
-private fun formatDriverPhp(amount: Double): String = "₱${String.format(Locale.US, "%.2f", amount)}"
+private fun formatDriverPhp(amount: Double): String = "₱${formatPhpPesos(amount)}"
 
 private fun formatDriverVehicle(value: String): String =
     value.takeIf { it.isNotBlank() && !it.equals("RIDE", true) }
