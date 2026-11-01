@@ -93,28 +93,99 @@ class PrivacySecurityScreen : Screen {
         val navigator = LocalNavigator.currentOrThrow
         val context = LocalContext.current
         Scaffold(topBar = { SupportTopBar("Privacy & Security", navigator::pop) }) { padding ->
-            LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
                 item {
-                    PreferenceCard {
-                        FaqItem("Protect your account", "Use a strong, unique password and never share sign-in codes or payment credentials.")
-                        HorizontalDivider()
-                        FaqItem("App permissions", "Review location, camera, photos and notification permissions in Android settings. Grant permissions only when you use the related feature.")
-                        HorizontalDivider()
-                        FaqItem("Sign-in security", "Sign out when using a shared device. If your account may be compromised, secure the email account associated with your Labmda sign-in.")
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "Your account, your control",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                "A few simple steps can help keep your Labmda account and personal information safer.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(50),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                            ) {
+                                Text(
+                                    "Security checklist",
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
                     }
                 }
                 item {
-                    Button(onClick = {
-                        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
-                        context.startActivity(intent)
-                    }, modifier = Modifier.fillMaxWidth()) { Text("Open Android app permissions") }
+                    Text("Protect your account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    PreferenceCard {
+                        FaqItem("Use a strong password", "Choose a unique password that you do not use for other apps or websites.")
+                        HorizontalDivider()
+                        FaqItem("Keep sign-in codes private", "Never share one-time codes, passwords or payment credentials with anyone.")
+                        HorizontalDivider()
+                        FaqItem("Secure your email account", "Your email may be used to recover access. Keep it secure and review unexpected sign-in messages.")
+                    }
                 }
-                item { Text("Account deletion and formal privacy-policy requests are not available from this screen yet. Contact support for assistance.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                item {
+                    Text("Device permissions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    PreferenceCard {
+                        FaqItem(
+                            "Review access when needed",
+                            "Check location, camera, photos and notification access in Android settings. Allow only the permissions needed for features you use."
+                        )
+                        Button(
+                            onClick = {
+                                val intent = Intent(
+                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", context.packageName, null)
+                                )
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp)
+                        ) {
+                            Text("Open Android app settings")
+                        }
+                    }
+                }
+                item {
+                    Text("Privacy information", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    PreferenceCard {
+                        FaqItem(
+                            "Using a shared device",
+                            "Sign out when you finish using Labmda on a device that other people can access."
+                        )
+                        HorizontalDivider()
+                        FaqItem(
+                            "Need account or privacy help?",
+                            "Account deletion and formal privacy-policy requests are not available from this screen yet. Contact Labmda support for assistance."
+                        )
+                    }
+                }
+                item {
+                    Text(
+                        "Opening Android settings lets you review the permissions granted to this app. It does not change your account credentials or submit a privacy request.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }
 }
-
 class AboutAppScreen : Screen {
     @Composable
     override fun Content() {
