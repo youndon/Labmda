@@ -7,6 +7,7 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
+import com.zouitel.presentaion.model.OrderType
 import com.zouitel.presentaion.payments.PaymentRepository
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
