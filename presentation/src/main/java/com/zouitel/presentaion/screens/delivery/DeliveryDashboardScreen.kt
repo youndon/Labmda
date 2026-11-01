@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.delivery
 
+import com.zouitel.presentaion.common.decodeRoutePolyline
+
 import com.zouitel.presentaion.model.formatPhpPesos
 import com.zouitel.presentaion.model.formatPhpCentavos
 
@@ -57,9 +59,7 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class DeliveryDashboardScreen : Screen {
     @SuppressLint("MissingPermission")
@@ -698,35 +698,6 @@ private fun formatRouteEta(duration: String): String {
     val seconds = duration.removeSuffix("s").toDoubleOrNull() ?: return duration
     val minutes = ((seconds + 59.0) / 60.0).toInt().coerceAtLeast(1)
     return if (minutes >= 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
-}
-
-private fun decodeRoutePolyline(encoded: String): List<LatLng> {
-    if (encoded.isBlank()) return emptyList()
-    val points = ArrayList<LatLng>()
-    var index = 0
-    var latitude = 0
-    var longitude = 0
-    while (index < encoded.length) {
-        var result = 0
-        var shift = 0
-        var value: Int
-        do {
-            value = encoded[index++].code - 63
-            result = result or ((value and 0x1f) shl shift)
-            shift += 5
-        } while (value >= 0x20 && index < encoded.length)
-        latitude += if ((result and 1) != 0) (result shr 1).inv() else result shr 1
-        result = 0
-        shift = 0
-        do {
-            value = encoded[index++].code - 63
-            result = result or ((value and 0x1f) shl shift)
-            shift += 5
-        } while (value >= 0x20 && index < encoded.length)
-        longitude += if ((result and 1) != 0) (result shr 1).inv() else result shr 1
-        points += LatLng(latitude / 1e5, longitude / 1e5)
-    }
-    return points
 }
 
 private fun distanceKm(a: LatLng, b: LatLng): Double {
