@@ -36,6 +36,14 @@
 
 The caller must load payment and allocation records from Realtime Database inside a trusted Cloud Function, verify the authoritative success or cash-collection state, then pass those records to this adapter and `postFinancialOperation`. Client-supplied payment or allocation amounts must never be trusted.
 
+## Payment receipt adapter
+
+`functions/src/finance/payment-ledger.ts` maps a succeeded, server-loaded `Payment` and its persisted `PaymentAllocation` records into one balanced receipt operation. It checks transaction references, PHP currency, allocation identities and statuses, and requires allocation totals to equal the payment amount. Pending allocations credit pending balances; ready allocations credit available balances.
+
+For cash payments, the trusted caller must also supply the verified cash collector ID. The platform allocation is recorded in that collector's `CASH_OWED` balance. A confirmed remittance can then move the owed amount into platform revenue. The ledger rejects a remittance that would make the collector's cash-owed balance negative. Non-cash collections use a generic payment-provider clearing account; no particular bank or gateway is assumed.
+
+The adapter does not create payment sessions, verify external transactions, receive webhooks, or execute payouts. A trusted Cloud Function must load and verify the persisted payment, allocations, and (for cash) collection record before calling the adapter and `postFinancialOperation`. Never use client-supplied amounts as ledger inputs.
+
 ## Integration boundary
 
 This module provides the validated journal, atomic balance projection, idempotency, and reconciliation primitives. It deliberately does not invent order/trip field names or trust client-supplied financial amounts. Payment webhooks, order/trip completion handlers, cash handover confirmation, payout execution, and admin authorization must call this module from trusted Cloud Functions after loading authoritative server-side records.
