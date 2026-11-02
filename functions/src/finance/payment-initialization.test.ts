@@ -44,6 +44,7 @@ const rideQuote = {
 describe("trusted payment initialization validation", () => {
   it("accepts an order only when ownership, item quantities, route and server quote totals match", () => {
     expect(() => validateOrderMatches(order, orderQuote, "customer_1")).not.toThrow();
+    expect(() => validateOrderMatches({ ...order, status: "PREPARING" }, orderQuote, "customer_1")).not.toThrow();
     expect(() => validateOrderMatches({ ...order, totalPrice: 26 }, orderQuote, "customer_1")).toThrow(/totals do not match/);
     expect(() => validateOrderMatches({ ...order, items: [{ id: "meal_1", quantity: 3 }] }, orderQuote, "customer_1")).toThrow(/items or quantities/);
     expect(() => validateOrderMatches(order, orderQuote, "another_user")).toThrow(/ownership/);
@@ -55,6 +56,7 @@ describe("trusted payment initialization validation", () => {
       pickupLat: 11, pickupLng: 21, dropoffLat: 11.1, dropoffLng: 21.1, fare: 30,
     };
     expect(() => validateRideMatches(trip, rideQuote, "passenger_1")).not.toThrow();
+    expect(() => validateRideMatches({ ...trip, status: "IN_PROGRESS" }, rideQuote, "passenger_1")).not.toThrow();
     expect(() => validateRideMatches({ ...trip, status: "REQUESTED" }, rideQuote, "passenger_1")).toThrow(/accepted driver/);
     expect(() => validateRideMatches({ ...trip, fare: 31 }, rideQuote, "passenger_1")).toThrow(/fare does not match/);
   });
