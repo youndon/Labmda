@@ -149,9 +149,12 @@ export const resolveAdminFinancialDiscrepancy = onCall({ enforceAppCheck: true }
     createdAt: Date.now(), createdBy: uid };
   const requestResult = await requestRef.transaction((current) => current ?? requested, undefined, false);
   const savedRequest = requestResult.snapshot.val() as typeof requested;
+  const samePosting = (saved: LedgerPosting, current: LedgerPosting) =>
+    saved.accountId === current.accountId && saved.bucket === current.bucket
+      && saved.partyType === current.partyType && saved.partyId === current.partyId;
   if (!savedRequest || savedRequest.amountMinor !== amountMinor || savedRequest.note !== note
-    || JSON.stringify(savedRequest.source) !== JSON.stringify(sourcePosting)
-    || JSON.stringify(savedRequest.destination) !== JSON.stringify(destinationPosting)) {
+    || !samePosting(savedRequest.source, sourcePosting)
+    || !samePosting(savedRequest.destination, destinationPosting)) {
     throw new HttpsError("already-exists", "This resolution reference was already used with different adjustment details.");
   }
   const operation = createFinancialTransfer({
@@ -254,7 +257,9 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   if (!claim.committed) {
     const current = claim.snapshot.val() as RefundCase | null;
     if (current?.status === "COMPLETED") return { refundId, status: "COMPLETED", duplicate: true };
-    throw new HttpsError("failed-precondition", "Only an approved refund can be completed.");
+    if (current?.status !== "PROCESSING" || current.providerReference !== providerReference) {
+      throw new HttpsError("failed-precondition", "Only an approved refund can be completed.");
+    }
   }
   const refund = claim.snapshot.val() as RefundCase;
   const paymentSnapshot = await db().ref(`payments/${refund.paymentId}`).get();
