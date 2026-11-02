@@ -493,10 +493,10 @@ private fun formatPhp(minor: Long): String {
 private fun transactionMatchesFilter(transaction: FinancialTransaction, filter: String): Boolean {
     val event = transaction.eventType.uppercase()
     return when (filter) {
-        "EARNINGS" -> event.contains("EARNING") || event.contains("COMMISSION")
+        "EARNINGS" -> event.contains("EARNING") || event.contains("COMMISSION") || event == "CUSTOMER_PAYMENT"
         "PAYOUTS" -> event.contains("PAYOUT")
         "CASH" -> event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE")
-        "OTHER" -> !(event.contains("EARNING") || event.contains("COMMISSION") || event.contains("PAYOUT") || event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE"))
+        "OTHER" -> !(event.contains("EARNING") || event.contains("COMMISSION") || event == "CUSTOMER_PAYMENT" || event.contains("PAYOUT") || event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE"))
         else -> true
     }
 }
