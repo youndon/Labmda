@@ -304,7 +304,7 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
   const data = call.data as { payoutId?: unknown; transferReference?: unknown; note?: unknown };
   const payoutId = String(data.payoutId ?? "");
   const transferReference = typeof data.transferReference === "string" ? data.transferReference.trim() : "";
-  if (!transferReference || transferReference.length > 120) throw new HttpsError("invalid-argument", "Enter the GCash or BDO transfer reference.");
+  if (transferReference.length > 120) throw new HttpsError("invalid-argument", "The transfer reference is too long.");
   const snapshot = await db().ref(`payoutRequests/${payoutId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
