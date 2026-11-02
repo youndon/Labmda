@@ -149,46 +149,27 @@ class DeliveryDashboardScreenModel : ScreenModel {
         val uid = currentUid ?: return
 
         screenModelScope.launch(Dispatchers.IO) {
-            val existing = runCatching {
-                db.child("orders").child(order.id).child("deliveryId")
-                    .valueEvents.first().value<String>()
-            }.getOrDefault("")
-            if (existing.isNotBlank() && existing != uid) return@launch
-
-            val profileSnapshot = db.child("users").child(uid).valueEvents.first()
-            val name = runCatching { profileSnapshot.child("fullName").value<String>() }
-                .getOrElse { runCatching { profileSnapshot.child("name").value<String>() }.getOrDefault("") }
-            val phone = runCatching { profileSnapshot.child("phoneNumber").value<String>() }
-                .getOrElse { runCatching { profileSnapshot.child("phone").value<String>() }.getOrDefault("") }
-
-            db.child("orders").child(order.id).updateChildren(
-                mapOf(
-                    "deliveryId" to uid,
-                    "deliveryName" to name.ifBlank { "Delivery" },
-                    "deliveryPhone" to phone
-                )
+            com.zouitel.presentaion.screens.trustedTransactionCall(
+                "claimOrderDelivery",
+                mapOf("orderId" to order.id)
             )
         }
     }
 
     fun rejectCourierTask(order: Order) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(order.id).updateChildren(
-                mapOf(
-                    "deliveryId" to "",
-                    "deliveryName" to "",
-                    "deliveryPhone" to ""
-                )
+            com.zouitel.presentaion.screens.trustedTransactionCall(
+                "releaseOrderDelivery",
+                mapOf("orderId" to order.id)
             )
         }
     }
 
     fun markCourierOrderDelivered(order: Order) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(order.id).updateChildren(
-                mapOf(
-                    "status" to OrderStatus.DELIVERED.name
-                )
+            com.zouitel.presentaion.screens.trustedTransactionCall(
+                "completeOrderDelivery",
+                mapOf("orderId" to order.id)
             )
         }
     }
