@@ -44,7 +44,8 @@ export function validatePaymentConfiguration(value: unknown): PaymentConfigurati
     || new Set(value.enabledMethods).size !== value.enabledMethods.length) {
     throw new Error("At least one unique supported payment method (GCASH or CASH) must be enabled.");
   }
-  if (!isRecord(value.services) || PAYMENT_SERVICES.some((service) => typeof value.services[service] !== "boolean")) {
+  const rawServices = value.services;
+  if (!isRecord(rawServices) || PAYMENT_SERVICES.some((service) => typeof rawServices[service] !== "boolean")) {
     throw new Error("FOOD, SHOP, DELIVERY and RIDE must each have an explicit enabled state.");
   }
   if (value.checkoutMode !== "MANUAL_LINK" || value.payoutMode !== "MANUAL") {
@@ -61,10 +62,10 @@ export function validatePaymentConfiguration(value: unknown): PaymentConfigurati
     currency: "PHP",
     enabledMethods: [...value.enabledMethods] as PaymentMethod[],
     services: {
-      FOOD: value.services.FOOD as boolean,
-      SHOP: value.services.SHOP as boolean,
-      DELIVERY: value.services.DELIVERY as boolean,
-      RIDE: value.services.RIDE as boolean,
+      FOOD: rawServices.FOOD as boolean,
+      SHOP: rawServices.SHOP as boolean,
+      DELIVERY: rawServices.DELIVERY as boolean,
+      RIDE: rawServices.RIDE as boolean,
     },
     checkoutMode: "MANUAL_LINK",
     payoutMode: "MANUAL",
@@ -134,11 +135,12 @@ export const updateAdminPaymentConfiguration = onCall({ enforceAppCheck: true },
 
   const services = { ...current.services };
   if (data.services !== undefined) {
-    if (!isRecord(data.services) || Object.entries(data.services).some(([key, value]) =>
+    const requestedServices = data.services;
+    if (!isRecord(requestedServices) || Object.entries(requestedServices).some(([key, value]) =>
       !PAYMENT_SERVICES.includes(key as PaymentService) || typeof value !== "boolean")) {
       throw new HttpsError("invalid-argument", "Service settings must contain boolean values for FOOD, SHOP, DELIVERY or RIDE.");
     }
-    Object.assign(services, data.services);
+    Object.assign(services, requestedServices);
   }
 
   const configRef = getDatabase().ref(PAYMENT_CONFIG_PATH);
