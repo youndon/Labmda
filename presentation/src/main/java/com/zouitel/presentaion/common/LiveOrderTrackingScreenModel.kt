@@ -90,7 +90,7 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
 
     fun cancelOrder() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            com.zouitel.presentaion.screens.trustedTransactionCall("cancelCustomerOrder", mapOf("orderId" to orderId))
         }
     }
 }
