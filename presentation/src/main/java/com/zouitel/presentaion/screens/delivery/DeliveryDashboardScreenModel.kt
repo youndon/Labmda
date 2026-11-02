@@ -114,6 +114,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
                             createdAtTimestamp = createdAt,
                             paymentMethod = paymentMethod,
                             paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
+                            paymentId = runCatching { child.child("paymentId").value<String>() }.getOrDefault(""),
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
                             deliveryPhone = deliveryPhone,
@@ -166,6 +167,17 @@ class DeliveryDashboardScreenModel : ScreenModel {
             com.zouitel.presentaion.screens.trustedTransactionCall(
                 "releaseOrderDelivery",
                 mapOf("orderId" to order.id)
+            )
+        }
+    }
+
+    fun confirmCashReceived(order: Order) {
+        val paymentId = order.paymentId
+        if (paymentId.isBlank()) return
+        screenModelScope.launch(Dispatchers.IO) {
+            com.zouitel.presentaion.screens.trustedTransactionCall(
+                "confirmCashCollection",
+                mapOf("paymentId" to paymentId)
             )
         }
     }
