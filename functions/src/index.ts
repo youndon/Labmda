@@ -156,6 +156,15 @@ export const quoteDelivery = onCall({ secrets: [mapsApiKey], enforceAppCheck: tr
   return saveQuote(uid, "DELIVERY", config, data, breakdown, { route, paymentMethod: method });
 });
 
+export {
+  transitionOrderStatus,
+  claimOrderDelivery,
+  releaseOrderDelivery,
+  completeOrderDelivery,
+  claimRide,
+  transitionTripStatus,
+  cancelPassengerTrip,
+} from "./operations/transaction-operations.js";
 
 // Phase 04 — authenticated cash collection, settlement, remittance and reconciliation.
 export {
