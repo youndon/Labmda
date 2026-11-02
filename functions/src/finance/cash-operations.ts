@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { recordAdminFinancialAudit } from "./admin-financial.js";
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 import { commitCashCollection } from "./cash-collection.js";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
@@ -142,10 +143,10 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
     destination: { accountId: "platform_revenue", bucket: "AVAILABLE", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
   });
   const posted = await postFinancialOperation(db(), operation);
-  await db().ref(`cashRemittances/${remittanceId}`).set({
-    id: remittanceId, collectorId, amountMinor, currency: "PHP", status: "CONFIRMED",
-    confirmedBy: call.auth!.uid, confirmedAt: Date.now(), ledgerOperationId: posted.operationId,
-  });
+  const remittance = { id: remittanceId, collectorId, amountMinor, currency: "PHP", status: "CONFIRMED",
+    confirmedBy: call.auth!.uid, confirmedAt: Date.now(), ledgerOperationId: posted.operationId };
+  await db().ref(`cashRemittances/${remittanceId}`).set(remittance);
+  await recordAdminFinancialAudit({ uid: call.auth!.uid, action: "CASH_REMITTANCE_CONFIRMED", targetType: "CASH_REMITTANCE", targetId: remittanceId, after: remittance });
   return { remittanceId, ...posted };
 });
 
@@ -204,5 +205,6 @@ export const reconcileCashPayments = onCall({ enforceAppCheck: true }, async (ca
     balanced: ledger.balanced && cashBalanced,
   };
   await database.ref(`cashReconciliations/${reconciliationId}`).set(snapshot);
+  await recordAdminFinancialAudit({ uid: call.auth!.uid, action: "CASH_RECONCILIATION_RUN", targetType: "CASH_RECONCILIATION", targetId: reconciliationId, after: snapshot });
   return snapshot;
 });
