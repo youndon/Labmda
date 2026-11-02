@@ -144,13 +144,24 @@ export const resolveAdminFinancialDiscrepancy = onCall({ enforceAppCheck: true }
   if (sourcePosting.accountId === destinationPosting.accountId && sourcePosting.bucket === destinationPosting.bucket) {
     throw new HttpsError("invalid-argument", "Source and destination must be different ledger buckets.");
   }
+  const requestRef = db().ref(`financialAdjustmentRequests/${referenceId}`);
+  const requested = { referenceId, amountMinor, note, source: sourcePosting, destination: destinationPosting,
+    createdAt: Date.now(), createdBy: uid };
+  const requestResult = await requestRef.transaction((current) => current ?? requested, undefined, false);
+  const savedRequest = requestResult.snapshot.val() as typeof requested;
+  if (!savedRequest || savedRequest.amountMinor !== amountMinor || savedRequest.note !== note
+    || JSON.stringify(savedRequest.source) !== JSON.stringify(sourcePosting)
+    || JSON.stringify(savedRequest.destination) !== JSON.stringify(destinationPosting)) {
+    throw new HttpsError("already-exists", "This resolution reference was already used with different adjustment details.");
+  }
   const operation = createFinancialTransfer({
     operationId: `admin_adjustment_${referenceId}`, eventType: "ADJUSTMENT",
     referenceType: "MANUAL", referenceId, idempotencyKey: `admin_adjustment_${referenceId}`,
-    createdAt: Date.now(), description: note, amountMinor, source: sourcePosting, destination: destinationPosting,
+    createdAt: savedRequest.createdAt, description: savedRequest.note, amountMinor: savedRequest.amountMinor,
+    source: savedRequest.source, destination: savedRequest.destination,
   });
   const posted = await postFinancialOperation(db(), operation);
-  await recordAdminFinancialAudit({ uid, action: "FINANCIAL_DISCREPANCY_RESOLVED",
+  if (!posted.duplicate) await recordAdminFinancialAudit({ uid, action: "FINANCIAL_DISCREPANCY_RESOLVED",
     targetType: "LEDGER_OPERATION", targetId: posted.operationId, after: operation, note });
   return { ...posted, amountMinor, currency: "PHP" };
 });
