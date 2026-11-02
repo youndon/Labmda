@@ -124,6 +124,31 @@
     "bdoReconciliations": {
       ".read": false,
       ".write": false
+    },
+    "refundCases": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "createdAt",
+        "status",
+        "paymentId"
+      ]
+    },
+    "adminAuditLogs": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "createdAt",
+        "actorUid",
+        "action"
+      ]
+    },
+    "financeReconciliations": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "createdAt"
+      ]
     }
   }
 }
