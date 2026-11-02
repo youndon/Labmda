@@ -267,7 +267,7 @@ class AdminPricingScreen : Screen {
                                         val clean = value.trim()
                                         require(Regex("^\\d+(?:\\.\\d{1,2})?$").matches(clean)) { "$field must be a PHP amount with up to 2 decimals." }
                                         val parts = clean.split(".")
-                                        (parts[0].toLong() * 100L) + (parts.getOrNull(1).orEmpty().padEnd(2, '0').take(2).toLong())
+                                        return (parts[0].toLong() * 100L) + (parts.getOrNull(1).orEmpty().padEnd(2, '0').take(2).toLong())
                                     }
                                     fun bps(value: String, field: String): Int = value.trim().toInt().also {
                                         require(it in 0..10000) { "$field must be between 0 and 10,000 bps." }
