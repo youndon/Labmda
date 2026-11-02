@@ -1,5 +1,6 @@
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { recordAdminFinancialAudit } from "./admin-financial.js";
 
 type PricingConfig = {
   version: number;
@@ -116,5 +117,8 @@ export const updateAdminPricingConfig = onCall({ enforceAppCheck: true }, async 
     throw new HttpsError("aborted", "Pricing configuration was not saved. Please retry.");
   }
   const saved = result.snapshot.child("config").val() as PricingConfig;
+  const previous = result.snapshot.child(`configHistory/${expectedVersion}`).val();
+  await recordAdminFinancialAudit({ uid: call.auth!.uid, action: "PRICING_CONFIG_UPDATED",
+    targetType: "PRICING_CONFIG", targetId: String(saved.version), before: previous, after: saved });
   return { success: true, config: saved };
 });
