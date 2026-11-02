@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";\nimport type { Database } from "firebase-admin/database";
+import { describe, expect, it } from "vitest";
+import type { Database } from "firebase-admin/database";
 import {
   createFinancialTransfer,
+  postFinancialOperation,
   validateFinancialOperation,
 } from "./ledger.js";
 import { createCashRemittanceOperation, createPaymentReceiptOperation } from "./payment-ledger.js";
