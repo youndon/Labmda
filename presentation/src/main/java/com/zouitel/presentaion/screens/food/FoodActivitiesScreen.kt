@@ -229,7 +229,7 @@ class FoodActivitiesScreen : Screen {
                         Text("Track Status")
                     }
 
-                    if (order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT) {
+                    if ((order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT) && order.paymentStatus != "PAID") {
                         OutlinedButton(
                             onClick = onCancelOrder,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
