@@ -40,24 +40,26 @@ function validatePayoutProfile(data: Record<string, unknown>): {
   }
   return { method, accountName, accountNumber };
 }
-async function ownedMerchantIds(uid: string): Promise<string[]> {
+async function ownsMerchant(uid: string): Promise<boolean> {
   const roots = ["shops", "restaurants"];
   const snapshots = await Promise.all(roots.map((root) => db().ref(root).get()));
-  const ids = new Set<string>();
-  snapshots.forEach((snapshot) => snapshot.forEach((child) => {
-    if (child.child("ownerUid").val() === uid && child.key) ids.add(child.key);
-  }));
-  return [...ids];
+  return snapshots.some((snapshot) => {
+    let owned = false;
+    snapshot.forEach((child) => {
+      if (child.child("ownerUid").val() === uid) owned = true;
+    });
+    return owned;
+  });
 }
 async function providerAccounts(uid: string): Promise<Array<{
   accountId: string; providerKind: ProviderKind; providerId: string;
 }>> {
-  const [merchantIds, user] = await Promise.all([
-    ownedMerchantIds(uid),
+  const [isMerchant, user] = await Promise.all([
+    ownsMerchant(uid),
     db().ref(`users/${uid}`).get(),
   ]);
   const accounts: Array<{ accountId: string; providerKind: ProviderKind; providerId: string }> = [];
-  merchantIds.forEach((id) => accounts.push({ accountId: `wallet_merchant_${id}`, providerKind: "MERCHANT", providerId: id }));
+  if (isMerchant) accounts.push({ accountId: `wallet_merchant_${uid}`, providerKind: "MERCHANT", providerId: uid });
   if (user.child("driverService").exists()) {
     accounts.push({ accountId: `wallet_driver_${uid}`, providerKind: "DRIVER", providerId: uid });
   }
