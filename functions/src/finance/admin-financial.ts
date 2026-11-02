@@ -237,7 +237,7 @@ export const reviewAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
 
 /**
  * Complete an approved refund after the actual transfer is confirmed in the
- * Xendit/bank dashboard. The immutable journal reverses the original payment
+ * BDO Checkout/bank records. The immutable journal reverses the original payment
  * allocations proportionally; no provider API call is made here.
  */
 export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (call) => {
