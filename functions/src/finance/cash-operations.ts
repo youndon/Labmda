@@ -174,12 +174,44 @@ export const getMyCashOutstanding = onCall({ enforceAppCheck: true }, async (cal
 export const reconcileCashPayments = onCall({ enforceAppCheck: true }, async (call) => {
   requireUid(call.auth?.uid);
   requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
-  const result = await reconcileFinancialLedger(db());
+  const database = db();
+  const [ledger, accountsSnapshot, collectionsSnapshot, handoversSnapshot, remittancesSnapshot] = await Promise.all([
+    reconcileFinancialLedger(database),
+    database.ref("finance/accounts").get(),
+    database.ref("cashCollections").get(),
+    database.ref("cashHandovers").get(),
+    database.ref("cashRemittances").get(),
+  ]);
+  const accounts = (accountsSnapshot.val() ?? {}) as Record<string, { cashOwedMinor?: number; availableMinor?: number }>;
+  const collections = Object.values((collectionsSnapshot.val() ?? {}) as Record<string, CashCollection>);
+  const handovers = Object.values((handoversSnapshot.val() ?? {}) as Record<string, { status?: string; amountMinor?: number }>);
+  const remittances = Object.values((remittancesSnapshot.val() ?? {}) as Record<string, { status?: string; amountMinor?: number }>);
+  const cashCollectedMinor = collections.filter((item) => item.status === "COLLECTED").reduce((sum, item) => sum + item.amountMinor, 0);
+  const merchantSettledMinor = handovers.filter((item) => item.status === "CONFIRMED").reduce((sum, item) => sum + (item.amountMinor ?? 0), 0);
+  const platformRemittedMinor = remittances.filter((item) => item.status === "CONFIRMED").reduce((sum, item) => sum + (item.amountMinor ?? 0), 0);
+  const cashOutstandingMinor = Object.entries(accounts)
+    .filter(([accountId]) => accountId.startsWith("cash_owed_"))
+    .reduce((sum, [, account]) => sum + (account.cashOwedMinor ?? 0), 0);
+  const collectorRetainedMinor = Object.entries(accounts)
+    .filter(([accountId]) => accountId.startsWith("cash_retained_"))
+    .reduce((sum, [, account]) => sum + (account.availableMinor ?? 0), 0);
+  const accountedCashMinor = merchantSettledMinor + platformRemittedMinor + cashOutstandingMinor + collectorRetainedMinor;
+  const cashBalanced = cashCollectedMinor === accountedCashMinor;
   const reconciliationId = randomUUID();
   const snapshot = {
     id: reconciliationId, type: "CASH_LEDGER", currency: "PHP",
-    createdAt: Date.now(), createdBy: call.auth!.uid, ...result,
+    createdAt: Date.now(), createdBy: call.auth!.uid,
+    ledger, cash: {
+      cashCollectedMinor, merchantSettledMinor, platformRemittedMinor,
+      cashOutstandingMinor, collectorRetainedMinor, accountedCashMinor,
+      differenceMinor: cashCollectedMinor - accountedCashMinor,
+      balanced: cashBalanced,
+      collectionCount: collections.filter((item) => item.status === "COLLECTED").length,
+      merchantHandoverCount: handovers.filter((item) => item.status === "CONFIRMED").length,
+      platformRemittanceCount: remittances.filter((item) => item.status === "CONFIRMED").length,
+    },
+    balanced: ledger.balanced && cashBalanced,
   };
-  await db().ref(`cashReconciliations/${reconciliationId}`).set(snapshot);
+  await database.ref(`cashReconciliations/${reconciliationId}`).set(snapshot);
   return snapshot;
 });
