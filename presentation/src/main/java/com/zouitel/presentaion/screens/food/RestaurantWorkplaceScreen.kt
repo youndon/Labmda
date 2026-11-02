@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.screens.finance.ProviderEarningsScreen
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.UserMode
 import androidx.compose.material.icons.filled.LocationOn
@@ -173,7 +174,8 @@ class RestaurantWorkplaceScreen : Screen {
                                             navigator?.push(
                                                 RestaurantDashboardScreen(restaurantInfo.id.ifBlank { profile.uid })
                                             )
-                                        }
+                                        },
+                                        onOpenEarnings = { navigator?.push(ProviderEarningsScreen()) }
                                     )
                                     else -> {
                                         Text("Unknown Status")
@@ -418,13 +420,24 @@ class RestaurantWorkplaceScreen : Screen {
         mealCount: Int,
         isOnline: Boolean,
         onOnlineChanged: (Boolean) -> Unit,
-        onManageMenu: () -> Unit
+        onManageMenu: () -> Unit,
+        onOpenEarnings: () -> Unit
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
+            item {
+                OutlinedButton(
+                    onClick = onOpenEarnings,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("Earnings & Payouts", fontWeight = FontWeight.Bold)
+                }
+            }
+
             item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),

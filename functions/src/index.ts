@@ -170,3 +170,16 @@ export {
 export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payments/payment-sessions.js";
 export { createSimulatedGcashRefund } from "./payments/refunds.js";
 export { expireSimulatedGcashSessions } from "./payments/expiration.js";
+
+// Phase 06 — provider earnings, private payout profiles and admin-managed payouts.
+export {
+  saveMyPayoutProfile,
+  getMyPayoutProfile,
+  getMyEarnings,
+  requestMyPayout,
+  getMyPayoutHistory,
+  getPendingPayoutRequests,
+  approvePayoutRequest,
+  rejectPayoutRequest,
+  markPayoutAsPaid,
+} from "./finance/payouts.js";

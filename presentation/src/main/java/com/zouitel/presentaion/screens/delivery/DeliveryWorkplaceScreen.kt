@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.screens.finance.ProviderEarningsScreen
 import com.zouitel.presentaion.common.Status
 
 class DeliveryWorkplaceScreen : Screen {
@@ -112,6 +113,16 @@ class DeliveryWorkplaceScreen : Screen {
                                 shape = RoundedCornerShape(14.dp)
                             ) {
                                 Text("Open Active Orders Dashboard", fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        item {
+                            OutlinedButton(
+                                onClick = { navigator?.push(ProviderEarningsScreen()) },
+                                modifier = Modifier.fillMaxWidth().height(50.dp),
+                                shape = RoundedCornerShape(14.dp)
+                            ) {
+                                Text("Earnings & Payouts", fontWeight = FontWeight.Bold)
                             }
                         }
 

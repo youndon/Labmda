@@ -50,6 +50,7 @@ interface FinanceState {
   entries?: Record<string, StoredOperation["entries"][number]>;
   accounts?: Record<string, AccountBalance>;
   idempotency?: Record<string, string>;
+  providerActivity?: Record<string, Record<string, FinancialOperation>>;
 }
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
@@ -123,6 +124,7 @@ export async function postFinancialOperation(
     const entries = state.entries ?? {};
     const accounts = state.accounts ?? {};
     const idempotency = state.idempotency ?? {};
+    const providerActivity = { ...(state.providerActivity ?? {}) };
     const priorId = idempotency[operation.idempotencyKey];
 
     if (priorId) return state;
@@ -146,16 +148,33 @@ export async function postFinancialOperation(
       const updated = previous[field] + posting.deltaMinor;
       if (!Number.isSafeInteger(updated)) throw new Error("Account balance exceeds the safe integer range.");
       if (posting.bucket === "CASH_OWED" && updated < 0) throw new Error("Cash remittance exceeds the collector cash-owed balance.");
+      if (operation.eventType === "PAYOUT" && posting.bucket === "AVAILABLE" && updated < 0) {
+        throw new Error("Payout exceeds the provider available balance.");
+      }
       nextAccounts[posting.accountId] = { ...previous, [field]: updated, updatedAt: operation.createdAt };
     });
 
     const stored: StoredOperation = { ...operation, entries: storedEntries };
+    const providerPostings = new Map<string, LedgerPosting[]>();
+    operation.postings.forEach((posting) => {
+      if (posting.partyType !== "MERCHANT" && posting.partyType !== "DRIVER" && posting.partyType !== "COURIER") return;
+      const current = providerPostings.get(posting.partyId) ?? [];
+      current.push(posting);
+      providerPostings.set(posting.partyId, current);
+    });
+    providerPostings.forEach((postings, providerUid) => {
+      providerActivity[providerUid] = {
+        ...(providerActivity[providerUid] ?? {}),
+        [operation.operationId]: { ...operation, postings },
+      };
+    });
     return {
       ...state,
       operations: { ...operations, [operation.operationId]: stored },
       entries: nextEntries,
       accounts: nextAccounts,
       idempotency: { ...idempotency, [operation.idempotencyKey]: operation.operationId },
+      providerActivity,
     };
   }, undefined, false);
 

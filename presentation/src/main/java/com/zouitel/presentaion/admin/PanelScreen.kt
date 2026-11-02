@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.DriveEta
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -30,6 +31,16 @@ class PanelScreen : Screen {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                Button(
+                    onClick = { navigator?.push(AdminPayoutScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Manage Provider Payouts")
+                }
+
                 Button(
                     onClick = { navigator?.push(DeliveryScreen()) },
                     modifier = Modifier.fillMaxWidth(),
