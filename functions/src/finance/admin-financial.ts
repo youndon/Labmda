@@ -9,7 +9,7 @@ const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
 type AdminCall = { auth?: { uid?: string; token?: Record<string, unknown> } | null };
 type PaymentRecord = {
   id: string; payerId: string; status: string; method: string; transactionType: string;
-  orderId?: string; tripId?: string; amountMinor: number; refundedAmountMinor?: number;
+  orderId?: string; tripId?: string; amountMinor: number; refundedAmountMinor?: number; refundReservedAmountMinor?: number;
   currency: string; createdAt: number; updatedAt?: number; completedAt?: number | null;
 };
 type RefundCase = {
@@ -161,23 +161,31 @@ export const createAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
   const paymentId = safeId(call.data?.paymentId, "Payment ID");
   const amountMinor = positiveMinor(call.data?.amountMinor, "Refund amount");
   const reason = text(call.data?.reason, "Refund reason");
-  const paymentSnapshot = await db().ref(`payments/${paymentId}`).get();
-  if (!paymentSnapshot.exists()) throw new HttpsError("not-found", "Payment was not found.");
-  const payment = paymentSnapshot.val() as PaymentRecord;
-  const alreadyRefunded = payment.refundedAmountMinor ?? 0;
-  if (payment.id !== paymentId || payment.currency !== "PHP"
-    || (payment.status !== "SUCCEEDED" && payment.status !== "PARTIALLY_REFUNDED")
-    || !Number.isSafeInteger(payment.amountMinor) || !Number.isSafeInteger(alreadyRefunded)
-    || amountMinor > payment.amountMinor - alreadyRefunded) {
-    throw new HttpsError("failed-precondition", "Payment is not refundable or the requested amount exceeds its remaining balance.");
-  }
   const caseId = randomUUID();
   const now = Date.now();
-  const refund: RefundCase = { id: caseId, paymentId, payerId: payment.payerId, amountMinor,
+  const refund: RefundCase = { id: caseId, paymentId, payerId: "", amountMinor,
     currency: "PHP", reason, status: "REQUESTED", requestedBy: uid, createdAt: now, updatedAt: now };
-  await db().ref(`refundCases/${caseId}`).set(refund);
-  await recordAdminFinancialAudit({ uid, action: "REFUND_CASE_CREATED", targetType: "REFUND", targetId: caseId, after: refund });
-  return { refundId: caseId, status: refund.status, amountMinor, currency: "PHP" };
+  const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const payment = root.payments?.[paymentId] as PaymentRecord | undefined;
+    if (!payment || payment.id !== paymentId || payment.currency !== "PHP"
+      || (payment.status !== "SUCCEEDED" && payment.status !== "PARTIALLY_REFUNDED")
+      || !Number.isSafeInteger(payment.amountMinor)) return;
+    const refunded = payment.refundedAmountMinor ?? 0;
+    const reserved = payment.refundReservedAmountMinor ?? 0;
+    if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved)
+      || refunded + reserved + amountMinor > payment.amountMinor) return;
+    const savedRefund = { ...refund, payerId: payment.payerId };
+    return {
+      ...root,
+      payments: { ...root.payments, [paymentId]: { ...payment, refundReservedAmountMinor: reserved + amountMinor } },
+      refundCases: { ...(root.refundCases ?? {}), [caseId]: savedRefund },
+    };
+  }, undefined, false);
+  if (!rootResult.committed) throw new HttpsError("failed-precondition", "Payment is not refundable or the requested amount exceeds its unreserved balance.");
+  const savedRefund = rootResult.snapshot.child(`refundCases/${caseId}`).val() as RefundCase;
+  await recordAdminFinancialAudit({ uid, action: "REFUND_CASE_CREATED", targetType: "REFUND", targetId: caseId, after: savedRefund });
+  return { refundId: caseId, status: savedRefund.status, amountMinor, currency: "PHP" };
 });
 
 export const reviewAdminRefundCase = onCall({ enforceAppCheck: true }, async (call) => {
@@ -186,15 +194,29 @@ export const reviewAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
   const decision = call.data?.decision;
   if (decision !== "APPROVED" && decision !== "REJECTED") throw new HttpsError("invalid-argument", "Decision must be APPROVED or REJECTED.");
   const note = text(call.data?.note, "Review note");
-  const ref = db().ref(`refundCases/${refundId}`);
   let before: RefundCase | null = null;
-  const result = await ref.transaction((raw: RefundCase | null) => {
-    if (!raw || raw.status !== "REQUESTED") return;
-    before = raw;
-    return { ...raw, status: decision, reviewedBy: uid, reviewedAt: Date.now(), reviewNote: note, updatedAt: Date.now() };
+  const result = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const current = root.refundCases?.[refundId] as RefundCase | undefined;
+    if (!current || current.status !== "REQUESTED") return;
+    before = current;
+    const nextCase = { ...current, status: decision, reviewedBy: uid,
+      reviewedAt: Date.now(), reviewNote: note, updatedAt: Date.now() };
+    if (decision === "REJECTED") {
+      const payment = root.payments?.[current.paymentId] as PaymentRecord | undefined;
+      if (!payment) return;
+      const reserved = payment.refundReservedAmountMinor ?? 0;
+      if (!Number.isSafeInteger(reserved) || reserved < current.amountMinor) return;
+      return {
+        ...root,
+        payments: { ...root.payments, [current.paymentId]: { ...payment, refundReservedAmountMinor: reserved - current.amountMinor } },
+        refundCases: { ...root.refundCases, [refundId]: nextCase },
+      };
+    }
+    return { ...root, refundCases: { ...root.refundCases, [refundId]: nextCase } };
   }, undefined, false);
-  if (!result.committed) throw new HttpsError("failed-precondition", "Refund case is missing or has already been reviewed.");
-  const after = result.snapshot.val() as RefundCase;
+  if (!result.committed) throw new HttpsError("failed-precondition", "Refund case is missing, already reviewed, or its reservation is inconsistent.");
+  const after = result.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
   await recordAdminFinancialAudit({ uid, action: `REFUND_${decision}`, targetType: "REFUND", targetId: refundId, before, after, note });
   return { refundId, status: after.status };
 });
@@ -249,10 +271,13 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     const currentPayment = root.payments?.[refund.paymentId] as PaymentRecord | undefined;
     if (!currentCase || currentCase.status !== "PROCESSING" || !currentPayment) return;
     const refunded = currentPayment.refundedAmountMinor ?? 0;
-    if (!Number.isSafeInteger(refunded) || refunded + refund.amountMinor > currentPayment.amountMinor
+    const reserved = currentPayment.refundReservedAmountMinor ?? 0;
+    if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved) || reserved < refund.amountMinor
+      || refunded + refund.amountMinor > currentPayment.amountMinor
       || (currentPayment.status !== "SUCCEEDED" && currentPayment.status !== "PARTIALLY_REFUNDED")) return;
     const nextRefunded = refunded + refund.amountMinor;
     const nextPayment = { ...currentPayment, refundedAmountMinor: nextRefunded,
+      refundReservedAmountMinor: reserved - refund.amountMinor,
       status: nextRefunded === currentPayment.amountMinor ? "REFUNDED" : "PARTIALLY_REFUNDED",
       updatedAt: Date.now() };
     const nextCase = { ...currentCase, status: "COMPLETED", providerReference,
