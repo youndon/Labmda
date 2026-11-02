@@ -7,7 +7,6 @@ import com.zouitel.domain.model.PaymentCheckoutState
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.functions.FirebaseFunctions
 import dev.gitlive.firebase.functions.functions
-import dev.gitlive.firebase.functions.httpsCallable
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 
