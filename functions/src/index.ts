@@ -155,3 +155,13 @@ export const quoteDelivery = onCall({ secrets: [mapsApiKey], enforceAppCheck: tr
   const breakdown = calculateDeliveryOnlyBreakdown({ config, route, paymentMethod: method });
   return saveQuote(uid, "DELIVERY", config, data, breakdown, { route, paymentMethod: method });
 });
+
+
+// Phase 04 — authenticated cash collection, settlement, remittance and reconciliation.
+export {
+  confirmCashCollection,
+  confirmMerchantCashSettlement,
+  confirmCashRemittance,
+  getMyCashOutstanding,
+  reconcileCashPayments,
+} from "./finance/cash-operations.js";

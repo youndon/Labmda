@@ -117,7 +117,7 @@ describe("financial ledger invariants", () => {
     };
     const operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
     expect(operation.postings[0]).toMatchObject({ accountId: "cash_collection_clearing", partyType: "CASH", deltaMinor: -500 });
-    expect(operation.postings[1]).toMatchObject({ accountId: "wallet_driver_driver_1", bucket: "PENDING", deltaMinor: 400 });
+    expect(operation.postings[1]).toMatchObject({ accountId: "cash_retained_driver_1", bucket: "AVAILABLE", deltaMinor: 400, partyType: "DRIVER" });
     expect(operation.postings[2]).toMatchObject({ accountId: "cash_owed_driver_1", bucket: "CASH_OWED", partyType: "CASH", partyId: "driver_1", deltaMinor: 100 });
     expect(() => validateFinancialOperation(operation)).not.toThrow();
     expect(() => createPaymentReceiptOperation(payment, allocations)).toThrow(/confirmed cash collection/i);
@@ -133,6 +133,40 @@ describe("financial ledger invariants", () => {
       { accountId: "platform_revenue", bucket: "AVAILABLE", deltaMinor: 100 },
     ]);
     expect(() => validateFinancialOperation(remittance)).not.toThrow();
+  });
+
+  it("holds merchant cash in the assigned collector account until merchant settlement", () => {
+    const payment: Payment = {
+      id: "cash_order_1", transactionType: "ORDER", orderId: "order_cash_1", tripId: "",
+      deliveryId: "courier_1", payerId: "customer_1", method: "CASH",
+      status: "SUCCEEDED", amountMinor: 1_000, currency: "PHP", refundedAmountMinor: 0,
+      createdAt: 1_798_000_000_000, updatedAt: 1_798_000_000_100,
+      completedAt: 1_798_000_000_100,
+    };
+    const allocations: PaymentAllocation[] = [
+      { id: "cash_merchant", paymentId: payment.id, transactionType: "ORDER", orderId: payment.orderId, tripId: "", deliveryId: payment.deliveryId, beneficiaryId: "merchant_1", beneficiaryType: "MERCHANT", amountMinor: 700, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+      { id: "cash_courier", paymentId: payment.id, transactionType: "ORDER", orderId: payment.orderId, tripId: "", deliveryId: payment.deliveryId, beneficiaryId: "courier_1", beneficiaryType: "DELIVERY", amountMinor: 200, currency: "PHP", status: "READY", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+      { id: "cash_platform", paymentId: payment.id, transactionType: "ORDER", orderId: payment.orderId, tripId: "", deliveryId: payment.deliveryId, beneficiaryId: "platform", beneficiaryType: "PLATFORM", amountMinor: 100, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+    ];
+    const cashCollection: CashCollection = {
+      id: "cash_cash_order_1", paymentId: payment.id, orderId: payment.orderId, tripId: "",
+      deliveryId: payment.deliveryId, collectorId: "courier_1", payerId: payment.payerId,
+      amountMinor: 1_000, currency: "PHP", status: "COLLECTED",
+      collectedAt: payment.updatedAt, createdAt: payment.createdAt, notes: "",
+    };
+    const operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
+    expect(operation.postings).toContainEqual(expect.objectContaining({
+      accountId: "cash_owed_courier_1_merchant_merchant_1", bucket: "CASH_OWED",
+      deltaMinor: 700, partyType: "CASH", partyId: "courier_1",
+    }));
+    expect(operation.postings).toContainEqual(expect.objectContaining({
+      accountId: "cash_owed_courier_1", bucket: "CASH_OWED", deltaMinor: 100,
+    }));
+    expect(operation.postings).toContainEqual(expect.objectContaining({
+      accountId: "cash_retained_courier_1", bucket: "AVAILABLE", deltaMinor: 200, partyType: "COURIER",
+    }));
+    expect(operation.postings.reduce((sum, posting) => sum + posting.deltaMinor, 0)).toBe(0);
+    expect(() => validateFinancialOperation(operation)).not.toThrow();
   });
 
   it("rejects failed payments and allocations that do not reconcile", () => {
