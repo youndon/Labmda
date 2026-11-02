@@ -18,7 +18,7 @@ export interface LedgerPosting {
   /** Signed PHP centavos. Negative is a debit; positive is a credit. */
   deltaMinor: number;
   /** Identifies the real-world source or destination of this posting. */
-  partyType: "CUSTOMER" | "PLATFORM" | "MERCHANT" | "DRIVER" | "COURIER" | "XENDIT" | "CASH";
+  partyType: "CUSTOMER" | "PLATFORM" | "MERCHANT" | "DRIVER" | "COURIER" | "PAYMENT_PROVIDER" | "CASH";
   partyId: string;
 }
 
@@ -53,6 +53,17 @@ interface FinanceState {
 }
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+const EVENT_TYPES: readonly FinancialEventType[] = [
+  "CUSTOMER_PAYMENT", "MERCHANT_EARNING", "DRIVER_EARNING", "COURIER_EARNING",
+  "PLATFORM_REVENUE", "CASH_COLLECTION", "PAYOUT", "REFUND", "ADJUSTMENT",
+];
+const BUCKETS: readonly BalanceBucket[] = ["AVAILABLE", "PENDING", "CASH_OWED", "CLEARING"];
+const PARTY_TYPES: readonly LedgerPosting["partyType"][] = [
+  "CUSTOMER", "PLATFORM", "MERCHANT", "DRIVER", "COURIER", "PAYMENT_PROVIDER", "CASH",
+];
+const REFERENCE_TYPES: readonly FinancialOperation["referenceType"][] = [
+  "ORDER", "RIDE", "PAYMENT", "PAYOUT", "REFUND", "MANUAL",
+];
 const BUCKET_FIELD: Record<BalanceBucket, keyof AccountBalance> = {
   AVAILABLE: "availableMinor",
   PENDING: "pendingMinor",
@@ -70,12 +81,17 @@ export function validateFinancialOperation(operation: FinancialOperation): void 
   validKey(operation.operationId, "operationId");
   validKey(operation.idempotencyKey, "idempotencyKey");
   validKey(operation.referenceId, "referenceId");
+  if (!EVENT_TYPES.includes(operation.eventType)) throw new Error("Unsupported financial event type.");
+  if (!REFERENCE_TYPES.includes(operation.referenceType)) throw new Error("Unsupported financial reference type.");
   if (operation.currency !== "PHP") throw new Error("Ledger currency must be PHP.");
   if (!Number.isSafeInteger(operation.createdAt) || operation.createdAt <= 0) throw new Error("createdAt must be a positive epoch-millisecond timestamp.");
   if (!operation.description.trim()) throw new Error("description is required.");
   if (!Array.isArray(operation.postings) || operation.postings.length < 2) throw new Error("A financial operation requires at least two postings.");
   const total = operation.postings.reduce((sum, posting) => {
     validKey(posting.accountId, "accountId");
+    if (!BUCKETS.includes(posting.bucket)) throw new Error("Unsupported balance bucket.");
+    if (!PARTY_TYPES.includes(posting.partyType)) throw new Error("Unsupported financial party type.");
+    validKey(posting.partyId, "partyId");
     if (!Number.isSafeInteger(posting.deltaMinor) || posting.deltaMinor === 0 || Math.abs(posting.deltaMinor) > MAX_SAFE) {
       throw new Error("Each posting delta must be a non-zero safe integer in PHP centavos.");
     }
