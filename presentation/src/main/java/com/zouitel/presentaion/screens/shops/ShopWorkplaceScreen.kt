@@ -32,6 +32,7 @@ import com.zouitel.presentaion.common.PickedImage
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.common.ImagePicker
 import com.zouitel.presentaion.screens.food.ImageUploadState
+import com.zouitel.presentaion.screens.finance.ProviderEarningsScreen
 import androidx.compose.runtime.collectAsState
 import coil3.compose.AsyncImage
 
@@ -154,7 +155,8 @@ class ShopWorkplaceScreen : Screen {
                                             shop = shop,
                                             isOnline = isOnline,
                                             onOnlineChanged = { screenModel.updateShopOnlineStatus(shop.id, it) },
-                                            onOpenDashboard = { navigator?.push(ShopDashboardScreen(shop.id)) }
+                                            onOpenDashboard = { navigator?.push(ShopDashboardScreen(shop.id)) },
+                                            onOpenEarnings = { navigator?.push(ProviderEarningsScreen()) }
                                         )
                                         else -> {}
                                     }
@@ -382,7 +384,8 @@ class ShopWorkplaceScreen : Screen {
         shop: Shop,
         isOnline: Boolean,
         onOnlineChanged: (Boolean) -> Unit,
-        onOpenDashboard: () -> Unit
+        onOpenDashboard: () -> Unit,
+        onOpenEarnings: () -> Unit
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -451,6 +454,16 @@ class ShopWorkplaceScreen : Screen {
                         Text(text = "Address: ${shop.address}", style = MaterialTheme.typography.bodyMedium)
                         Text(text = "Phone: ${shop.phone}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
                     }
+                }
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = onOpenEarnings,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                ) {
+                    Text("Earnings & Payouts", fontWeight = FontWeight.Bold)
                 }
             }
 
