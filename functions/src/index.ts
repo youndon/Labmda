@@ -209,3 +209,10 @@ export {
   getAdminRefundCases,
   getAdminAuditTrail,
 } from "./finance/admin-financial.js";
+
+
+// Trusted server-side initialization of PHP cash payments from accepted orders/rides.
+export {
+  initializeOrderCashPayment,
+  initializeRideCashPayment,
+} from "./finance/payment-initialization.js";
