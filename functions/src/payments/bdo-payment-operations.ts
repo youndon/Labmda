@@ -34,66 +34,18 @@ export const confirmBdoGcashPayment = onCall({ enforceAppCheck: true }, async (c
     throw new HttpsError("invalid-argument", "Confirm that the BDO transaction was paid by GCash, then provide its payment ID, reference, and exact PHP-centavo amount.");
   }
 
-  let duplicate = false;
-  const result = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
-    const payments = root.payments ?? {};
-    const payment = payments[paymentId];
-    if (!payment || payment.id !== paymentId || payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
-      || !payment.checkoutUrl || payment.currency !== "PHP" || payment.amountMinor !== amountMinor) return;
-    const confirmations = root.bdoPaymentConfirmations ?? {};
-    const referenceIndex = root.bdoPaymentReferenceIndex ?? {};
-    const prior = confirmations[paymentId];
-    if (prior) {
-      if (prior.transferReference !== transferReference || prior.amountMinor !== amountMinor) return;
-      duplicate = true;
-      return root;
-    }
-    const indexedPaymentId = referenceIndex[transferReference];
-    if (indexedPaymentId && indexedPaymentId !== paymentId) return;
-    if (payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
-
-    const now = Date.now();
-    const nextPayment = {
-      ...payment, provider: "BDO_CHECKOUT", providerReference: transferReference,
-      status: "SUCCEEDED", completedAt: now, updatedAt: now,
-      verifiedBy: uid, verifiedAt: now, verificationMode: "ADMIN_DASHBOARD",
-    };
-    const updates: Record<string, any> = {
-      payments: { ...payments, [paymentId]: nextPayment },
-      bdoPaymentConfirmations: {
-        ...confirmations,
-        [paymentId]: { paymentId, transferReference, amountMinor, currency: "PHP", status: "VERIFIED", verifiedBy: uid, verifiedAt: now },
-      },
-      bdoPaymentReferenceIndex: { ...referenceIndex, [transferReference]: paymentId },
-    };
-    if (payment.transactionType === "ORDER" && payment.orderId) {
-      const order = root.orders?.[payment.orderId];
-      if (!order || order.paymentId !== paymentId || order.status !== "PENDING_PAYMENT") return;
-      updates.orders = {
-        ...root.orders,
-        [payment.orderId]: { ...order, status: order.orderType === "DELIVERY" ? "OUT_FOR_DELIVERY" : "PLACED", paymentStatus: "PAID", updatedAtTimestamp: now },
-      };
-    } else if (payment.transactionType === "RIDE" && payment.tripId) {
-      const trip = root.trips?.[payment.tripId];
-      if (!trip || trip.paymentId !== paymentId || trip.status !== "PENDING_PAYMENT") return;
-      updates.trips = {
-        ...root.trips,
-        [payment.tripId]: { ...trip, status: "REQUESTED", paymentStatus: "PAID", paymentState: "PAID", updatedAtTimestamp: now },
-      };
-    } else {
-      return;
-    }
-    return { ...root, ...updates };
-  }, undefined, false);
-
-  if (!result.committed && !duplicate) {
-    const current = result.snapshot.val() as Record<string, any> | null;
-    const prior = current?.bdoPaymentConfirmations?.[paymentId];
-    if (prior?.transferReference === transferReference && prior?.amountMinor === amountMinor) duplicate = true;
-    else throw new HttpsError("failed-precondition", "Payment, order/trip state, amount, or BDO reference could not be verified.");
+  let result: { paymentId: string; status: string; transferReference: string; duplicate: boolean };
+  try {
+    result = await confirmBdoGcashPaymentRecord(db(), {
+      paymentId, transferReference, amountMinor: amountMinor as number, verifiedBy: uid,
+    });
+  } catch (error) {
+    throw new HttpsError(
+      "failed-precondition",
+      error instanceof Error ? error.message : "BDO payment confirmation could not be verified.",
+    );
   }
-  return { paymentId, status: "SUCCEEDED", transferReference, duplicate };
+  return result;
 });
 
 
