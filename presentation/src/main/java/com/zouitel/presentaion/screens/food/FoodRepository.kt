@@ -1,6 +1,7 @@
 package com.zouitel.presentaion.screens.food
 
 import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -58,8 +59,10 @@ class FoodRepository {
     ) {
         val newRef = db.child("restaurants").push()
         val id = newRef.key ?: return
+        val ownerUid = Firebase.auth.currentUser?.uid ?: throw IllegalStateException("Sign in before registering a restaurant.")
         val restaurantMap = mapOf(
             "id" to id,
+            "ownerUid" to ownerUid,
             "name" to name,
             "imageUrl" to imageUrl,
             "rating" to 5.0,
