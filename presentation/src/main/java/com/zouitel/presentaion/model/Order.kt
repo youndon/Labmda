@@ -10,6 +10,7 @@ enum class OrderType {
 
 @Serializable
 enum class OrderStatus {
+    PENDING_PAYMENT,
     PLACED,
     ACCEPTED,
     PREPARING,
