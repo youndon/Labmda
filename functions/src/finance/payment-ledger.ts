@@ -66,9 +66,13 @@ export function createPaymentReceiptOperation(
     allocatedMinor += allocation.amountMinor;
     if (!Number.isSafeInteger(allocatedMinor)) throw new Error("Payment allocation total exceeds the safe integer range.");
 
-    if (isCash && allocation.beneficiaryType === "PLATFORM") {
+    if (isCash && (allocation.beneficiaryType === "PLATFORM" || allocation.beneficiaryType === "MERCHANT")) {
+      // The collector physically holds the merchant and platform portions until
+      // each is handed over. Keep merchant and platform obligations separate.
       return {
-        accountId: `cash_owed_${cashCollection!.collectorId}`,
+        accountId: allocation.beneficiaryType === "PLATFORM"
+          ? `cash_owed_${cashCollection!.collectorId}`
+          : `cash_owed_${cashCollection!.collectorId}_merchant_${allocation.beneficiaryId}`,
         bucket: "CASH_OWED",
         deltaMinor: allocation.amountMinor,
         partyType: "CASH",
