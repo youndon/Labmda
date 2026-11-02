@@ -6,7 +6,7 @@ type QuoteRecord = {
   quoteId: string; uid: string; kind: "FOOD" | "SHOP" | "DELIVERY" | "RIDE";
   currency: "PHP"; expiresAt: number; status: "QUOTED" | "CONSUMING" | "CONSUMED";
   paymentMethod?: string; sourceId?: string; breakdown: Record<string, unknown>;
-  paymentId?: string; transactionId?: string;
+  paymentId?: string; transactionId?: string; pricingVersion?: number;
   request: { pickup: { latitude: number; longitude: number }; dropoff: { latitude: number; longitude: number } };
   route?: { distanceMeters: number; durationSeconds: number };
   items?: Array<{ itemId: string; name: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }>;
@@ -222,7 +222,7 @@ export const createCashPaymentFromQuote = onCall({ enforceAppCheck: true }, asyn
     updates[`trips/${transactionId}/fareAmount`] = fareMinor / 100;
     updates[`trips/${transactionId}/paymentMethod`] = "CASH";
     updates[`trips/${transactionId}/pricingQuoteId`] = quoteId;
-    updates[`trips/${transactionId}/pricingVersion`] = (quote as QuoteRecord & { pricingVersion?: number }).pricingVersion ?? null;
+    updates[`trips/${transactionId}/pricingVersion`] = quote.pricingVersion ?? null;
     updates[`trips/${transactionId}/pickupLat`] = quote.request.pickup.latitude;
     updates[`trips/${transactionId}/pickupLng`] = quote.request.pickup.longitude;
     updates[`trips/${transactionId}/dropoffLat`] = quote.request.dropoff.latitude;
