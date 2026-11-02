@@ -7,6 +7,7 @@ import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderStatus
 import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.launch
 
 class ShopOrdersScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
+    private val currentUid = Firebase.auth.currentUser?.uid
 
     private val _orders = MutableStateFlow<List<Order>>(emptyList())
     val orders: StateFlow<List<Order>> = _orders.asStateFlow()
@@ -28,7 +30,10 @@ class ShopOrdersScreenModel : ScreenModel {
 
     private fun listenToShopOrders() {
         screenModelScope.launch {
-            db.child("orders").valueEvents.collect { snapshot ->
+            val uid = currentUid ?: run { _isLoading.value = false; return@launch }
+            db.child("shops").orderByChild("ownerUid").equalTo(uid).valueEvents.collect { shops ->
+                val shopId = shops.children.firstOrNull()?.key ?: run { _orders.value = emptyList(); _isLoading.value = false; return@collect }
+                db.child("orders").orderByChild("sourceId").equalTo(shopId).valueEvents.collect { snapshot ->
                 val fetchedOrders = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
@@ -95,6 +100,7 @@ class ShopOrdersScreenModel : ScreenModel {
 
                 _orders.value = fetchedOrders
                 _isLoading.value = false
+                }
             }
         }
     }
