@@ -82,7 +82,10 @@ export function calculateProviderFee(config: PricingConfig, method: PaymentMetho
   const fee = config.providerFees.GCASH;
   assertBps(fee.rateBps, "providerFees.GCASH.rateBps");
   assertMinor(fee.fixedFeeMinor, "providerFees.GCASH.fixedFeeMinor");
-  return { amount: roundBps(amountMinor, fee.rateBps) + fee.fixedFeeMinor, payer: fee.payer };
+  const amount = roundBps(amountMinor, fee.rateBps) + fee.fixedFeeMinor;
+  assertMinor(amount, "provider fee");
+  if (fee.payer !== "PLATFORM" && fee.payer !== "CUSTOMER") throw new Error("provider fee payer is invalid.");
+  return { amount, payer: fee.payer };
 }
 export function applyDiscount(subtotalMinor: number, rule?: DiscountRule, now = Date.now()): { total: number; merchant: number; platform: number } {
   assertMinor(subtotalMinor, "subtotalMinor");
@@ -90,6 +93,9 @@ export function applyDiscount(subtotalMinor: number, rule?: DiscountRule, now = 
   if (!rule.active) throw new Error("Discount is not active.");
   if (rule.startsAt !== undefined && now < rule.startsAt) throw new Error("Discount is not active yet.");
   if (rule.endsAt !== undefined && now > rule.endsAt) throw new Error("Discount has expired.");
+  assertMinor(rule.minimumSubtotalMinor ?? 0, "minimumSubtotalMinor");
+  if (rule.maxDiscountMinor !== undefined) assertMinor(rule.maxDiscountMinor, "maxDiscountMinor");
+  if (rule.funder !== "PLATFORM" && rule.funder !== "MERCHANT") throw new Error("Discount funder is invalid.");
   if (subtotalMinor < (rule.minimumSubtotalMinor ?? 0)) throw new Error("Order does not meet the discount minimum.");
   let discount = rule.kind === "FIXED"
     ? (rule.valueMinor ?? 0)
@@ -105,6 +111,7 @@ export function calculateDeliveryFee(config: DeliveryRate, route: RouteMetrics):
   assertBps(config.platformCommissionBps, "delivery.platformCommissionBps");
   const variable = roundUpPerKm(route.distanceMeters, config.perKmMinor);
   const feeMinor = Math.max(config.minimumFeeMinor, config.baseFeeMinor + variable);
+  assertMinor(feeMinor, "delivery.feeMinor");
   const platformCommissionMinor = roundBps(feeMinor, config.platformCommissionBps);
   return { feeMinor, platformCommissionMinor, courierEarningsMinor: feeMinor - platformCommissionMinor };
 }
@@ -120,6 +127,7 @@ export function calculateRideFare(config: PricingConfig["ride"], route: RouteMet
   const timeCharge = minutes * config.perMinuteMinor;
   assertMinor(timeCharge, "ride.timeCharge");
   const fareMinor = Math.max(config.minimumFareMinor, config.baseFareMinor + distanceCharge + timeCharge);
+  assertMinor(fareMinor, "ride.fareMinor");
   const platformCommissionMinor = roundBps(fareMinor, config.platformCommissionBps);
   return { fareMinor, platformCommissionMinor, driverEarningsMinor: fareMinor - platformCommissionMinor };
 }
@@ -141,6 +149,7 @@ export function calculateOrderBreakdown(args: {
   const commissionBase = subtotalMinor - discount.merchant;
   const merchantCommissionMinor = roundBps(commissionBase, commissionRate);
   const beforeProvider = subtotalMinor + delivery.feeMinor - discount.total;
+  assertMinor(beforeProvider, "order total before provider fee");
   const fee = calculateProviderFee(config, paymentMethod, beforeProvider);
   const customerTotalMinor = beforeProvider + (fee.payer === "CUSTOMER" ? fee.amount : 0);
   const platformNet = merchantCommissionMinor + delivery.platformCommissionMinor
@@ -168,7 +177,7 @@ export function calculateDeliveryOnlyBreakdown(args: {
   paymentMethod: PaymentMethod;
 }): { currency: "PHP"; deliveryFeeMinor: number; providerFeeMinor: number; customerTotalMinor: number; platformCommissionMinor: number; courierEarningsMinor: number; platformNetBeforeOtherCostsMinor: number } {
   const delivery = calculateDeliveryFee(args.config.delivery, args.route);
-  const fee = providerFee(args.config, args.paymentMethod, delivery.feeMinor);
+  const fee = calculateProviderFee(args.config, args.paymentMethod, delivery.feeMinor);
   return {
     currency: "PHP",
     deliveryFeeMinor: delivery.feeMinor,
@@ -180,7 +189,7 @@ export function calculateDeliveryOnlyBreakdown(args: {
   };
 }
 export function decimalPesosToMinor(value: unknown, field: string): number {
-  const text = typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : String(value ?? "");
+  const text = typeof value === "number" && Number.isFinite(value) ? String(value) : String(value ?? "");
   if (!/^\d+(?:\.\d{1,2})?$/.test(text)) throw new Error(`${field} is not a valid PHP amount.`);
   const [pesos, centavos = ""] = text.split(".");
   const result = Number(BigInt(pesos) * 100n + BigInt((centavos + "00").slice(0, 2)));
