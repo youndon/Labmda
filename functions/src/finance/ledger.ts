@@ -85,8 +85,9 @@ export function validateFinancialOperation(operation: FinancialOperation): void 
   if (total !== 0n) throw new Error("Financial operation is unbalanced: debits and credits must net to zero.");
 }
 
-function sameOperation(a: FinancialOperation, b: FinancialOperation): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+function sameOperation(a: StoredOperation, b: FinancialOperation): boolean {
+  const { entries: _entries, ...storedOperation } = a;
+  return JSON.stringify(storedOperation) === JSON.stringify(b);
 }
 
 /**
