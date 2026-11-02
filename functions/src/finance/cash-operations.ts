@@ -34,12 +34,14 @@ async function loadPayment(paymentId: string): Promise<Payment> {
 async function assignedCollector(payment: Payment): Promise<string> {
   if (payment.transactionType === "ORDER") {
     const order = await db().ref(`orders/${payment.orderId}`).get();
+    if (!order.exists() || order.child("status").val() === "CANCELLED") throw new HttpsError("failed-precondition", "The order is missing or cancelled.");
     const deliveryId = order.child("deliveryId").val();
     if (typeof deliveryId !== "string" || !deliveryId) throw new HttpsError("failed-precondition", "Assign a courier before cash collection.");
     if (payment.deliveryId && payment.deliveryId !== deliveryId) throw new HttpsError("failed-precondition", "The order courier changed; refresh the payment assignment.");
     return deliveryId;
   }
   const trip = await db().ref(`trips/${payment.tripId}`).get();
+  if (!trip.exists() || trip.child("status").val() === "CANCELLED") throw new HttpsError("failed-precondition", "The trip is missing or cancelled.");
   const driverId = trip.child("driverId").val();
   if (typeof driverId !== "string" || !driverId) throw new HttpsError("failed-precondition", "Assign a driver before cash collection.");
   return driverId;
@@ -132,6 +134,8 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
   if (!updated || updated.status !== "SUCCEEDED") {
     throw new HttpsError("failed-precondition", "Payment could not be confirmed. The cash evidence was retained for safe retry.");
   }
+  const transactionPath = payment.transactionType === "ORDER" ? `orders/${payment.orderId}` : `trips/${payment.tripId}`;
+  await db().ref(`${transactionPath}/paymentStatus`).set("SUCCEEDED");
   const posted = await postPaymentReceiptFromDatabase(db(), paymentId);
   return { paymentId, status: "COLLECTED", ...posted };
 });
