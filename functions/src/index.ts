@@ -193,3 +193,6 @@ export { getAdminPricingConfig, updateAdminPricingConfig } from "./finance/admin
 
 // Post trusted successful payments into the immutable financial journal.
 export { postSucceededPaymentToLedger } from "./finance/payment-ledger-trigger.js";
+
+// Phase 09 — manual BDO settlement records and bank-statement reconciliation.
+export { createExpectedBdoSettlement, recordBdoBankTransfer, reconcileBdoSettlements } from "./finance/bdo-settlement.js";
