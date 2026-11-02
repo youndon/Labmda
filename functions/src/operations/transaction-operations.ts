@@ -201,9 +201,11 @@ export const claimRide = onCall({ enforceAppCheck: true }, async (call) => {
   }, undefined, false);
   if (!result.committed) {
     const latest = result.snapshot.val() as Record<string, any> | null;
-    if (latest?.driverId === uid && latest?.status === "ACCEPTED") return { tripId, driverId: uid, duplicate: true };
-    fail("This ride has already been accepted or is no longer available.");
+    if (latest?.driverId !== uid || latest?.status !== "ACCEPTED") fail("This ride has already been accepted or is no longer available.");
+    await ensureRideAllocations(tripId, uid);
+    return { tripId, driverId: uid, duplicate: true };
   }
+  await ensureRideAllocations(tripId, uid);
   return { tripId, driverId: uid, duplicate: false };
 });
 
