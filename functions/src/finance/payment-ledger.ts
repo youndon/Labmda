@@ -1,6 +1,6 @@
 import { assertMinorAmount, assertPaymentRelationship } from "../models/payment.js";
 import type { Payment, PaymentAllocation } from "../models/payment.js";
-import type { FinancialOperation, LedgerPosting } from "./ledger.js";
+import { createFinancialTransfer, type FinancialOperation, type LedgerPosting } from "./ledger.js";
 
 /**
  * Converts a server-verified, succeeded payment and its persisted allocations
@@ -11,6 +11,7 @@ import type { FinancialOperation, LedgerPosting } from "./ledger.js";
 export function createPaymentReceiptOperation(
   payment: Payment,
   allocations: PaymentAllocation[],
+  options: { cashCollectorId?: string } = {},
 ): FinancialOperation {
   if (payment.transactionType !== "ORDER" && payment.transactionType !== "RIDE") throw new Error("Payment transaction type is invalid.");
   if (payment.method !== "GCASH" && payment.method !== "CASH") throw new Error("Payment method is unsupported.");
@@ -21,6 +22,8 @@ export function createPaymentReceiptOperation(
   if (payment.currency !== "PHP") throw new Error("Payment currency must be PHP.");
   assertMinorAmount(payment.amountMinor, "payment.amountMinor");
   if (payment.amountMinor === 0) throw new Error("Payment amount must be greater than zero.");
+  const isCash = payment.method === "CASH";
+  if (isCash && !options.cashCollectorId) throw new Error("Cash payments require the verified cash collector ID.");
   if (!Array.isArray(allocations) || allocations.length === 0) {
     throw new Error("A succeeded payment requires at least one persisted allocation.");
   }
@@ -51,6 +54,15 @@ export function createPaymentReceiptOperation(
     allocatedMinor += allocation.amountMinor;
     if (!Number.isSafeInteger(allocatedMinor)) throw new Error("Payment allocation total exceeds the safe integer range.");
 
+    if (isCash && allocation.beneficiaryType === "PLATFORM") {
+      return {
+        accountId: `cash_owed_${options.cashCollectorId}`,
+        bucket: "CASH_OWED",
+        deltaMinor: allocation.amountMinor,
+        partyType: "CASH",
+        partyId: options.cashCollectorId!,
+      };
+    }
     const partyType: LedgerPosting["partyType"] = allocation.beneficiaryType === "DELIVERY"
       ? "COURIER"
       : allocation.beneficiaryType;
@@ -68,7 +80,6 @@ export function createPaymentReceiptOperation(
     throw new Error("Payment allocations must exactly equal the succeeded payment amount.");
   }
 
-  const isCash = payment.method === "CASH";
   const source: LedgerPosting = {
     accountId: isCash ? "cash_collection_clearing" : "payment_provider_clearing",
     bucket: "CLEARING",
@@ -92,4 +103,42 @@ export function createPaymentReceiptOperation(
     description: `Customer ${payment.method.toLowerCase()} payment allocated`,
     postings: [source, ...allocationPostings],
   };
+}
+
+
+/**
+ * Moves a confirmed cash remittance from the collector's cash-owed balance
+ * into platform revenue. The caller must verify the actual handover and the
+ * collector's outstanding balance before posting.
+ */
+export function createCashRemittanceOperation(args: {
+  cashCollectionId: string;
+  collectorId: string;
+  amountMinor: number;
+  createdAt: number;
+}): FinancialOperation {
+  return createFinancialTransfer({
+    operationId: `cash_remittance_${args.cashCollectionId}`,
+    eventType: "CASH_COLLECTION",
+    referenceType: "PAYMENT",
+    referenceId: args.cashCollectionId,
+    idempotencyKey: `cash_remittance_${args.cashCollectionId}`,
+    createdAt: args.createdAt,
+    description: "Confirmed cash remittance to platform",
+    amountMinor: args.amountMinor,
+    source: {
+      accountId: `cash_owed_${args.collectorId}`,
+      bucket: "CASH_OWED",
+      deltaMinor: 0,
+      partyType: "CASH",
+      partyId: args.collectorId,
+    },
+    destination: {
+      accountId: "platform_revenue",
+      bucket: "AVAILABLE",
+      deltaMinor: 0,
+      partyType: "PLATFORM",
+      partyId: "platform",
+    },
+  });
 }
