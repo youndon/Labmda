@@ -42,6 +42,16 @@ class PanelScreen : Screen {
                 }
 
                 Button(
+                    onClick = { navigator?.push(AdminPaymentSettingsScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Payment Settings")
+                }
+
+                Button(
                     onClick = { navigator?.push(AdminPricingScreen()) },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)
