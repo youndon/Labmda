@@ -8,7 +8,6 @@ import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.AccountBalanceWallet
-import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -57,7 +56,7 @@ class PanelScreen : Screen {
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)
                 ) {
-                    Icon(Icons.Default.ReceiptLong, contentDescription = null)
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Payments & Refunds")
                 }
