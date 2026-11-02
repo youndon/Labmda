@@ -43,7 +43,7 @@ export async function confirmBdoGcashPaymentRecord(
     if (prior) {
       if (prior.transferReference !== transferReference || prior.amountMinor !== amountMinor
         || prior.currency !== "PHP" || prior.status !== "VERIFIED") return;
-      return root;
+      return;
     }
 
     const indexedPaymentId = referenceIndex[transferReference];
