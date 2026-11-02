@@ -28,9 +28,10 @@ export const confirmBdoGcashPayment = onCall({ enforceAppCheck: true }, async (c
   const paymentId = String(call.data?.paymentId ?? "");
   const transferReference = String(call.data?.transferReference ?? "").trim();
   const amountMinor = call.data?.amountMinor;
-  if (!safeId.test(paymentId) || !/^[A-Za-z0-9_-]{4,120}$/.test(transferReference)
+  const verifiedMethod = String(call.data?.verifiedMethod ?? "");
+  if (verifiedMethod !== "GCASH" || !safeId.test(paymentId) || !/^[A-Za-z0-9_-]{4,120}$/.test(transferReference)
     || !Number.isSafeInteger(amountMinor) || (amountMinor as number) <= 0) {
-    throw new HttpsError("invalid-argument", "Payment ID, BDO transaction reference, and positive PHP-centavo amount are required.");
+    throw new HttpsError("invalid-argument", "Confirm that the BDO transaction was paid by GCash, then provide its payment ID, reference, and exact PHP-centavo amount.");
   }
 
   let duplicate = false;
