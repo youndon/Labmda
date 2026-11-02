@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class OrderType {
     FOOD,
-    RETAIL
+    RETAIL,
+    DELIVERY
 }
 
 @Serializable
