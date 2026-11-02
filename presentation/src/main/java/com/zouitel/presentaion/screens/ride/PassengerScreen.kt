@@ -874,7 +874,7 @@ class PassengerScreen : Screen {
                 }
 
                 if (trip.paymentStatus != "PAID" && trip.checkoutUrl.isNotBlank()) {
-                    Button(onClick = { uriHandler.openUri(trip.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { if (trip.checkoutUrl.startsWith("https://checkout.bdo.com.ph/")) uriHandler.openUri(trip.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
                         Text("Pay with GCash · BDO Checkout")
                     }
                 } else if (trip.status == "PENDING_PAYMENT" && trip.checkoutUrl.isBlank()) {
