@@ -1,5 +1,8 @@
 package com.zouitel.presentaion.screens.finance
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +28,7 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +53,9 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ProviderEarningsScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +73,10 @@ class ProviderEarningsScreen : Screen {
         var showProfileDialog by remember { mutableStateOf(false) }
         var payoutAmount by remember { mutableStateOf("") }
         var selectedAccountId by remember { mutableStateOf("") }
+        var selectedTransactionFilter by remember { mutableStateOf("ALL") }
+        var selectedTransaction by remember { mutableStateOf<FinancialTransaction?>(null) }
+        val transactionFilters = listOf("ALL", "EARNINGS", "PAYOUTS", "CASH", "OTHER")
+        val filteredTransactions = earnings.transactions.filter { transactionMatchesFilter(it, selectedTransactionFilter) }
 
         LaunchedEffect(earnings.accounts) {
             if (selectedAccountId.isBlank() || earnings.accounts.none { it.accountId == selectedAccountId }) {
@@ -252,25 +263,50 @@ class ProviderEarningsScreen : Screen {
                     }
 
                     item {
-                        Text("Recent activity", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Transaction history", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                transactionFilters.forEach { filter ->
+                                    FilterChip(
+                                        selected = selectedTransactionFilter == filter,
+                                        onClick = { selectedTransactionFilter = filter },
+                                        label = { Text(filter.lowercase().replaceFirstChar { it.uppercase() }) }
+                                    )
+                                }
+                            }
+                            Text(
+                                "${filteredTransactions.size} transactions shown",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                    if (earnings.transactions.isEmpty()) {
+                    if (filteredTransactions.isEmpty()) {
                         item {
-                            Text("Your financial activity will appear here when earnings are posted.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                if (earnings.transactions.isEmpty()) "Your financial activity will appear here when earnings are posted." else "No transactions in this category.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     } else {
-                        items(earnings.transactions, key = { it.operationId }) { transaction ->
-                            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(transaction.eventType.replace('_', ' '), fontWeight = FontWeight.SemiBold)
-                                    Text(transaction.referenceType, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                Text(transaction.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                transaction.postings.forEach { posting ->
-                                    Text(
-                                        "${posting.bucket}: ${if (posting.deltaMinor >= 0) "+" else ""}${formatPhp(posting.deltaMinor)}",
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
+                        items(filteredTransactions, key = { it.operationId }) { transaction ->
+                            Column(
+                                Modifier.fillMaxWidth().clickable { selectedTransaction = transaction }.padding(vertical = 10.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(transaction.eventType.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.SemiBold)
+                                        Text(transaction.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                    }
+                                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(transaction.referenceType.ifBlank { "Activity" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(formatTransactionDate(transaction.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                 }
                                 Divider(color = MaterialTheme.colorScheme.outlineVariant)
                             }
@@ -290,6 +326,35 @@ class ProviderEarningsScreen : Screen {
                     model.savePayoutProfile(method, name, number)
                     showProfileDialog = false
                 }
+            )
+        }
+
+        selectedTransaction?.let { transaction ->
+            AlertDialog(
+                onDismissRequest = { selectedTransaction = null },
+                title = { Text(transaction.eventType.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(transaction.description.ifBlank { "Financial activity" })
+                        Text("Date: ${formatTransactionDate(transaction.createdAt)}", style = MaterialTheme.typography.bodySmall)
+                        Text("Reference: ${transaction.referenceType} / ${transaction.referenceId}", style = MaterialTheme.typography.bodySmall)
+                        Divider()
+                        Text("Ledger entries", fontWeight = FontWeight.SemiBold)
+                        transaction.postings.forEach { posting ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(posting.bucket, style = MaterialTheme.typography.bodyMedium)
+                                    Text(posting.partyType, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text(
+                                    "${if (posting.deltaMinor >= 0) "+" else ""}${formatPhp(posting.deltaMinor)}",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { selectedTransaction = null }) { Text("Close") } }
             )
         }
     }
@@ -362,4 +427,20 @@ private fun formatPhp(minor: Long): String {
     val pesos = minor / 100
     val centavos = kotlin.math.abs(minor % 100).toString().padStart(2, '0')
     return "₱$pesos.$centavos"
+}
+
+private fun transactionMatchesFilter(transaction: FinancialTransaction, filter: String): Boolean {
+    val event = transaction.eventType.uppercase()
+    return when (filter) {
+        "EARNINGS" -> event.contains("EARNING") || event.contains("COMMISSION")
+        "PAYOUTS" -> event.contains("PAYOUT")
+        "CASH" -> event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE")
+        "OTHER" -> !(event.contains("EARNING") || event.contains("COMMISSION") || event.contains("PAYOUT") || event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE"))
+        else -> true
+    }
+}
+
+private fun formatTransactionDate(timestamp: Long): String {
+    if (timestamp <= 0L) return "Date unavailable"
+    return SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault()).format(Date(timestamp))
 }
