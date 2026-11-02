@@ -129,7 +129,7 @@ Provider payouts remain manual until an approved transfer API is integrated. An 
 4. For an outbound provider payout, record the actual BDO debit as `OUTBOUND`. It matches only a payout already marked `PAID` with the same transfer reference and amount.
 5. `reconcileBdoSettlements` saves an auditable reconciliation snapshot listing unmatched bank transfers, expected settlements not yet received, and paid payouts without a matching BDO debit.
 
-The BDO workflow records statement evidence and reconciles it against expected settlement/payout records. It does not connect to BDO APIs, parse bank statements automatically, or create an accounting journal movement from a bank statement line. Importing statement files and reconciling the bank's closing balance against the accounting cash/bank control account remain future integration work; do not treat the current report's `balanced` flag as proof that the BDO statement closing balance equals the general ledger.
+The BDO workflow does not connect to BDO APIs or parse statement files automatically; an administrator records each actual statement line. Its `balanced` flag is true only when transfer references match expected settlements/paid payouts, no expected inbound settlement or paid payout remains unmatched, and the BDO statement closing balance equals the opening balance plus the period movements posted to `finance/accounts/bdo_bank` from the immutable journal. The statement period must cover all bank lines being reconciled, and every line must be recorded once. The current workflow does not yet automatically ingest BDO files or fetch balances from the bank.
 
 ### BDO callable exports
 
