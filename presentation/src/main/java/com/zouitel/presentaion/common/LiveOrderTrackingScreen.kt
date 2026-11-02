@@ -116,7 +116,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                 )
                                 if (currentOrder.paymentStatus != "PAID" && currentOrder.checkoutUrl.isNotBlank()) {
                                     Button(onClick = { if (currentOrder.checkoutUrl.startsWith("https://checkout.bdo.com.ph/")) uriHandler.openUri(currentOrder.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
-                                        Text("Pay with GCash · BDO Checkout")
+                                        Text("Continue to BDO Checkout")
                                     }
                                 } else if (currentOrder.paymentMethod == "GCASH" && currentOrder.paymentStatus != "PAID") {
                                     Text("Waiting for the BDO Checkout payment request link.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
