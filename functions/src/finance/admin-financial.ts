@@ -11,6 +11,7 @@ type PaymentRecord = {
   id: string; payerId: string; status: string; method: string; transactionType: string;
   orderId?: string; tripId?: string; amountMinor: number; refundedAmountMinor?: number; refundReservedAmountMinor?: number;
   currency: string; createdAt: number; updatedAt?: number; completedAt?: number | null;
+  provider?: string; checkoutUrl?: string; providerReference?: string;
 };
 type RefundCase = {
   id: string; paymentId: string; payerId: string; amountMinor: number; currency: "PHP";
@@ -64,7 +65,7 @@ export const getAdminPaymentMonitor = onCall({ enforceAppCheck: true }, async (c
     .map((item) => ({
       paymentId: item.id, payerId: item.payerId, status: item.status, method: item.method,
       transactionType: item.transactionType, orderId: item.orderId ?? "", tripId: item.tripId ?? "",
-      amountMinor: item.amountMinor, refundedAmountMinor: item.refundedAmountMinor ?? 0,
+      amountMinor: item.amountMinor, provider: item.provider ?? "", checkoutUrl: item.checkoutUrl ?? "", providerReference: item.providerReference ?? "", refundedAmountMinor: item.refundedAmountMinor ?? 0,
       refundableMinor: Math.max(0, item.amountMinor - (item.refundedAmountMinor ?? 0)),
       currency: item.currency, createdAt: item.createdAt, updatedAt: item.updatedAt ?? item.createdAt,
     }));
