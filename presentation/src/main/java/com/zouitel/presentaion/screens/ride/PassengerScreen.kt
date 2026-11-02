@@ -137,7 +137,10 @@ class PassengerScreen : Screen {
         }
 
         LaunchedEffect(paymentError) {
-            paymentError?.let { snackbarHostState.showSnackbar(it) }
+            paymentError?.let {
+                snackbarHostState.showSnackbar(it)
+                screenModel.clearPaymentError()
+            }
         }
 
         LaunchedEffect(Unit) {
