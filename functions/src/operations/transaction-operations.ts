@@ -1,5 +1,7 @@
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { buildOrderPaymentAllocations, buildRidePaymentAllocations } from "../finance/payment-allocations.js";
+import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -22,6 +24,52 @@ function fail(message: string): never {
 }
 function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+async function ensureOrderAllocations(orderId: string, courierId: string): Promise<void> {
+  const orderSnapshot = await db().ref("orders/" + orderId).get();
+  if (!orderSnapshot.exists()) return;
+  const order = orderSnapshot.val() as Record<string, any>;
+  const paymentId = readString(order.paymentId);
+  if (!paymentId) return;
+  const paymentSnapshot = await db().ref("payments/" + paymentId).get();
+  if (!paymentSnapshot.exists()) fail("The order payment record is missing.");
+  const payment = paymentSnapshot.val() as Record<string, any>;
+  const existing = await db().ref("paymentAllocations/" + paymentId).get();
+  if (!existing.exists()) {
+    const breakdown = order.paymentBreakdown as Record<string, number>;
+    const allocations = buildOrderPaymentAllocations({ paymentId, orderId, merchantOwnerId: readString(order.merchantOwnerId), courierId, breakdown: breakdown as any, providerFeePayer: order.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM", createdAt: Date.now() });
+    const rows: Record<string, unknown> = {};
+    for (const allocation of allocations) rows[allocation.id] = allocation;
+    const updates: Record<string, unknown> = {};
+    updates["paymentAllocations/" + paymentId] = rows;
+    updates["payments/" + paymentId + "/deliveryId"] = courierId;
+    updates["payments/" + paymentId + "/updatedAt"] = Date.now();
+    await db().ref().update(updates);
+  } else if (payment.deliveryId !== courierId) {
+    throw new HttpsError("failed-precondition", "Payment allocations already exist for a different courier.");
+  }
+  const latest = await db().ref("payments/" + paymentId).get();
+  if (latest.child("status").val() === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
+}
+
+async function ensureRideAllocations(tripId: string, driverId: string): Promise<void> {
+  const tripSnapshot = await db().ref("trips/" + tripId).get();
+  if (!tripSnapshot.exists()) return;
+  const trip = tripSnapshot.val() as Record<string, any>;
+  const paymentId = readString(trip.paymentId);
+  if (!paymentId) return;
+  const existing = await db().ref("paymentAllocations/" + paymentId).get();
+  if (!existing.exists()) {
+    const breakdown = trip.paymentBreakdown as Record<string, number>;
+    const allocations = buildRidePaymentAllocations({ paymentId, tripId, driverId, fareMinor: breakdown.fareMinor, driverEarningsMinor: breakdown.driverEarningsMinor, platformCommissionMinor: breakdown.platformCommissionMinor, providerFeeMinor: breakdown.providerFeeMinor, providerFeePayer: trip.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM", customerTotalMinor: breakdown.customerTotalMinor, createdAt: Date.now() });
+    const rows: Record<string, unknown> = {};
+    for (const allocation of allocations) rows[allocation.id] = allocation;
+    const updates: Record<string, unknown> = {};
+    updates["paymentAllocations/" + paymentId] = rows;
+    await db().ref().update(updates);
+  }
+  const payment = await db().ref("payments/" + paymentId).get();
+  if (payment.child("status").val() === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
 }
 export function isAllowedOrderTransition(from: string, to: string): boolean {
   return (from === "PLACED" && (to === "ACCEPTED" || to === "CANCELLED"))
