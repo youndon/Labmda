@@ -55,7 +55,8 @@ function validateRouteMatches(record: Record<string, any>, quote: QuoteRecord, l
 }
 export function validateOrderMatches(order: Record<string, any>, quote: QuoteRecord, uid: string): void {
   if (order.clientId !== uid || order.sourceId !== quote.sourceId
-    || order.status !== "PLACED" || order.paymentMethod !== "CASH") {
+    || !["PLACED", "ACCEPTED", "PREPARING", "OUT_FOR_DELIVERY"].includes(order.status)
+    || order.paymentMethod !== "CASH") {
     throw new HttpsError("failed-precondition", "Order ownership, status, merchant or payment method does not match the quote.");
   }
   const expectedType = quote.kind === "FOOD" ? "FOOD" : "RETAIL";
@@ -79,7 +80,8 @@ export function validateOrderMatches(order: Record<string, any>, quote: QuoteRec
   }
 }
 export function validateRideMatches(trip: Record<string, any>, quote: QuoteRecord, uid: string): void {
-  if (trip.passengerId !== uid || trip.status !== "ACCEPTED" || typeof trip.driverId !== "string" || !trip.driverId) {
+  if (trip.passengerId !== uid || !["ACCEPTED", "IN_PROGRESS", "COMPLETED"].includes(trip.status)
+    || typeof trip.driverId !== "string" || !trip.driverId) {
     throw new HttpsError("failed-precondition", "The ride must belong to you and have an accepted driver before cash payment is initialized.");
   }
   validateRouteMatches(trip, quote, "Ride");
