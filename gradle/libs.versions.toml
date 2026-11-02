@@ -106,6 +106,7 @@ firebase-auth = { module = "dev.gitlive:firebase-auth", version.ref = "firebase"
 firebase-firestore = { module = "dev.gitlive:firebase-firestore", version.ref = "firebase" }
 firebase-database = { module = "dev.gitlive:firebase-database", version.ref = "firebase" }
 firebase-storage = { module = "dev.gitlive:firebase-storage", version.ref = "firebase" }
+firebase-functions = { module = "dev.gitlive:firebase-functions", version.ref = "firebase" }
 
 #Google GMS.
 play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuth" }
