@@ -319,7 +319,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
                         OutlinedTextField(
                             value = paymentMethod,
-                            onValueChange = { paymentMethod = it },
+                            onValueChange = {},
+                            readOnly = true,
                             label = { Text("Payment Method") },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
