@@ -45,6 +45,22 @@ describe("financial ledger invariants", () => {
     expect(() => validateFinancialOperation(operation)).toThrow(/Firebase-safe/i);
   });
 
+  it("rejects unsupported runtime enum values", () => {
+    const operation = createFinancialTransfer(base);
+    expect(() => validateFinancialOperation({
+      ...operation,
+      eventType: "UNKNOWN" as typeof operation.eventType,
+    })).toThrow(/event type/i);
+    expect(() => validateFinancialOperation({
+      ...operation,
+      postings: [{ ...operation.postings[0]!, bucket: "WALLET" as typeof operation.postings[0]["bucket"] }, operation.postings[1]!],
+    })).toThrow(/balance bucket/i);
+    expect(() => validateFinancialOperation({
+      ...operation,
+      postings: [{ ...operation.postings[0]!, partyType: "GATEWAY" as typeof operation.postings[0]["partyType"] }, operation.postings[1]!],
+    })).toThrow(/party type/i);
+  });
+
   it("rejects non-PHP currency and empty party references", () => {
     const operation = createFinancialTransfer(base);
     expect(() => validateFinancialOperation({ ...operation, currency: "USD" as "PHP" })).toThrow(/PHP/);
