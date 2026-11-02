@@ -71,7 +71,7 @@ This fragment intentionally does not grant an admin bypass: the repository does 
 
 ## Phase 06 — provider earnings and manual payouts
 
-Provider balances continue to come from the immutable `finance/entries` journal and the cached `finance/accounts` projection. All payout amounts are integer PHP centavos.
+Provider balances continue to come from the immutable `finance/entries` journal and the cached `finance/accounts` projection. The ledger transaction also maintains a private `finance/providerActivity/{uid}` projection so the earnings callable does not need to scan every operation in the central journal. All payout amounts are integer PHP centavos.
 
 ### Provider identity and wallet accounts
 
