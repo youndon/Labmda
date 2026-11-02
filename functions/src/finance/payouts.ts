@@ -18,8 +18,8 @@ function uidFrom(call: { auth?: { uid?: string } | null }): string {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
   return uid;
 }
-function requireAdmin(call: { auth?: { token?: Record<string, unknown> } | null }): void {
-  if (call.auth?.token?.admin !== true) throw new HttpsError("permission-denied", "Administrator access is required.");
+function requireAdmin(claims: Record<string, unknown> | undefined): void {
+  if (claims?.admin !== true) throw new HttpsError("permission-denied", "Administrator access is required.");
 }
 function safeId(value: string): boolean {
   return /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -232,7 +232,7 @@ export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call)
 });
 
 export const getPendingPayoutRequests = onCall({ enforceAppCheck: true }, async (call) => {
-  requireAdmin(call);
+  requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const [requested, approved] = await Promise.all([
     db().ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get(),
     db().ref("payoutRequests").orderByChild("status").equalTo("APPROVED").get(),
@@ -266,14 +266,14 @@ async function updatePayoutStatus(
 }
 
 export const approvePayoutRequest = onCall({ enforceAppCheck: true }, async (call) => {
-  requireAdmin(call);
+  requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const payoutId = String((call.data as { payoutId?: unknown }).payoutId ?? "");
   const payout = await updatePayoutStatus(payoutId, ["REQUESTED"], "APPROVED", { approvedAt: Date.now(), approvedBy: call.auth!.uid });
   return { payoutId, status: payout.status };
 });
 
 export const rejectPayoutRequest = onCall({ enforceAppCheck: true }, async (call) => {
-  requireAdmin(call);
+  requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const payoutId = String((call.data as { payoutId?: unknown }).payoutId ?? "");
   const snapshot = await db().ref(`payoutRequests/${payoutId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
@@ -299,7 +299,7 @@ export const rejectPayoutRequest = onCall({ enforceAppCheck: true }, async (call
 });
 
 export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) => {
-  requireAdmin(call);
+  requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const data = call.data as { payoutId?: unknown; transferReference?: unknown; note?: unknown };
   const payoutId = String(data.payoutId ?? "");
   const transferReference = typeof data.transferReference === "string" ? data.transferReference.trim() : "";
