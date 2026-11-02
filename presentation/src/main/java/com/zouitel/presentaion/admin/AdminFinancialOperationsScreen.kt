@@ -319,6 +319,7 @@ class AdminFinancialOperationsScreen : Screen {
                                             bdoConfirmTarget = payment
                                             bdoReference = ""
                                             bdoAmount = BigDecimal.valueOf(payment.amountMinor, 2).stripTrailingZeros().toPlainString()
+                                            bdoMethodVerified = false
                                         }, enabled = !busy) { Text("Verify paid transaction") }
                                     }
                                 }
