@@ -16,6 +16,7 @@ data class Trip(
     val dropoffLng: Double = 0.0,
     val fare: Double = 0.0,
     val paymentStatus: String = "",
+    val checkoutUrl: String = "",
     val driverId: String = "",
     val driverName: String = "",
     val driverPhone: String = "",
