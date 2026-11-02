@@ -129,13 +129,13 @@ class AdminPricingScreenModel : ScreenModel {
         }
     }
 
-    fun save(config: AdminPricingConfig) {
+    fun save(config: AdminPricingConfig, expectedVersion: Int) {
         if (_saving.value) return
         screenModelScope.launch {
             _saving.value = true
             _message.value = null
             runCatching {
-                val response = functions.httpsCallable("updateAdminPricingConfig").invoke(mapOf("config" to config)).data<AdminPricingSaveResponse>()
+                val response = functions.httpsCallable("updateAdminPricingConfig").invoke(mapOf("config" to config, "expectedVersion" to expectedVersion)).data<AdminPricingSaveResponse>()
                 _config.value = response.config
                 _configured.value = true
                 _message.value = "Pricing saved as version ${response.config.version}. New quotations will use this version."
@@ -279,7 +279,7 @@ class AdminPricingScreen : Screen {
                                         shop = AdminPricingShop(bps(shopCommission, "Shop commission")),
                                         providerFees = AdminPricingProviderFees(AdminPricingGcash(bps(gcashRate, "GCash rate"), pesos(gcashFixed, "GCash fixed fee"), gcashPayer))
                                     )
-                                    model.save(next)
+                                    model.save(next, config?.version ?: 0)
                                 }.onFailure { validationError = it.message ?: "Check the pricing values." }
                             },
                             enabled = !saving && !loading,
