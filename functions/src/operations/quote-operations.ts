@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getDatabase } from "firebase-admin/database";
+import { getDatabase, type Reference } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 const db = () => getDatabase();
@@ -28,13 +28,12 @@ async function claimQuote(quoteId: string, uid: string, kind: string) {
   if (!result.committed) throw new HttpsError("failed-precondition", "This quote is expired, already used, or belongs to another account.");
   return { ref, quote: result.snapshot.val() as Record<string, any> };
 }
-async function restoreQuote(ref: FirebaseDatabaseReference, quote: Record<string, any>) {
+async function restoreQuote(ref: Reference, quote: Record<string, any>) {
   await ref.transaction((current: Record<string, any> | null) => {
     if (!current || current.status !== "CREATING" || current.creationStartedAt !== quote.creationStartedAt) return;
     return { ...current, status: "QUOTED", creationStartedAt: null };
   }, undefined, false);
 }
-type FirebaseDatabaseReference = ReturnType<ReturnType<typeof db>["ref"]>;
 
 /** Creates an order exclusively from the customer's unexpired server quote. */
 export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (call) => {
