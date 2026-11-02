@@ -1,5 +1,6 @@
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { confirmBdoGcashPaymentRecord } from "./bdo-payment-confirmation.js";
 
 const db = () => getDatabase();
 const safeId = /^[A-Za-z0-9_-]{1,128}$/;
