@@ -34,6 +34,12 @@ At collection, the receipt operation balances the full customer payment against 
 
 The merchant and platform cash-owed accounts are deliberately separate. A merchant settlement cannot reduce the commission owed to the platform, and a platform remittance cannot consume the merchant's cash.
 
+The admin reconciliation callable also checks the operational cash equation:
+
+`cash collected = merchant cash settled + platform commission remitted + collector retained earnings + current cash outstanding`
+
+It stores both this cash reconciliation and the underlying immutable-ledger projection check. A non-zero difference is reported as unbalanced; it is not silently adjusted.
+
 ## Authorization contract
 
 - Every callable requires Firebase Authentication and App Check.
