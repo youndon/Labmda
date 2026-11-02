@@ -42,6 +42,16 @@ class PanelScreen : Screen {
                 }
 
                 Button(
+                    onClick = { navigator?.push(AdminPricingScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Commissions & Fees")
+                }
+
+                Button(
                     onClick = { navigator?.push(AdminPayoutScreen()) },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)
