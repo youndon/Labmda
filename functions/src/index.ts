@@ -166,6 +166,7 @@ export {
   claimRide,
   transitionTripStatus,
   cancelPassengerTrip,
+  cancelCustomerOrder,
 } from "./operations/transaction-operations.js";
 
 // Phase 04 — authenticated cash collection, settlement, remittance and reconciliation.
