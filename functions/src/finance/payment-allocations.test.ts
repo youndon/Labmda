@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrderPaymentAllocations, buildRidePaymentAllocations } from "./payment-allocations.js";
+import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations } from "./payment-allocations.js";
 import type { MoneyBreakdown } from "../pricing/engine.js";
 
 const orderBreakdown: MoneyBreakdown = {
@@ -47,6 +47,37 @@ describe("quote-backed payment allocations", () => {
       paymentId: "payment_ride", tripId: "trip_1", driverId: "driver_uid",
       fareMinor: 5_000, driverEarningsMinor: 4_100, platformCommissionMinor: 1_000,
       providerFeeMinor: 150, providerFeePayer: "CUSTOMER", customerTotalMinor: 5_250, createdAt: 100,
+    })).toThrow(/do not reconcile/i);
+  });
+});
+
+describe("standalone delivery allocations", () => {
+  it("splits the delivery fee between courier and platform", () => {
+    const rows = buildStandaloneDeliveryAllocations({
+      paymentId: "payment_delivery", orderId: "delivery_1", courierId: "courier_uid",
+      deliveryFeeMinor: 1_000, courierEarningsMinor: 850, platformCommissionMinor: 150,
+      providerFeeMinor: 0, providerFeePayer: "PLATFORM", customerTotalMinor: 1_000, createdAt: 100,
+    });
+    expect(rows.map((row) => [row.beneficiaryType, row.amountMinor])).toEqual([
+      ["DELIVERY", 850], ["PLATFORM", 150],
+    ]);
+  });
+
+  it("includes a customer-paid checkout fee without reducing courier earnings", () => {
+    const rows = buildStandaloneDeliveryAllocations({
+      paymentId: "payment_delivery_gcash", orderId: "delivery_2", courierId: "courier_uid",
+      deliveryFeeMinor: 1_000, courierEarningsMinor: 850, platformCommissionMinor: 150,
+      providerFeeMinor: 25, providerFeePayer: "CUSTOMER", customerTotalMinor: 1_025, createdAt: 100,
+    });
+    expect(rows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(1_025);
+    expect(rows[1].amountMinor).toBe(175);
+  });
+
+  it("rejects a delivery split that does not balance", () => {
+    expect(() => buildStandaloneDeliveryAllocations({
+      paymentId: "payment_delivery", orderId: "delivery_1", courierId: "courier_uid",
+      deliveryFeeMinor: 1_000, courierEarningsMinor: 850, platformCommissionMinor: 100,
+      providerFeeMinor: 0, providerFeePayer: "PLATFORM", customerTotalMinor: 1_000, createdAt: 100,
     })).toThrow(/do not reconcile/i);
   });
 });
