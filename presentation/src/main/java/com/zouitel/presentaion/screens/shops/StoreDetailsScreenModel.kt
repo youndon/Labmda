@@ -111,7 +111,7 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
                 )
                 val quoteId = quote["quoteId"] as? String
                     ?: error("The server did not return a shop order quote.")
-                val created = com.zouitel.presentaation.screens.trustedTransactionCallData(
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
                     "createOrderFromQuote",
                     mapOf("quoteId" to quoteId, "kind" to "SHOP")
                 )
