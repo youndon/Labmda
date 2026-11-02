@@ -211,10 +211,10 @@ class AdminFinanceOverviewScreen : Screen {
                                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(Icons.Default.TrendingUp, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                                        Text("  PLATFORM REVENUE AVAILABLE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                        Text("  PLATFORM EARNINGS AVAILABLE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
                                     }
                                     Text("${data.platformRevenueAvailableMinor.let(::formatFinancePhp)}", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
-                                    Text("Current available balance in the platform revenue ledger account. Not gross sales.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    Text("Available balance across platform ledger accounts. This is not gross sales.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
                             }
                         }
