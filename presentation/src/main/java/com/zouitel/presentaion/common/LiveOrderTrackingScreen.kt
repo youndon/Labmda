@@ -239,7 +239,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     }
 
                     // Allow Client Cancellation if Order is still in PLACED state
-                    if (currentOrder.status == OrderStatus.PLACED || currentOrder.status == OrderStatus.PENDING_PAYMENT) {
+                    if (currentOrder.status == OrderStatus.PLACED || currentOrder.status == OrderStatus.PENDING_PAYMENT || (currentOrder.orderType == com.zouitel.presentaion.model.OrderType.DELIVERY && currentOrder.status == OrderStatus.OUT_FOR_DELIVERY && currentOrder.deliveryId.isBlank())) {
                         item {
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
