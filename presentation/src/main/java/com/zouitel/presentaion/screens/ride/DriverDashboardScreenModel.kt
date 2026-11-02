@@ -99,6 +99,7 @@ class DriverDashboardScreenModel : ScreenModel {
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
                             driverId = driverId,
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
