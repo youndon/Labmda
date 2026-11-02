@@ -152,6 +152,7 @@ export const createCashPaymentFromQuote = onCall({ enforceAppCheck: true }, asyn
   }
 
   const paymentId = `pay_${quoteId}`;
+  const { transaction, isTrip } = await loadTransaction(quote.kind, transactionId, uid, quote.sourceId);
   const claim = await quoteRef.transaction((current: QuoteRecord | null) => {
     if (!current || current.uid !== uid || current.quoteId !== quoteId) return;
     if (current.status === "QUOTED") {
@@ -167,17 +168,6 @@ export const createCashPaymentFromQuote = onCall({ enforceAppCheck: true }, asyn
     throw new HttpsError("already-exists", "This quote has already been used for another transaction.");
   }
 
-  const { transaction, isTrip } = await loadTransaction(quote.kind, transactionId, uid, quote.sourceId);
-  const transactionPath = quote.kind === "RIDE" || quote.kind === "DELIVERY" ? "trips" : "orders";
-  const transactionPaymentRef = db().ref(`${transactionPath}/${transactionId}/paymentId`);
-  const transactionPaymentClaim = await transactionPaymentRef.transaction((current: string | null) => {
-    if (current === null || current === "") return paymentId;
-    if (current === paymentId) return current;
-    return;
-  }, undefined, false);
-  if (transactionPaymentClaim.snapshot.val() !== paymentId) {
-    throw new HttpsError("already-exists", "This transaction already has a different payment.");
-  }
   const payment = buildPayment(quote, transactionId, transaction, isTrip, uid, Date.now());
   const existingPayment = await db().ref(`payments/${paymentId}`).get();
   if (existingPayment.exists()) {
@@ -205,6 +195,16 @@ export const createCashPaymentFromQuote = onCall({ enforceAppCheck: true }, asyn
     merchantId, collectorId: isTrip ? (typeof transaction.driverId === "string" ? transaction.driverId : "") : payment.deliveryId,
     now,
   });
+  const transactionPath = isTrip ? "trips" : "orders";
+  const transactionPaymentRef = db().ref(`${transactionPath}/${transactionId}/paymentId`);
+  const transactionPaymentClaim = await transactionPaymentRef.transaction((current: string | null) => {
+    if (current === null || current === "") return paymentId;
+    if (current === paymentId) return current;
+    return;
+  }, undefined, false);
+  if (transactionPaymentClaim.snapshot.val() !== paymentId) {
+    throw new HttpsError("already-exists", "This transaction already has a different payment.");
+  }
   const updates: Record<string, unknown> = {
     [`payments/${paymentId}`]: payment,
     [`pricing/quotes/${quoteId}/status`]: "CONSUMED",
