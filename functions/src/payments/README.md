@@ -1,53 +1,42 @@
-# Development-only GCash payment simulation
+# GCash payment lifecycle — integration boundary
 
-This module implements a test checkout lifecycle, not a payment gateway integration.
+## Current implementation status
 
-## Safety boundary
+The repository currently contains a **development-only simulated GCash checkout**. It is not connected to a live GCash merchant API. Simulation sessions are marked `provider: SIMULATED` and `simulationOnly: true`; simulated success does not create a succeeded financial payment and must never post to the ledger.
 
-- The simulated provider is selected only when `FUNCTIONS_EMULATOR=true`, `NODE_ENV` is not production, and `K_SERVICE` is absent.
-- Callable functions fail closed outside that emulator runtime.
-- Every session, event, payment intent and refund carries `provider: SIMULATED` and `simulationOnly: true`.
-- A simulated success updates only `paymentSessions/{sessionId}`. The linked `paymentIntents/{paymentId}` deliberately remains `PROCESSING`; it is not a real `Payment` and cannot trigger financial ledger posting, merchant earnings, payout, or fulfillment.
-- Simulated refunds use `SIMULATED_SUCCEEDED`, not the real refund status enum, and never post to the financial ledger or move money.
-- The simulation result and refund callables are development tooling. Do not add them to a production client build or expose a production endpoint for them.
-- BDO is not implemented or activated.
+The live GCash API Portal / partner approval has **not** been obtained. This change adds a provider-neutral contract and a fail-closed capability gate; it does not invent GCash HTTP endpoints, credentials, webhook headers, signature algorithms, or response fields.
 
-## Flow
+## Architecture retained
 
-1. The client requests a server quote using the existing quote callables.
-2. `createSimulatedGcashSession({ quoteId })` verifies ownership, quote expiry, GCash method and the server-calculated PHP-centavo total.
-3. A simulated session and non-settleable payment intent are created.
-4. Development UI chooses simulated `SUCCEEDED` or `FAILED` using `simulateGcashPaymentResult({ sessionId, outcome })`.
-5. The webhook processor verifies an HMAC signature, atomically records the event ID and updates checkout state. Repeated event IDs are no-ops; late events become `EXPIRED`.
-6. A scheduled task expires abandoned pending sessions.
-7. `createSimulatedGcashRefund({ sessionId, reason, amountMinor? })` demonstrates refund state without issuing a real refund.
-8. This simulation is not a real GCash collection channel. A production GCash flow must not be enabled until the business collection account/QR arrangement and an authoritative transaction-verification mechanism are selected and approved. BDO is the administrator's bank/settlement destination; it is not implemented as a customer GCash checkout provider.
+- Existing server-generated quotes remain authoritative for order, shop, delivery and ride amounts.
+- All money remains integer PHP centavos.
+- Existing financial ledger, payment allocations, commission calculations and wallet projections remain provider-independent.
+- Android must receive only a short-lived checkout URL/reference; it must never receive GCash API credentials.
+- A provider redirect or Android callback is not proof of payment.
+- Only an authoritative provider verification result may transition a real payment to `SUCCEEDED` and trigger ledger posting.
+- Collection and disbursement are separate capabilities. GCash collection approval does not imply approval to send payouts.
 
-## Callable exports
+## New contract
 
-- `createSimulatedGcashSession`
-- `simulateGcashPaymentResult` (emulator only)
-- `createSimulatedGcashRefund` (emulator only)
+`gcash-provider-contract.ts` defines Labmda's internal normalized contract for creating checkout, verifying collection, requesting refunds, creating GCash payouts and verifying payout results. These are **Labmda interfaces**, not representations of GCash's undocumented API schema. The concrete adapter must map them using the merchant API pack supplied by GCash.
 
-## Android development client
+`assertGCashCapabilityReady` fails closed unless the selected capability has explicit provider approval, an approval reference, merchant account ID, verified API contract version, server-side credentials, authoritative status verification and explicit admin enablement. Collection and disbursement readiness are checked independently.
 
-The presentation module uses the GitLive `firebase-functions` SDK. Instantiate `FirebaseSimulatedPaymentCheckoutRepository` with an explicit Functions Emulator host before starting checkout:
+## Work still blocked on GCash approval
 
-- Android Studio emulator: `10.0.2.2`
-- Physical Android device: the development machine's reachable LAN IP
-- Functions Emulator port: `5001`
+### Collection
+- Obtain approved GCash merchant/API access and sandbox documentation.
+- Confirm hosted checkout or QR flow, callback/webhook contract, signature verification, transaction lookup, expiry, refunds, fees and settlement reporting.
+- Implement the concrete adapter and trusted webhook/verification endpoint.
+- Create server-owned payment and allocation records from the existing quote and actual order/trip assignments; current app order creation is not yet a complete trusted payment-creation boundary.
+- After verified success, update the persisted payment and call the existing idempotent financial ledger posting service.
 
-Example:
+### Automatic GCash payouts
+- Obtain separate approval for the GCash disbursement API/service.
+- Confirm recipient eligibility, required recipient data, prefunding, limits, fees, idempotency behavior, status lookup/webhooks and reversal handling.
+- Implement the concrete payout adapter and a retry-safe worker. A payout must not be marked paid until GCash confirms it.
+- Existing payout requests currently use admin approval and manual transfer confirmation; they are not automatic.
 
-```kotlin
-val checkout = FirebaseSimulatedPaymentCheckoutRepository(
-    emulatorHost = "10.0.2.2",
-    emulatorPort = 5001
-)
-val pending = checkout.createGcashSession(quoteId)
-val completed = checkout.simulateResult(pending, success = true)
-```
+## Safety rule
 
-Do not instantiate this development repository in a production build. It always redirects GitLive Functions to the emulator and does not provide a production fallback.
-
-The existing cash collection and financial ledger flows are unchanged.
+Until the relevant capability passes its readiness gate and the real adapter is implemented and tested, keep live GCash collection and disbursement disabled. Do not switch the simulated provider into production or interpret a simulated session as customer funds.
