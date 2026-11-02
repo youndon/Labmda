@@ -6,7 +6,7 @@ import { createFinancialTransfer, postFinancialOperation } from "./ledger.js";
 
 const db = () => getDatabase();
 type Direction = "INBOUND" | "OUTBOUND";
-type Expected = { id: string; transferReference: string; amountMinor: number; source: "XENDIT" | "MANUAL"; status: "EXPECTED" | "SETTLED"; createdAt: number; createdBy: string };
+type Expected = { id: string; transferReference: string; amountMinor: number; source: "BDO" | "MANUAL"; status: "EXPECTED" | "SETTLED"; createdAt: number; createdBy: string };
 type Transfer = { id: string; bank: "BDO"; direction: Direction; transferReference: string; amountMinor: number; currency: "PHP"; transactionAt: number; status: "MATCHED" | "UNMATCHED"; matchedType: "PAYOUT" | "EXPECTED_SETTLEMENT" | null; matchedId: string | null; recordedAt: number; recordedBy: string; note: string };
 
 function admin(call: { auth?: { uid?: string; token?: Record<string, unknown> } | null }): string {
@@ -24,7 +24,7 @@ function amount(value: unknown): number {
   return value as number;
 }
 
-/** Register an expected Xendit/manual settlement into the company's BDO account. */
+/** Register an expected BDO Checkout/manual settlement into the company's BDO account. */
 export const createExpectedBdoSettlement = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = admin(call);
   const data = call.data as { settlementId?: unknown; transferReference?: unknown; amountMinor?: unknown; source?: unknown };
@@ -32,8 +32,8 @@ export const createExpectedBdoSettlement = onCall({ enforceAppCheck: true }, asy
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new HttpsError("invalid-argument", "Settlement ID is invalid.");
   const transferReference = ref(data.transferReference);
   const amountMinor = amount(data.amountMinor);
-  const source = data.source === undefined ? "XENDIT" : data.source;
-  if (source !== "XENDIT" && source !== "MANUAL") throw new HttpsError("invalid-argument", "Source must be XENDIT or MANUAL.");
+  const source = data.source === undefined ? "BDO" : data.source;
+  if (source !== "BDO" && source !== "MANUAL") throw new HttpsError("invalid-argument", "Source must be BDO or MANUAL.");
   const record: Expected = { id, transferReference, amountMinor, source, status: "EXPECTED", createdAt: Date.now(), createdBy: uid };
   const result = await db().ref("expectedBdoSettlements").transaction((raw: Record<string, Expected> | null) => {
     const current = raw ?? {};
@@ -51,7 +51,7 @@ export const createExpectedBdoSettlement = onCall({ enforceAppCheck: true }, asy
 });
 
 /**
- * Record a real BDO statement line. Inbound lines match expected Xendit/manual
+ * Record a real BDO statement line. Inbound lines match expected BDO Checkout/manual
  * settlements; outbound lines match already-paid provider payouts. This does
  * not initiate transfers or mark payouts paid.
  */
