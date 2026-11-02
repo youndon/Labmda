@@ -38,6 +38,16 @@
         ".read": "auth != null && (data.child('payerId').val() === auth.uid || data.child('collectorId').val() === auth.uid)"
       }
     },
+    "payoutProfiles": {
+      "$uid": {
+        ".read": false,
+        ".write": false
+      }
+    },
+    "payoutRequests": {
+      ".read": false,
+      ".write": false
+    },
     "payouts": {
       "$payoutId": {
         ".write": false,
