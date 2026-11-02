@@ -2,6 +2,7 @@ import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations } from "../finance/payment-allocations.js";
 import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js";
+import { createFinancialTransfer, postFinancialOperation } from "../finance/ledger.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -60,6 +61,45 @@ async function ensureOrderAllocations(orderId: string, courierId: string): Promi
   }
   const latest = await db().ref("payments/" + paymentId).get();
   if (latest.child("status").val() === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
+}
+
+async function releaseSucceededOnlinePaymentAllocations(paymentId: string): Promise<void> {
+  const paymentSnapshot = await db().ref("payments/" + paymentId).get();
+  if (!paymentSnapshot.exists()) return;
+  const payment = paymentSnapshot.val() as Record<string, any>;
+  // Cash earners already hold their physical cash; cash settlement uses the
+  // separate CASH_OWED/CASH_RETAINED workflow and must not credit wallets twice.
+  if (payment.method !== "GCASH" || payment.status !== "SUCCEEDED") return;
+
+  const allocationsSnapshot = await db().ref("paymentAllocations/" + paymentId).get();
+  if (!allocationsSnapshot.exists()) throw new HttpsError("failed-precondition", "Payment allocations are missing.");
+  const allocations = allocationsSnapshot.val() as Record<string, Record<string, any>>;
+  for (const [allocationId, allocation] of Object.entries(allocations)) {
+    if (allocation.status === "READY") continue;
+    if (allocation.status !== "PENDING" || allocation.paymentId !== paymentId
+      || !Number.isSafeInteger(allocation.amountMinor) || allocation.amountMinor <= 0
+      || allocation.currency !== "PHP") {
+      throw new HttpsError("failed-precondition", "A payment allocation cannot be released.");
+    }
+    const partyType = allocation.beneficiaryType === "DELIVERY" ? "COURIER"
+      : allocation.beneficiaryType;
+    const accountId = "wallet_" + String(allocation.beneficiaryType).toLowerCase() + "_" + allocation.beneficiaryId;
+    const operation = createFinancialTransfer({
+      operationId: "payment_" + paymentId + "_allocation_" + allocationId + "_released",
+      eventType: "ADJUSTMENT", referenceType: "PAYMENT", referenceId: paymentId,
+      idempotencyKey: "payment_" + paymentId + "_allocation_" + allocationId + "_released",
+      createdAt: Date.now(), description: "Release completed-service payment allocation",
+      amountMinor: allocation.amountMinor,
+      source: { accountId, bucket: "PENDING", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
+      destination: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
+    });
+    await postFinancialOperation(db(), operation);
+    await db().ref("paymentAllocations/" + paymentId + "/" + allocationId).transaction((current: Record<string, any> | null) => {
+      if (!current || current.status === "READY") return current;
+      if (current.status !== "PENDING") return;
+      return { ...current, status: "READY", updatedAt: Date.now() };
+    }, undefined, false);
+  }
 }
 
 async function ensureRideAllocations(tripId: string, driverId: string): Promise<void> {
@@ -202,6 +242,10 @@ export const completeOrderDelivery = onCall({ enforceAppCheck: true }, async (ca
     return { ...current, status: "DELIVERED", deliveredAt: Date.now(), updatedAtTimestamp: Date.now() };
   }, undefined, false);
   if (!result.committed) fail("Only the assigned courier can complete an active delivery.");
+  const completedOrder = result.snapshot.val() as Record<string, any>;
+  if (typeof completedOrder.paymentId === "string" && completedOrder.paymentId) {
+    await releaseSucceededOnlinePaymentAllocations(completedOrder.paymentId);
+  }
   return { orderId, status: "DELIVERED" };
 });
 
@@ -253,6 +297,12 @@ export const transitionTripStatus = onCall({ enforceAppCheck: true }, async (cal
     return { ...current, status: nextStatus, updatedAtTimestamp: Date.now(), ...(nextStatus === "COMPLETED" ? { completedAt: Date.now() } : {}) };
   }, undefined, false);
   if (!result.committed) fail("Only the assigned driver can make this valid trip transition.");
+  if (nextStatus === "COMPLETED") {
+    const completedTrip = result.snapshot.val() as Record<string, any>;
+    if (typeof completedTrip.paymentId === "string" && completedTrip.paymentId) {
+      await releaseSucceededOnlinePaymentAllocations(completedTrip.paymentId);
+    }
+  }
   return { tripId, status: nextStatus };
 });
 
