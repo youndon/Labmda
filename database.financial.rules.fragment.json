@@ -46,7 +46,8 @@
     },
     "payoutRequests": {
       ".read": false,
-      ".write": false
+      ".write": false,
+      ".indexOn": ["uid", "status"]
     },
     "payouts": {
       "$payoutId": {
