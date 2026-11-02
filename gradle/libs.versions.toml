@@ -14,32 +14,22 @@ activityCompose = "1.13.0"
 kotlin = "2.4.20"
 appcompat = "1.8.0"
 lifecycle = "2.11.0"
-
-#Compose.
 compose-bom = "2026.09.00"
 material3 = "1.5.0-alpha28"
 compose-constraintlayout = "1.1.2"
 material = "1.14.0"
-#KotlinX.
 coroutines = "1.11.0"
-#Datastore.
 datastore = "1.2.1"
-
-#Coil
 coil = "3.6.3"
 coilNetworkKtor3 = "3.6.3"
 ktor = "3.6.0"
-
-#Voyager.
 materialIconsCore = "1.7.8"
 materialIconsExtended = "1.7.8"
 voyager = "2.2.21-1.10.3"
-#Koin.
 koin = "4.2.2"
-#Firebase.
 firebase = "2.7.0"
 firebaseDatabaseKtx = "22.0.2"
-
+firebaseAppCheck = "20.0.0"
 playServicesAuth = "22.0.0"
 
 [libraries]
@@ -57,8 +47,6 @@ kmp-maps-compose-utils = { module = "eu.buney.maps:kmp-maps-compose-utils", vers
 kmp-maps-compose = { module = "eu.buney.maps:kmp-maps-compose", version.ref = "kmpMapsCompose" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
-
-#Compose.
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
 ui = { group = "androidx.compose.ui", name = "ui" }
 compose-ui = { group = "androidx.compose.ui", name = "ui" }
@@ -73,44 +61,31 @@ compose-material = { group = "androidx.compose.material", name = "material" }
 compose-constraintlayout = { module = "androidx.constraintlayout:constraintlayout-compose", version.ref = "compose-constraintlayout" }
 lifecycle-compose-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 lifecycle-compose-runtime = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
-
-#Kotlinx.
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
-
-#DataStore.
 datastore = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
-#Koin.
 koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
 koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
 koin-compose = { module = "io.insert-koin:koin-androidx-compose", version.ref = "koin" }
 koin-worker = { module = "io.insert-koin:koin-androidx-workmanager", version.ref = "koin" }
 koin-coroutines = { module = "io.insert-koin:koin-core-coroutines", version.ref = "koin" }
 koin-startup = { module = "io.insert-koin:koin-androidx-startup", version.ref = "koin" }
-#Coil.
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
-coil-network-ktor3 = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coilNetworkKtor3" }
-
-#Native only.
+coil-network-ktor3 = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
-#IOS only.
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
-
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
-#Navigation.
 voyager-navigator = { module = "cafe.adriel.voyager:voyager-navigator", version.ref = "voyager" }
 voyager-screenModel = { module = "cafe.adriel.voyager:voyager-screenmodel", version.ref = "voyager" }
 voyager-transitions = { module = "cafe.adriel.voyager:voyager-transitions", version.ref = "voyager" }
 voyager-koin = { module = "cafe.adriel.voyager:voyager-koin", version.ref = "voyager" }
-#Firebase.
 firebase-auth = { module = "dev.gitlive:firebase-auth", version.ref = "firebase" }
 firebase-firestore = { module = "dev.gitlive:firebase-firestore", version.ref = "firebase" }
 firebase-database = { module = "dev.gitlive:firebase-database", version.ref = "firebase" }
 firebase-storage = { module = "dev.gitlive:firebase-storage", version.ref = "firebase" }
 firebase-functions = { module = "dev.gitlive:firebase-functions", version.ref = "firebase" }
-
-#Google GMS.
+firebase-appcheck-playintegrity = { module = "com.google.firebase:firebase-appcheck-playintegrity", version.ref = "firebaseAppCheck" }
+firebase-appcheck-debug = { module = "com.google.firebase:firebase-appcheck-debug", version.ref = "firebaseAppCheck" }
 play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuth" }
-#Ktor.
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
