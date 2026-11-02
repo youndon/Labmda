@@ -1,11 +1,11 @@
 {
   "rules": {
     "orders": {
-      ".read": "auth != null && ((query.orderByChild == 'clientId' && query.equalTo == auth.uid) || (query.orderByChild == 'sourceId' && ((root.child('shops').child(query.equalTo).child('ownerUid').val() == auth.uid) || (root.child('restaurants').child(query.equalTo).child('ownerUid').val() == auth.uid) || (root.child('restaurants').child(query.equalTo).child('managerId').val() == auth.uid))) || (query.orderByChild == 'deliveryId' && query.equalTo == auth.uid) || (query.orderByChild == 'status' && query.equalTo == 'OUT_FOR_DELIVERY' && root.child('users').child(auth.uid).child('deliveryServices').child('status').val() == 'APPROVED' && root.child('users').child(auth.uid).child('deliveryServices').child('isOnline').val() == true))",
+      ".read": "auth != null && ((query.orderByChild == 'clientId' && query.equalTo == auth.uid) || (query.orderByChild == 'sourceId' && ((query.equalTo == auth.uid) || (root.child('shops').child(query.equalTo).child('ownerUid').val() == auth.uid) || (root.child('restaurants').child(query.equalTo).child('ownerUid').val() == auth.uid) || (root.child('restaurants').child(query.equalTo).child('managerId').val() == auth.uid))) || (query.orderByChild == 'deliveryId' && query.equalTo == auth.uid) || (query.orderByChild == 'status' && query.equalTo == 'OUT_FOR_DELIVERY' && root.child('users').child(auth.uid).child('deliveryServices').child('status').val() == 'APPROVED' && root.child('users').child(auth.uid).child('deliveryServices').child('isOnline').val() == true))",
       ".write": false,
       ".indexOn": ["clientId", "sourceId", "deliveryId", "status"],
       "$orderId": {
-        ".read": "auth != null && (data.child('clientId').val() == auth.uid || data.child('deliveryId').val() == auth.uid || root.child('shops').child(data.child('sourceId').val()).child('ownerUid').val() == auth.uid || root.child('restaurants').child(data.child('sourceId').val()).child('ownerUid').val() == auth.uid || root.child('restaurants').child(data.child('sourceId').val()).child('managerId').val() == auth.uid)",
+        ".read": "auth != null && (data.child('clientId').val() == auth.uid || data.child('deliveryId').val() == auth.uid || data.child('sourceId').val() == auth.uid || root.child('shops').child(data.child('sourceId').val()).child('ownerUid').val() == auth.uid || root.child('restaurants').child(data.child('sourceId').val()).child('ownerUid').val() == auth.uid || root.child('restaurants').child(data.child('sourceId').val()).child('managerId').val() == auth.uid)",
         ".write": false
       }
     },
