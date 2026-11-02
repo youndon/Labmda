@@ -52,3 +52,18 @@ The service is intentionally not wired to a database trigger or callable yet: th
 This PR does not yet invoke the adapter from live order/trip lifecycle handlers or cash handover flows. Refund processing, payout execution, and admin-authorized reconciliation also remain separate integration work.
 
 The `finance` root transaction is a correctness-first foundation and serializes financial writes. Before high-volume production, shard the journal/projections by account and add a durable outbox/settlement workflow while preserving the immutable operation contract.
+
+
+## Financial Realtime Database security policy
+
+The repository includes `database.financial.rules.fragment.json` as a **financial-path rules fragment**, not as a complete application ruleset. It denies client writes to authoritative payment, allocation, settlement, wallet, legacy ledger, cash collection, payout, refund, journal, provider-event, handover, and reconciliation records. Read access is scoped to the payer, beneficiary, owner, requester, or cash collector represented by each record.
+
+Important deployment constraint:
+
+- The current `firebase.json` configures Cloud Functions only; it does not deploy Realtime Database rules.
+- Do not rename this fragment to `database.rules.json`, attach it to `firebase.json`, or deploy it by itself. Realtime Database denies paths without an applicable grant, so doing so would also block the application's existing non-financial paths.
+- Before deployment, merge these financial rules into the complete application ruleset, review all existing read/query patterns, add rules for the rest of the app's paths, and run Realtime Database Rules Emulator tests.
+- Firebase Admin SDK writes from trusted Cloud Functions bypass these client rules. That is the intended server-side write boundary; Cloud Functions must still authenticate and authorize every callable and verify provider evidence.
+- No client-visible rule grants access to the private `finance` journal. If the app needs wallet screens, expose a separately designed, user-scoped read model rather than opening the central journal.
+
+This fragment intentionally does not grant an admin bypass: the repository does not yet establish a trusted admin custom-claims contract. Admin review and reconciliation endpoints must be added only after that authorization contract is defined.
