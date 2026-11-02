@@ -88,7 +88,8 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         dropoffLat: Double,
         dropoffLng: Double,
         paymentMethod: String,
-        onSuccess: (String) -> Unit
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit = {}
     ) {
         if (auth.currentUser?.uid == null || cartItems.isEmpty()) return
         screenModelScope.launch {
@@ -117,10 +118,7 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
                 val orderId = created["orderId"] as? String
                     ?: error("The server did not return the new shop order ID.")
                 onSuccess(orderId)
-            }.onFailure { error ->
-                // Surface the failure through the screen's existing error handling path.
-                throw error
-            }
+            }.onFailure { error -> onError(error.message ?: "Could not place the shop order.") }
         }
     }
 }
