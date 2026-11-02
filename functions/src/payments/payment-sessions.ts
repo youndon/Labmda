@@ -4,7 +4,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { HmacPaymentSignatureVerifier, SimulatedPaymentProvider, isSimulationRuntime } from "./provider.js";
 import { processSignedPaymentWebhook, type SimulatedPaymentEvent } from "./webhooks.js";
 
-const db = getDatabase();
+function database() { return getDatabase(); }
 const SESSION_TTL_MS = 10 * 60 * 1000;
 const webhookVerifier = new HmacPaymentSignatureVerifier(process.env.SIMULATED_WEBHOOK_SECRET ?? "local-emulator-only-secret");
 
@@ -24,7 +24,7 @@ export const createSimulatedGcashSession = onCall({ enforceAppCheck: true }, asy
   assertSimulationEnabled();
   const quoteId = String(call.data?.quoteId ?? "");
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(quoteId)) throw new HttpsError("invalid-argument", "A valid quote ID is required.");
-  const quoteSnapshot = await db.ref(`pricing/quotes/${quoteId}`).get();
+  const quoteSnapshot = await database().ref(`pricing/quotes/${quoteId}`).get();
   if (!quoteSnapshot.exists()) throw new HttpsError("not-found", "The checkout quote was not found.");
   const quote = quoteSnapshot.val() as Record<string, any>;
   if (quote.uid !== uid) throw new HttpsError("permission-denied", "This quote belongs to another customer.");
@@ -95,5 +95,5 @@ export const simulateGcashPaymentResult = onCall({ enforceAppCheck: true }, asyn
     provider: "SIMULATED", simulationOnly: true, occurredAt: Date.now(),
   };
   const rawBody = JSON.stringify(event);
-  return processSignedPaymentWebhook(db, rawBody, webhookVerifier.sign(rawBody), webhookVerifier);
+  return processSignedPaymentWebhook(database(), rawBody, webhookVerifier.sign(rawBody), webhookVerifier);
 });
