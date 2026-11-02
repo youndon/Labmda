@@ -77,6 +77,7 @@ class PassengerScreen : Screen {
         val onlineDrivers by screenModel.onlineDrivers.collectAsState()
         val passengerInfo by screenModel.passengerInfo.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val paymentError by screenModel.paymentError.collectAsState()
 
         val cameraPositionState = rememberCameraPositionState()
         val snackbarHostState = remember { SnackbarHostState() }
@@ -133,6 +134,10 @@ class PassengerScreen : Screen {
                 .addOnFailureListener {
                     scope.launch { snackbarHostState.showSnackbar("Couldn't get your location.") }
                 }
+        }
+
+        LaunchedEffect(paymentError) {
+            paymentError?.let { snackbarHostState.showSnackbar(it) }
         }
 
         LaunchedEffect(Unit) {
