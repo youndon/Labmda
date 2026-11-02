@@ -95,6 +95,10 @@ async function loadTransaction(kind: QuoteRecord["kind"], transactionId: string,
   const owner = isTrip ? transaction.passengerId : transaction.clientId;
   if (owner !== uid) throw new HttpsError("permission-denied", "This transaction does not belong to the signed-in customer.");
   if (!isTrip && transaction.sourceId !== sourceId) throw new HttpsError("failed-precondition", "Order merchant does not match the quote.");
+  if (!isTrip) {
+    const expectedOrderType = kind === "FOOD" ? "FOOD" : "RETAIL";
+    if (transaction.orderType !== expectedOrderType) throw new HttpsError("failed-precondition", "Order type does not match the pricing quote.");
+  }
   if (!isTrip && transaction.status === "CANCELLED") throw new HttpsError("failed-precondition", "Cancelled orders cannot be paid.");
   if (isTrip) {
     const serviceType = String(transaction.serviceType ?? "").toLowerCase();
@@ -145,6 +149,12 @@ export const createCashPaymentFromQuote = onCall({ enforceAppCheck: true }, asyn
   }
 
   const paymentId = `pay_${quoteId}`;
+  const existingTransactionPaymentId = transactionId
+    ? (await db().ref(`${quote.kind === "RIDE" || quote.kind === "DELIVERY" ? "trips" : "orders"}/${transactionId}/paymentId`).get()).val()
+    : null;
+  if (typeof existingTransactionPaymentId === "string" && existingTransactionPaymentId !== paymentId) {
+    throw new HttpsError("already-exists", "This transaction already has a different payment.");
+  }
   const claim = await quoteRef.transaction((current: QuoteRecord | null) => {
     if (!current || current.uid !== uid || current.quoteId !== quoteId) return;
     if (current.status === "QUOTED") {
