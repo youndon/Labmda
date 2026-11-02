@@ -89,6 +89,7 @@ class PassengerScreen : Screen {
         var pickupAddress by remember { mutableStateOf("") }
         var destinationAddress by remember { mutableStateOf("") }
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
+        var paymentMethod by remember { mutableStateOf("CASH") }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember { mutableStateOf(false) }
@@ -193,13 +194,33 @@ class PassengerScreen : Screen {
                 fare = fare,
                 passengerName = name,
                 passengerPhone = phone,
-                targetDriver = driver
+                targetDriver = driver,
+                paymentMethod = paymentMethod
             )
             destination = null
             destinationAddress = ""
             selectedDriver = null
             tappedDriverId = null
             scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
+        }
+
+        fun submitDelivery() {
+            val p = pickup
+            val d = destination
+            if (p == null || d == null) return
+            screenModel.requestDelivery(
+                pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
+                pickupLat = p.latitude,
+                pickupLng = p.longitude,
+                dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
+                dropoffLat = d.latitude,
+                dropoffLng = d.longitude,
+                paymentMethod = paymentMethod
+            ) { orderId ->
+                destination = null
+                destinationAddress = ""
+                scope.launch { snackbarHostState.showSnackbar("Delivery booking $orderId created.") }
+            }
         }
 
         Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { paddingValues ->
@@ -337,6 +358,9 @@ class PassengerScreen : Screen {
                                     selectedDriver = selectedDriver,
                                     initialName = passengerInfo.name,
                                     initialPhone = passengerInfo.phone,
+                                    paymentMethod = paymentMethod,
+                                    onPaymentMethodChange = { paymentMethod = it },
+                                    onSubmitDelivery = { submitDelivery() },
                                     onVehicleTypeChange = {
                                         vehicleType = it
                                         selectedDriver = null
@@ -455,6 +479,9 @@ class PassengerScreen : Screen {
         selectedDriver: UserProfile?,
         initialName: String,
         initialPhone: String,
+        paymentMethod: String,
+        onPaymentMethodChange: (String) -> Unit,
+        onSubmitDelivery: () -> Unit,
         onVehicleTypeChange: (VehicleType) -> Unit,
         onSelectDriver: (UserProfile?) -> Unit,
         onClearDestination: () -> Unit,
@@ -553,13 +580,36 @@ class PassengerScreen : Screen {
                     )
                 }
 
-                Button(
-                    onClick = { onSubmit(name.trim(), phone.trim()) },
-                    enabled = name.isNotBlank() && distanceKm > 0.05,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    Text(if (selectedDriver != null) "Request ${selectedDriver.fullName}" else "Request Ride", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = paymentMethod == "CASH",
+                        onClick = { onPaymentMethodChange("CASH") },
+                        label = { Text("Cash") }
+                    )
+                    FilterChip(
+                        selected = paymentMethod == "GCASH",
+                        onClick = { onPaymentMethodChange("GCASH") },
+                        label = { Text("GCash") }
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onSubmit(name.trim(), phone.trim()) },
+                        enabled = name.isNotBlank() && distanceKm > 0.05,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).height(52.dp)
+                    ) {
+                        Text(if (selectedDriver != null) "Request Ride" else "Ride", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = onSubmitDelivery,
+                        enabled = distanceKm > 0.05,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).height(52.dp)
+                    ) {
+                        Text("Send Package", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
