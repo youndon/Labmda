@@ -27,10 +27,11 @@ export async function processSimulatedPaymentEvent(
     || !/^[A-Za-z0-9_-]{1,128}$/.test(event.paymentId)) throw new Error("Webhook identifiers are invalid.");
   if (!Number.isSafeInteger(event.amountMinor) || event.amountMinor <= 0 || event.currency !== "PHP") throw new Error("Webhook amount or currency is invalid.");
 
+  let duplicateEvent = false;
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
     if (!root) return;
     const events = root.paymentWebhookEvents ?? {};
-    if (events[event.eventId]) return root;
+    if (events[event.eventId]) { duplicateEvent = true; return root; }
     const sessions = root.paymentSessions ?? {};
     const intents = root.paymentIntents ?? {};
     const session = sessions[event.sessionId];
@@ -78,7 +79,7 @@ export async function processSimulatedPaymentEvent(
       || stored.amountMinor !== event.amountMinor || stored.currency !== event.currency) {
       throw new Error("Webhook event ID was reused with different payment data.");
     }
-    return { duplicate: !result.committed, status: stored.outcome as "SUCCEEDED" | "FAILED" | "EXPIRED" };
+    return { duplicate: duplicateEvent || !result.committed, status: stored.outcome as "SUCCEEDED" | "FAILED" | "EXPIRED" };
   }
   throw new Error("Webhook event did not match a pending simulated payment session.");
 }
