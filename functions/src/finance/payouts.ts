@@ -8,7 +8,7 @@ import {
   type LedgerPosting,
 } from "./ledger.js";
 
-const db = getDatabase();
+const db = () => getDatabase();
 type PayoutMethod = "GCASH" | "BDO";
 type ProviderKind = "MERCHANT" | "DRIVER" | "DELIVERY";
 type PayoutStatus = "REQUESTED" | "APPROVED" | "REJECTED" | "PAID";
@@ -42,7 +42,7 @@ function validatePayoutProfile(data: Record<string, unknown>): {
 }
 async function ownedMerchantIds(uid: string): Promise<string[]> {
   const roots = ["shops", "restaurants"];
-  const snapshots = await Promise.all(roots.map((root) => db.ref(root).get()));
+  const snapshots = await Promise.all(roots.map((root) => db().ref(root).get()));
   const ids = new Set<string>();
   snapshots.forEach((snapshot) => snapshot.forEach((child) => {
     if (child.child("ownerUid").val() === uid && child.key) ids.add(child.key);
@@ -54,7 +54,7 @@ async function providerAccounts(uid: string): Promise<Array<{
 }>> {
   const [merchantIds, user] = await Promise.all([
     ownedMerchantIds(uid),
-    db.ref(`users/${uid}`).get(),
+    db().ref(`users/${uid}`).get(),
   ]);
   const accounts: Array<{ accountId: string; providerKind: ProviderKind; providerId: string }> = [];
   merchantIds.forEach((id) => accounts.push({ accountId: `wallet_merchant_${id}`, providerKind: "MERCHANT", providerId: id }));
@@ -118,7 +118,7 @@ function payoutPaid(args: {
 export const saveMyPayoutProfile = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
   const profile = validatePayoutProfile(call.data as Record<string, unknown>);
-  await db.ref(`payoutProfiles/${uid}`).set({
+  await db().ref(`payoutProfiles/${uid}`).set({
     ...profile, updatedAt: Date.now(), updatedBy: uid,
   });
   return { saved: true, method: profile.method, accountName: profile.accountName,
@@ -127,7 +127,7 @@ export const saveMyPayoutProfile = onCall({ enforceAppCheck: true }, async (call
 
 export const getMyPayoutProfile = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
-  const snapshot = await db.ref(`payoutProfiles/${uid}`).get();
+  const snapshot = await db().ref(`payoutProfiles/${uid}`).get();
   if (!snapshot.exists()) return { configured: false };
   const profile = snapshot.val() as { method: PayoutMethod; accountName: string; accountNumber: string; updatedAt: number };
   return { configured: true, method: profile.method, accountName: profile.accountName,
@@ -138,8 +138,8 @@ export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
   const accounts = await providerAccounts(uid);
   const [finance, operations] = await Promise.all([
-    db.ref("finance/accounts").get(),
-    db.ref("finance/operations").get(),
+    db().ref("finance/accounts").get(),
+    db().ref("finance/operations").get(),
   ]);
   const accountIds = new Set(accounts.map((account) => account.accountId));
   const balances = accounts.map((account) => {
@@ -178,19 +178,19 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
   const uid = uidFrom(call);
   const amountMinor = amount((call.data as { amountMinor?: unknown }).amountMinor);
   const [profileSnapshot, accounts] = await Promise.all([
-    db.ref(`payoutProfiles/${uid}`).get(), providerAccounts(uid),
+    db().ref(`payoutProfiles/${uid}`).get(), providerAccounts(uid),
   ]);
   if (!profileSnapshot.exists()) throw new HttpsError("failed-precondition", "Set up a GCash or BDO payout account first.");
   const profile = profileSnapshot.val() as { method: PayoutMethod; accountName: string; accountNumber: string };
   const eligible = await Promise.all(accounts.map(async (account) => {
-    const snapshot = await db.ref(`finance/accounts/${account.accountId}`).get();
+    const snapshot = await db().ref(`finance/accounts/${account.accountId}`).get();
     return { ...account, availableMinor: Number(snapshot.child("availableMinor").val() ?? 0) };
   }));
   const selected = eligible.find((account) => account.availableMinor >= amountMinor);
   if (!selected) throw new HttpsError("failed-precondition", "Available earnings are insufficient for this payout amount.");
   const payoutId = randomUUID();
   const createdAt = Date.now();
-  await postFinancialOperation(db, payoutReservation({
+  await postFinancialOperation(db(), payoutReservation({
     payoutId, uid, accountId: selected.accountId, providerKind: selected.providerKind,
     providerId: selected.providerId, amountMinor, createdAt,
   }));
@@ -201,9 +201,9 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
     status: "REQUESTED" as PayoutStatus, createdAt, updatedAt: createdAt,
   };
   try {
-    await db.ref(`payoutRequests/${payoutId}`).set(record);
+    await db().ref(`payoutRequests/${payoutId}`).set(record);
   } catch (error) {
-    await postFinancialOperation(db, payoutRelease({
+    await postFinancialOperation(db(), payoutRelease({
       payoutId, accountId: selected.accountId, providerKind: selected.providerKind,
       providerId: selected.providerId, amountMinor, createdAt: Date.now(),
     }));
@@ -214,7 +214,7 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
 
 export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
-  const snapshot = await db.ref("payoutRequests").orderByChild("uid").equalTo(uid).get();
+  const snapshot = await db().ref("payoutRequests").orderByChild("uid").equalTo(uid).get();
   const payouts = snapshot.val() as Record<string, Record<string, unknown>> | null;
   return Object.values(payouts ?? {}).map((payout) => ({
     payoutId: payout.payoutId, amountMinor: payout.amountMinor, currency: payout.currency,
@@ -226,7 +226,7 @@ export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call)
 
 export const getPendingPayoutRequests = onCall({ enforceAppCheck: true }, async (call) => {
   requireAdmin(call);
-  const snapshot = await db.ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get();
+  const snapshot = await db().ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get();
   return Object.values((snapshot.val() ?? {}) as Record<string, Record<string, unknown>>)
     .map((payout) => ({
       payoutId: payout.payoutId, uid: payout.uid, providerKind: payout.providerKind,
@@ -243,7 +243,7 @@ async function updatePayoutStatus(
   patch: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   if (!safeId(payoutId)) throw new HttpsError("invalid-argument", "Payout ID is invalid.");
-  const result = await db.ref(`payoutRequests/${payoutId}`).transaction((current) => {
+  const result = await db().ref(`payoutRequests/${payoutId}`).transaction((current) => {
     if (!current || !allowed.includes(current.status as PayoutStatus)) return;
     return { ...current, ...patch, status: next, updatedAt: Date.now() };
   });
@@ -261,11 +261,11 @@ export const approvePayoutRequest = onCall({ enforceAppCheck: true }, async (cal
 export const rejectPayoutRequest = onCall({ enforceAppCheck: true }, async (call) => {
   requireAdmin(call);
   const payoutId = String((call.data as { payoutId?: unknown }).payoutId ?? "");
-  const snapshot = await db.ref(`payoutRequests/${payoutId}`).get();
+  const snapshot = await db().ref(`payoutRequests/${payoutId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
   if (payout.status !== "REQUESTED" && payout.status !== "APPROVED") throw new HttpsError("failed-precondition", "This payout cannot be rejected.");
-  await postFinancialOperation(db, payoutRelease({
+  await postFinancialOperation(db(), payoutRelease({
     payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
     providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
   }));
@@ -282,11 +282,11 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
   const payoutId = String(data.payoutId ?? "");
   const transferReference = typeof data.transferReference === "string" ? data.transferReference.trim() : "";
   if (!transferReference || transferReference.length > 120) throw new HttpsError("invalid-argument", "Enter the GCash or BDO transfer reference.");
-  const snapshot = await db.ref(`payoutRequests/${payoutId}`).get();
+  const snapshot = await db().ref(`payoutRequests/${payoutId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
   if (payout.status !== "APPROVED") throw new HttpsError("failed-precondition", "Approve the payout before recording a transfer.");
-  await postFinancialOperation(db, payoutPaid({
+  await postFinancialOperation(db(), payoutPaid({
     payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
     providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
   }));
