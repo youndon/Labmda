@@ -77,7 +77,7 @@ function roundUpPerKm(distanceMeters: number, perKmMinor: number): number {
   assertMinor(result, "distance charge");
   return result;
 }
-function providerFee(config: PricingConfig, method: PaymentMethod, amountMinor: number): { amount: number; payer: ProviderFeePayer } {
+export function calculateProviderFee(config: PricingConfig, method: PaymentMethod, amountMinor: number): { amount: number; payer: ProviderFeePayer } {
   if (method === "CASH") return { amount: 0, payer: "PLATFORM" };
   const fee = config.providerFees.GCASH;
   assertBps(fee.rateBps, "providerFees.GCASH.rateBps");
@@ -141,7 +141,7 @@ export function calculateOrderBreakdown(args: {
   const commissionBase = subtotalMinor - discount.merchant;
   const merchantCommissionMinor = roundBps(commissionBase, commissionRate);
   const beforeProvider = subtotalMinor + delivery.feeMinor - discount.total;
-  const fee = providerFee(config, paymentMethod, beforeProvider);
+  const fee = calculateProviderFee(config, paymentMethod, beforeProvider);
   const customerTotalMinor = beforeProvider + (fee.payer === "CUSTOMER" ? fee.amount : 0);
   const platformNet = merchantCommissionMinor + delivery.platformCommissionMinor
     - discount.platform - (fee.payer === "PLATFORM" ? fee.amount : 0);
