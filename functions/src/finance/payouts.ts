@@ -178,7 +178,8 @@ export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
 
 export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
-  const amountMinor = amount((call.data as { amountMinor?: unknown }).amountMinor);
+  const data = call.data as { amountMinor?: unknown; accountId?: unknown };
+  const amountMinor = amount(data.amountMinor);
   const [profileSnapshot, accounts] = await Promise.all([
     db().ref(`payoutProfiles/${uid}`).get(), providerAccounts(uid),
   ]);
@@ -188,8 +189,12 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
     const snapshot = await db().ref(`finance/accounts/${account.accountId}`).get();
     return { ...account, availableMinor: Number(snapshot.child("availableMinor").val() ?? 0) };
   }));
-  const selected = eligible.find((account) => account.availableMinor >= amountMinor);
-  if (!selected) throw new HttpsError("failed-precondition", "Available earnings are insufficient for this payout amount.");
+  const requestedAccountId = typeof data.accountId === "string" ? data.accountId : "";
+  const selected = eligible.find((account) => account.accountId === requestedAccountId);
+  if (!selected) throw new HttpsError("permission-denied", "Choose one of your own provider wallets.");
+  if (selected.availableMinor < amountMinor) {
+    throw new HttpsError("failed-precondition", "This wallet does not have enough available earnings for the requested payout.");
+  }
   const payoutId = randomUUID();
   const createdAt = Date.now();
   await postFinancialOperation(db(), payoutReservation({
