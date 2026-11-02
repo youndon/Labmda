@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { isSimulationRuntime } from "./provider.js";
+import { SimulatedPaymentRefundProvider, isSimulationRuntime } from "./provider.js";
 
 function requireUser(uid?: string): string {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in to request a refund.");
@@ -36,11 +36,16 @@ export const createSimulatedGcashRefund = onCall({ enforceAppCheck: true }, asyn
   }
   const refundId = randomUUID();
   const now = Date.now();
+  const provider = new SimulatedPaymentRefundProvider(true);
+  const providerRefund = await provider.createRefund({
+    paymentId: session.paymentId, providerSessionId: session.providerSessionId,
+    amountMinor, currency: "PHP", reason,
+  });
   const refund = {
     id: refundId, sessionId, paymentId: session.paymentId, requestedBy: uid,
-    amountMinor, currency: "PHP", reason, status: "SIMULATED_SUCCEEDED",
-    provider: "SIMULATED", simulationOnly: true, createdAt: now, updatedAt: now,
-    completedAt: now,
+    amountMinor, currency: "PHP", reason, status: providerRefund.status,
+    provider: providerRefund.provider, providerRefundId: providerRefund.providerRefundId,
+    simulationOnly: true, createdAt: now, updatedAt: now, completedAt: now,
   };
   await db.ref(`paymentRefunds/${refundId}`).set(refund);
   return { refundId, status: refund.status, amountMinor, currency: "PHP", simulationOnly: true };
