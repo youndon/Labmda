@@ -2,12 +2,6 @@ import { assertMinorAmount, assertPaymentRelationship } from "../models/payment.
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 import { createFinancialTransfer, type FinancialOperation, type LedgerPosting } from "./ledger.js";
 
-/**
- * Converts a server-verified, succeeded payment and its persisted allocations
- * into one balanced journal operation. Callers must load these records from
- * Realtime Database in trusted Cloud Functions; never pass client-calculated
- * amounts directly into this adapter.
- */
 /** Reject beneficiary roles that do not belong to the payment transaction. */
 function assertAllocationBeneficiary(payment: Payment, allocation: PaymentAllocation, cashCollection?: CashCollection): void {
   switch (allocation.beneficiaryType) {
@@ -32,6 +26,12 @@ function assertAllocationBeneficiary(payment: Payment, allocation: PaymentAlloca
     default: throw new Error("Payment allocation beneficiary type is invalid.");
   }
 }
+/**
+ * Converts a server-verified, succeeded payment and its persisted allocations
+ * into one balanced journal operation. Callers must load these records from
+ * Realtime Database in trusted Cloud Functions; never pass client-calculated
+ * amounts directly into this adapter.
+ */
 export function createPaymentReceiptOperation(
   payment: Payment,
   allocations: PaymentAllocation[],
