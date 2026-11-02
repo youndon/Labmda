@@ -13,10 +13,10 @@ type PaymentRecord = {
 };
 type RefundCase = {
   id: string; paymentId: string; payerId: string; amountMinor: number; currency: "PHP";
-  reason: string; status: "REQUESTED" | "APPROVED" | "REJECTED" | "COMPLETED";
+  reason: string; status: "REQUESTED" | "APPROVED" | "PROCESSING" | "REJECTED" | "COMPLETED";
   requestedBy: string; createdAt: number; updatedAt: number; reviewedBy?: string;
   reviewedAt?: number; reviewNote?: string; completedBy?: string; completedAt?: number;
-  providerReference?: string; method?: string;
+  providerReference?: string; method?: string; ledgerOperationId?: string;
 };
 
 function admin(call: AdminCall): string {
@@ -141,8 +141,8 @@ export const resolveAdminFinancialDiscrepancy = onCall({ enforceAppCheck: true }
     throw new HttpsError("invalid-argument", "Source and destination must be different ledger buckets.");
   }
   const operation = createFinancialTransfer({
-    operationId: `admin_adjustment_${randomUUID()}`, eventType: "ADJUSTMENT",
-    referenceType: "MANUAL", referenceId, idempotencyKey: `admin_adjustment_${randomUUID()}`,
+    operationId: `admin_adjustment_${referenceId}`, eventType: "ADJUSTMENT",
+    referenceType: "MANUAL", referenceId, idempotencyKey: `admin_adjustment_${referenceId}`,
     createdAt: Date.now(), description: note, amountMinor, source: sourcePosting, destination: destinationPosting,
   });
   const posted = await postFinancialOperation(db(), operation);
@@ -157,17 +157,18 @@ export const createAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
   const paymentId = safeId(call.data?.paymentId, "Payment ID");
   const amountMinor = positiveMinor(call.data?.amountMinor, "Refund amount");
   const reason = text(call.data?.reason, "Refund reason");
-  const paymentRef = db().ref(`payments/${paymentId}`);
+  const paymentSnapshot = await db().ref(`payments/${paymentId}`).get();
+  if (!paymentSnapshot.exists()) throw new HttpsError("not-found", "Payment was not found.");
+  const payment = paymentSnapshot.val() as PaymentRecord;
+  const alreadyRefunded = payment.refundedAmountMinor ?? 0;
+  if (payment.id !== paymentId || payment.currency !== "PHP"
+    || (payment.status !== "SUCCEEDED" && payment.status !== "PARTIALLY_REFUNDED")
+    || !Number.isSafeInteger(payment.amountMinor) || !Number.isSafeInteger(alreadyRefunded)
+    || amountMinor > payment.amountMinor - alreadyRefunded) {
+    throw new HttpsError("failed-precondition", "Payment is not refundable or the requested amount exceeds its remaining balance.");
+  }
   const caseId = randomUUID();
   const now = Date.now();
-  const result = await paymentRef.transaction((raw: PaymentRecord | null) => {
-    if (!raw || raw.id !== paymentId || raw.status !== "SUCCEEDED" && raw.status !== "PARTIALLY_REFUNDED") return;
-    const refunded = raw.refundedAmountMinor ?? 0;
-    if (!Number.isSafeInteger(refunded) || refunded + amountMinor > raw.amountMinor) return;
-    return raw;
-  }, undefined, false);
-  if (!result.committed) throw new HttpsError("failed-precondition", "Payment is not refundable or the requested amount exceeds its remaining balance.");
-  const payment = result.snapshot.val() as PaymentRecord;
   const refund: RefundCase = { id: caseId, paymentId, payerId: payment.payerId, amountMinor,
     currency: "PHP", reason, status: "REQUESTED", requestedBy: uid, createdAt: now, updatedAt: now };
   await db().ref(`refundCases/${caseId}`).set(refund);
@@ -194,39 +195,93 @@ export const reviewAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
   return { refundId, status: after.status };
 });
 
-/** Record an externally executed refund after verification in the provider/bank dashboard. */
+/**
+ * Complete an approved refund after the actual transfer is confirmed in the
+ * Xendit/bank dashboard. The immutable journal reverses the original payment
+ * allocations proportionally; no provider API call is made here.
+ */
 export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = admin(call);
   const refundId = safeId(call.data?.refundId, "Refund ID");
   const providerReference = text(call.data?.providerReference, "Provider/bank refund reference", 160);
-  const ref = db().ref(`refundCases/${refundId}`);
-  let before: RefundCase | null = null;
-  const result = await ref.transaction((raw: RefundCase | null) => {
-    if (!raw || raw.status !== "APPROVED") return;
-    before = raw;
-    return { ...raw, status: "COMPLETED", providerReference, completedBy: uid,
-      completedAt: Date.now(), updatedAt: Date.now() };
+  const caseRef = db().ref(`refundCases/${refundId}`);
+  const claim = await caseRef.transaction((raw: RefundCase | null) => {
+    if (!raw || raw.status !== "APPROVED" && raw.status !== "PROCESSING") return;
+    if (raw.status === "PROCESSING") return raw;
+    return { ...raw, status: "PROCESSING", completedBy: uid, providerReference, updatedAt: Date.now() };
   }, undefined, false);
-  if (!result.committed) throw new HttpsError("failed-precondition", "Only an approved refund can be completed.");
-  const refund = result.snapshot.val() as RefundCase;
-  const paymentRef = db().ref(`payments/${refund.paymentId}`);
-  let updatedPayment: PaymentRecord | null = null;
-  const paymentResult = await paymentRef.transaction((raw: PaymentRecord | null) => {
-    if (!raw || raw.status !== "SUCCEEDED" && raw.status !== "PARTIALLY_REFUNDED") return;
-    const refunded = raw.refundedAmountMinor ?? 0;
-    if (!Number.isSafeInteger(refunded) || refunded + refund.amountMinor > raw.amountMinor) return;
-    const next = refunded + refund.amountMinor;
-    const status = next === raw.amountMinor ? "REFUNDED" : "PARTIALLY_REFUNDED";
-    updatedPayment = { ...raw, refundedAmountMinor: next, status, updatedAt: Date.now() };
-    return updatedPayment;
-  }, undefined, false);
-  if (!paymentResult.committed) {
-    await ref.update({ status: "APPROVED", completedBy: null, completedAt: null, providerReference: null });
-    throw new HttpsError("failed-precondition", "Payment refund balance changed; refresh the case before retrying.");
+  if (!claim.committed) {
+    const current = claim.snapshot.val() as RefundCase | null;
+    if (current?.status === "COMPLETED") return { refundId, status: "COMPLETED", duplicate: true };
+    throw new HttpsError("failed-precondition", "Only an approved refund can be completed.");
   }
+  const refund = claim.snapshot.val() as RefundCase;
+  const paymentSnapshot = await db().ref(`payments/${refund.paymentId}`).get();
+  if (!paymentSnapshot.exists()) throw new HttpsError("not-found", "Refund payment was not found.");
+  const payment = paymentSnapshot.val() as PaymentRecord;
+  if (payment.currency !== "PHP" || !Number.isSafeInteger(payment.amountMinor)) {
+    throw new HttpsError("failed-precondition", "Payment record is invalid.");
+  }
+  const originalSnapshot = await db().ref(`finance/operations/payment_${refund.paymentId}_received`).get();
+  if (!originalSnapshot.exists()) throw new HttpsError("failed-precondition", "The original payment journal entry is missing; refund cannot be posted safely.");
+  const original = originalSnapshot.val() as { postings?: LedgerPosting[]; createdAt?: number };
+  const postings = original.postings ?? [];
+  if (!postings.length || !Number.isSafeInteger(original.createdAt)) {
+    throw new HttpsError("failed-precondition", "The original payment journal entry is invalid.");
+  }
+  const distribute = (items: LedgerPosting[], total: number): number[] => {
+    const weightTotal = items.reduce((sum, item) => sum + Math.abs(item.deltaMinor), 0);
+    if (weightTotal <= 0) throw new HttpsError("failed-precondition", "Original payment journal has no refundable postings.");
+    const rows = items.map((item, index) => {
+      const numerator = BigInt(Math.abs(item.deltaMinor)) * BigInt(refund.amountMinor);
+      return { index, amount: Number(numerator / BigInt(weightTotal)), remainder: numerator % BigInt(weightTotal) };
+    });
+    const allocated = rows.reduce((sum, row) => sum + row.amount, 0);
+    rows.sort((a, b) => a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1);
+    for (let i = 0; i < total - allocated; i++) rows[i % rows.length].amount += 1;
+    rows.sort((a, b) => a.index - b.index);
+    return rows.map((row) => row.amount);
+  };
+  const reverse: LedgerPosting[] = [];
+  for (const sign of [-1, 1]) {
+    const side = postings.filter((item) => Math.sign(item.deltaMinor) === sign);
+    if (!side.length) continue;
+    const amounts = distribute(side, refund.amountMinor);
+    side.forEach((item, index) => reverse.push({ ...item, deltaMinor: -Math.sign(item.deltaMinor) * amounts[index] }));
+  }
+  const reversal = {
+    operationId: `refund_${refundId}_posted`, eventType: "REFUND" as const,
+    referenceType: "REFUND" as const, referenceId: refundId, currency: "PHP" as const,
+    idempotencyKey: `refund_${refundId}_posted`, createdAt: Date.now(),
+    description: `Refund reversal for payment ${refund.paymentId}: ${refund.reason}`,
+    postings: reverse,
+  };
+  const posted = await postFinancialOperation(db(), reversal);
+  const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const currentCase = root.refundCases?.[refundId] as RefundCase | undefined;
+    const currentPayment = root.payments?.[refund.paymentId] as PaymentRecord | undefined;
+    if (!currentCase || currentCase.status !== "PROCESSING" || !currentPayment) return;
+    const refunded = currentPayment.refundedAmountMinor ?? 0;
+    if (!Number.isSafeInteger(refunded) || refunded + refund.amountMinor > currentPayment.amountMinor
+      || (currentPayment.status !== "SUCCEEDED" && currentPayment.status !== "PARTIALLY_REFUNDED")) return;
+    const nextRefunded = refunded + refund.amountMinor;
+    const nextPayment = { ...currentPayment, refundedAmountMinor: nextRefunded,
+      status: nextRefunded === currentPayment.amountMinor ? "REFUNDED" : "PARTIALLY_REFUNDED",
+      updatedAt: Date.now() };
+    const nextCase = { ...currentCase, status: "COMPLETED", providerReference,
+      completedBy: uid, completedAt: Date.now(), updatedAt: Date.now(), ledgerOperationId: posted.operationId };
+    return { ...root, payments: { ...root.payments, [refund.paymentId]: nextPayment },
+      refundCases: { ...root.refundCases, [refundId]: nextCase } };
+  }, undefined, false);
+  if (!rootResult.committed) {
+    throw new HttpsError("failed-precondition", "Payment refund balance changed or this refund is no longer processable. Review the case before retrying.");
+  }
+  const completed = rootResult.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
   await recordAdminFinancialAudit({ uid, action: "REFUND_COMPLETED", targetType: "REFUND", targetId: refundId,
-    before, after: { refund, payment: paymentResult.snapshot.val() }, note: providerReference });
-  return { refundId, status: "COMPLETED", paymentId: refund.paymentId, providerReference };
+    before: refund, after: completed, note: providerReference });
+  return { refundId, status: "COMPLETED", paymentId: refund.paymentId,
+    providerReference, ledgerOperationId: posted.operationId };
 });
 
 export const getAdminRefundCases = onCall({ enforceAppCheck: true }, async (call) => {
