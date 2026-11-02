@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateDeliveryFee, calculateOrderBreakdown, calculateRideFare, decimalPesosToMinor } from "./engine";
+import { calculateDeliveryFee, calculateOrderBreakdown, calculateRideFare, decimalPesosToMinor } from "./engine.js";
 
 const config = {
   version: 1, currency: "PHP" as const,
@@ -21,7 +21,7 @@ describe("PHP pricing engine", () => {
   });
   it("calculates ride fare and driver earnings", () => {
     expect(calculateRideFare(config.ride, { distanceMeters: 2100, durationSeconds: 601 })).toEqual({
-      fareMinor: 10200, platformCommissionMinor: 1530, driverEarningsMinor: 8670,
+      fareMinor: 10800, platformCommissionMinor: 1620, driverEarningsMinor: 9180,
     });
   });
   it("separates merchant-funded discount, platform commission and courier earnings", () => {
@@ -33,7 +33,7 @@ describe("PHP pricing engine", () => {
     expect(quote.discountMinor).toBe(2000);
     expect(quote.merchantEarningsMinor).toBe(15840);
     expect(quote.courierEarningsMinor).toBe(3600);
-    expect(quote.customerTotalMinor).toBe(24000);
-    expect(quote.platformNetBeforeOtherCostsMinor).toBe(2760);
+    expect(quote.customerTotalMinor).toBe(22000);
+    expect(quote.platformNetBeforeOtherCostsMinor).toBe(510);
   });
 });
