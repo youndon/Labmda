@@ -3,7 +3,7 @@ import {
   createFinancialTransfer,
   validateFinancialOperation,
 } from "./ledger.js";
-import { createPaymentReceiptOperation } from "./payment-ledger.js";
+import { createCashRemittanceOperation, createPaymentReceiptOperation } from "./payment-ledger.js";
 import type { Payment, PaymentAllocation } from "../models/payment.js";
 
 describe("financial ledger invariants", () => {
@@ -95,7 +95,7 @@ describe("financial ledger invariants", () => {
     expect(() => validateFinancialOperation(operation)).not.toThrow();
   });
 
-  it("uses cash clearing for a succeeded cash payment", () => {
+  it("tracks a cash collector's platform remittance obligation", () => {
     const payment: Payment = {
       id: "cash_payment_1", transactionType: "RIDE", orderId: "", tripId: "trip_1",
       deliveryId: "", payerId: "passenger_1", method: "CASH",
@@ -103,14 +103,28 @@ describe("financial ledger invariants", () => {
       createdAt: 1_798_000_000_000, updatedAt: 1_798_000_000_100,
       completedAt: 1_798_000_000_100,
     };
-    const allocation: PaymentAllocation = {
-      id: "ride_allocation", paymentId: payment.id, transactionType: "RIDE", orderId: "",
-      tripId: "trip_1", deliveryId: "", beneficiaryId: "driver_1", beneficiaryType: "DRIVER",
-      amountMinor: 500, currency: "PHP", status: "PENDING",
-      createdAt: payment.createdAt, updatedAt: payment.updatedAt,
-    };
-    const operation = createPaymentReceiptOperation(payment, [allocation]);
+    const allocations: PaymentAllocation[] = [
+      { id: "ride_driver", paymentId: payment.id, transactionType: "RIDE", orderId: "", tripId: "trip_1", deliveryId: "", beneficiaryId: "driver_1", beneficiaryType: "DRIVER", amountMinor: 400, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+      { id: "ride_platform", paymentId: payment.id, transactionType: "RIDE", orderId: "", tripId: "trip_1", deliveryId: "", beneficiaryId: "platform", beneficiaryType: "PLATFORM", amountMinor: 100, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+    ];
+    const operation = createPaymentReceiptOperation(payment, allocations, { cashCollectorId: "driver_1" });
     expect(operation.postings[0]).toMatchObject({ accountId: "cash_collection_clearing", partyType: "CASH", deltaMinor: -500 });
+    expect(operation.postings[1]).toMatchObject({ accountId: "wallet_driver_driver_1", bucket: "PENDING", deltaMinor: 400 });
+    expect(operation.postings[2]).toMatchObject({ accountId: "cash_owed_driver_1", bucket: "CASH_OWED", partyType: "CASH", partyId: "driver_1", deltaMinor: 100 });
+    expect(() => validateFinancialOperation(operation)).not.toThrow();
+    expect(() => createPaymentReceiptOperation(payment, allocations)).toThrow(/collector ID/i);
+
+    const remittance = createCashRemittanceOperation({
+      cashCollectionId: "cash_collection_1",
+      collectorId: "driver_1",
+      amountMinor: 100,
+      createdAt: payment.updatedAt + 100,
+    });
+    expect(remittance.postings).toMatchObject([
+      { accountId: "cash_owed_driver_1", bucket: "CASH_OWED", deltaMinor: -100 },
+      { accountId: "platform_revenue", bucket: "AVAILABLE", deltaMinor: 100 },
+    ]);
+    expect(() => validateFinancialOperation(remittance)).not.toThrow();
   });
 
   it("rejects failed payments and allocations that do not reconcile", () => {
