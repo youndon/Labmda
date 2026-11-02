@@ -2,12 +2,12 @@ import type { Database } from "firebase-admin/database";
 import type { CashCollection, Payment } from "../models/payment.js";
 import { assertPaymentStatusTransition } from "./payment-state.js";
 
-function sameCollection(a: CashCollection, b: CashCollection): boolean {
+function sameCollectionIdentity(a: CashCollection, b: CashCollection): boolean {
   return a.id === b.id && a.paymentId === b.paymentId
     && a.orderId === b.orderId && a.tripId === b.tripId
     && a.deliveryId === b.deliveryId && a.collectorId === b.collectorId
     && a.payerId === b.payerId && a.amountMinor === b.amountMinor
-    && a.currency === b.currency && a.status === "COLLECTED";
+    && a.currency === b.currency;
 }
 
 function samePaymentIdentity(current: Payment, expected: Payment): boolean {
@@ -50,10 +50,13 @@ export async function commitCashCollection(
     if (!assigned) return;
 
     const prior = raw.cashCollections?.[expectedPayment.id] as CashCollection | undefined;
-    if (prior && !sameCollection(prior, collection)) return;
+    if (prior && (!sameCollectionIdentity(prior, collection)
+      || (prior.status !== "PENDING" && prior.status !== "COLLECTED"))) return;
 
-    if (current.status === "SUCCEEDED" && prior && sameCollection(prior, collection)) {
-      return raw;
+    if (current.status === "SUCCEEDED" && prior?.status === "COLLECTED"
+      && sameCollectionIdentity(prior, collection)) {
+      // Abort the transaction: the already-committed collection is an idempotent retry.
+      return;
     }
     if (current.status !== "PENDING") return;
     assertPaymentStatusTransition(current.status, "SUCCEEDED");
@@ -82,7 +85,7 @@ export async function commitCashCollection(
   const savedPayment = root?.payments?.[expectedPayment.id] as Payment | undefined;
   const savedCollection = root?.cashCollections?.[expectedPayment.id] as CashCollection | undefined;
   if (!savedPayment || savedPayment.status !== "SUCCEEDED" || !savedCollection
-    || !sameCollection(savedCollection, collection)) {
+    || savedCollection.status !== "COLLECTED" || !sameCollectionIdentity(savedCollection, collection)) {
     throw new Error("Cash collection could not be committed. Payment state or collector assignment changed; refresh and retry.");
   }
   return { duplicate: !result.committed };
