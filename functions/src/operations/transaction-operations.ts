@@ -240,12 +240,22 @@ export const transitionTripStatus = onCall({ enforceAppCheck: true }, async (cal
 export const cancelPassengerTrip = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
   const tripId = requireId(call.data?.tripId, "Trip ID");
-  const ref = db().ref(`trips/${tripId}`);
-  const result = await ref.transaction((current: Record<string, any> | null) => {
-    if (!current || current.passengerId !== uid || !["REQUESTED", "ACCEPTED"].includes(readString(current.status))) return;
-    return { ...current, status: "CANCELLED", cancelledAt: Date.now(), updatedAtTimestamp: Date.now() };
+  const result = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const trip = root.trips?.[tripId] as Record<string, any> | undefined;
+    if (!trip || trip.passengerId !== uid || !["REQUESTED", "ACCEPTED"].includes(readString(trip.status))) return;
+    const paymentId = readString(trip.paymentId);
+    const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
+    if (payment && payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
+    const now = Date.now();
+    const nextRoot: Record<string, any> = {
+      ...root,
+      trips: { ...root.trips, [tripId]: { ...trip, status: "CANCELLED", cancelledAt: now, updatedAtTimestamp: now } },
+    };
+    if (payment) nextRoot.payments = { ...root.payments, [paymentId]: { ...payment, status: "CANCELLED", updatedAt: now, completedAt: now } };
+    return nextRoot;
   }, undefined, false);
-  if (!result.committed) fail("Only the passenger can cancel before the ride starts.");
+  if (!result.committed) fail("Only the passenger can cancel an unpaid ride before it starts.");
   return { tripId, status: "CANCELLED" };
 });
 
