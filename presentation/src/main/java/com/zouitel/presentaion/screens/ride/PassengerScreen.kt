@@ -201,7 +201,7 @@ class PassengerScreen : Screen {
                     destinationAddress = ""
                     selectedDriver = null
                     tappedDriverId = null
-                    scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
+                    scope.launch { snackbarHostState.showSnackbar(if (paymentMethod == "GCASH") "Ride created. GCash payment is pending BDO Checkout verification." else "Trip requested. Looking for a driver…") }
                 }
             )
         }
@@ -221,7 +221,7 @@ class PassengerScreen : Screen {
             ) { orderId ->
                 destination = null
                 destinationAddress = ""
-                scope.launch { snackbarHostState.showSnackbar("Delivery booking $orderId created.") }
+                scope.launch { snackbarHostState.showSnackbar(if (paymentMethod == "GCASH") "Delivery created. GCash payment is pending BDO Checkout verification." else "Delivery booking $orderId created.") }
             }
         }
 
