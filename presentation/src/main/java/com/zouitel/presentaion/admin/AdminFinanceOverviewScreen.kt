@@ -257,11 +257,17 @@ class AdminFinanceOverviewScreen : Screen {
                                     Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Text("  Manage payouts")
                                 }
-                                Button(onClick = { model.reconcile() }, enabled = !busy, modifier = Modifier.weight(1f)) {
-                                    if (busy) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    else Icon(Icons.Default.Scale, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Text("  Reconcile")
+                                Button(onClick = { navigator?.push(AdminFinancialOperationsScreen()) }, modifier = Modifier.weight(1f)) {
+                                    Icon(Icons.Default.Scale, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Text("  Finance tools")
                                 }
+                            }
+                        }
+                        item {
+                            Button(onClick = { model.reconcile() }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                if (busy) CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                else Icon(Icons.Default.Scale, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Text("  Reconcile cash collections")
                             }
                         }
                         item {
