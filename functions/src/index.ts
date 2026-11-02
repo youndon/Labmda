@@ -87,6 +87,7 @@ async function saveQuote(uid: string, kind: string, config: PricingConfig, reque
 }
 async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<string, unknown>) {
   const sourceId = String(data.sourceId ?? "");
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(sourceId)) throw new HttpsError("invalid-argument", "Merchant ID is invalid.");
   const items = data.items as Array<{ itemId: string; quantity: number }> | undefined;
   if (!sourceId || !Array.isArray(items) || items.length === 0 || items.length > 50) {
     throw new HttpsError("invalid-argument", "A source and 1–50 order items are required.");
@@ -101,7 +102,7 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
   let subtotalMinor = 0;
   const pricedItems: Array<{ itemId: string; name: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }> = [];
   for (const line of items) {
-    if (!line || typeof line.itemId !== "string" || !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) {
+    if (!line || typeof line.itemId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(line.itemId) || !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) {
       throw new HttpsError("invalid-argument", "Each item must have a valid ID and quantity from 1 to 99.");
     }
     const item = await database.ref(`${root}/${sourceId}/${collection}/${line.itemId}`).get();
