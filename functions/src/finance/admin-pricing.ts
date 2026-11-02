@@ -87,18 +87,34 @@ export const getAdminPricingConfig = onCall({ enforceAppCheck: true }, async (ca
 export const updateAdminPricingConfig = onCall({ enforceAppCheck: true }, async (call) => {
   if (!call.auth?.uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
   requireAdmin(call.auth.token as Record<string, unknown>);
-  const ref = getDatabase().ref("pricing/config");
-  const result = await ref.transaction((current) => {
-    const previousVersion = Number.isSafeInteger(current?.version) && current.version > 0 ? current.version : 0;
+  const expectedVersion = integer(call.data?.expectedVersion, "Expected pricing version", 2_000_000_000);
+  const rootRef = getDatabase().ref("pricing");
+  const updatedAt = Date.now();
+  let versionConflict = false;
+  const result = await rootRef.transaction((current) => {
+    const root = (current ?? {}) as Record<string, any>;
+    const currentConfig = root.config ?? null;
+    const previousVersion = Number.isSafeInteger(currentConfig?.version) && currentConfig.version > 0 ? currentConfig.version : 0;
+    if (previousVersion !== expectedVersion) {
+      versionConflict = true;
+      return;
+    }
     if (previousVersion >= 2_000_000_000) throw new HttpsError("out-of-range", "Pricing configuration version limit reached.");
-    return validateConfig(call.data?.config, previousVersion + 1);
+    const saved = validateConfig(call.data?.config, previousVersion + 1);
+    const history = (root.configHistory ?? {}) as Record<string, unknown>;
+    return {
+      ...root,
+      config: saved,
+      configHistory: {
+        ...history,
+        [saved.version]: { ...saved, updatedAt, updatedBy: call.auth!.uid },
+      },
+    };
   }, undefined, false);
-  if (!result.committed) throw new HttpsError("aborted", "Pricing configuration was not saved. Please retry.");
-  const saved = result.snapshot.val() as PricingConfig;
-  await getDatabase().ref(`pricing/configHistory/${saved.version}`).set({
-    ...saved,
-    updatedAt: Date.now(),
-    updatedBy: call.auth.uid,
-  });
+  if (!result.committed) {
+    if (versionConflict) throw new HttpsError("aborted", "Pricing changed since you opened this screen. Refresh and review the latest rates before saving.");
+    throw new HttpsError("aborted", "Pricing configuration was not saved. Please retry.");
+  }
+  const saved = result.snapshot.child("config").val() as PricingConfig;
   return { success: true, config: saved };
 });
