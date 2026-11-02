@@ -50,6 +50,7 @@ import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
+import com.zouitel.presentaion.screens.payment.rememberCustomerPaymentAvailability
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
@@ -80,6 +81,10 @@ class PassengerScreen : Screen {
         val passengerInfo by screenModel.passengerInfo.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
         val requestError by screenModel.requestError.collectAsState()
+        val ridePaymentAvailability = rememberCustomerPaymentAvailability("RIDE")
+        val deliveryPaymentAvailability = rememberCustomerPaymentAvailability("DELIVERY")
+        val availablePaymentMethods = (ridePaymentAvailability.methods + deliveryPaymentAvailability.methods).distinct()
+        val paymentAvailabilityMessage = listOfNotNull(ridePaymentAvailability.error, deliveryPaymentAvailability.error).distinct().joinToString("\n")
 
         val cameraPositionState = rememberCameraPositionState()
         val snackbarHostState = remember { SnackbarHostState() }
@@ -92,6 +97,9 @@ class PassengerScreen : Screen {
         var destinationAddress by remember { mutableStateOf("") }
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
         var paymentMethod by remember { mutableStateOf("CASH") }
+        LaunchedEffect(availablePaymentMethods) {
+            if (paymentMethod !in availablePaymentMethods) paymentMethod = availablePaymentMethods.firstOrNull() ?: ""
+        }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember { mutableStateOf(false) }
@@ -364,6 +372,10 @@ class PassengerScreen : Screen {
                                     initialName = passengerInfo.name,
                                     initialPhone = passengerInfo.phone,
                                     paymentMethod = paymentMethod,
+                                    paymentMethods = availablePaymentMethods,
+                                    paymentAvailabilityMessage = paymentAvailabilityMessage,
+                                    rideEnabled = ridePaymentAvailability.serviceEnabled && paymentMethod in ridePaymentAvailability.methods,
+                                    deliveryEnabled = deliveryPaymentAvailability.serviceEnabled && paymentMethod in deliveryPaymentAvailability.methods,
                                     onPaymentMethodChange = { paymentMethod = it },
                                     onSubmitDelivery = { submitDelivery() },
                                     onVehicleTypeChange = {
@@ -398,6 +410,7 @@ class PassengerScreen : Screen {
                         fare = fare,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
+                        paymentMethod = paymentMethod,
                         onRequest = { name, phone ->
                             val p = pickup
                             val d = destination
@@ -412,7 +425,8 @@ class PassengerScreen : Screen {
                                     fare = fare,
                                     passengerName = name,
                                     passengerPhone = phone,
-                                    targetDriver = driver
+                                    targetDriver = driver,
+                                    paymentMethod = paymentMethod
                                 )
                                 destination = null
                                 destinationAddress = ""
@@ -485,6 +499,10 @@ class PassengerScreen : Screen {
         initialName: String,
         initialPhone: String,
         paymentMethod: String,
+        paymentMethods: List<String>,
+        paymentAvailabilityMessage: String,
+        rideEnabled: Boolean,
+        deliveryEnabled: Boolean,
         onPaymentMethodChange: (String) -> Unit,
         onSubmitDelivery: () -> Unit,
         onVehicleTypeChange: (VehicleType) -> Unit,
@@ -585,23 +603,26 @@ class PassengerScreen : Screen {
                     )
                 }
 
+                if (paymentAvailabilityMessage.isNotBlank()) {
+                    Text(paymentAvailabilityMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = paymentMethod == "CASH",
-                        onClick = { onPaymentMethodChange("CASH") },
-                        label = { Text("Cash") }
-                    )
-                    FilterChip(
-                        selected = paymentMethod == "GCASH",
-                        onClick = { onPaymentMethodChange("GCASH") },
-                        label = { Text("GCash") }
-                    )
+                    paymentMethods.forEach { method ->
+                        FilterChip(
+                            selected = paymentMethod == method,
+                            onClick = { onPaymentMethodChange(method) },
+                            label = { Text(if (method == "GCASH") "GCash" else "Cash") }
+                        )
+                    }
+                }
+                if (paymentMethods.isEmpty() && paymentAvailabilityMessage.isBlank()) {
+                    Text("Payment options are unavailable for this service.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { onSubmit(name.trim(), phone.trim()) },
-                        enabled = name.isNotBlank() && distanceKm > 0.05,
+                        enabled = name.isNotBlank() && distanceKm > 0.05 && rideEnabled,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.weight(1f).height(52.dp)
                     ) {
@@ -609,7 +630,7 @@ class PassengerScreen : Screen {
                     }
                     OutlinedButton(
                         onClick = onSubmitDelivery,
-                        enabled = distanceKm > 0.05,
+                        enabled = distanceKm > 0.05 && deliveryEnabled,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.weight(1f).height(52.dp)
                     ) {
@@ -630,6 +651,7 @@ class PassengerScreen : Screen {
         fare: Double,
         initialName: String,
         initialPhone: String,
+        paymentMethod: String,
         onPickDestination: () -> Unit,
         onRequest: (String, String) -> Unit
     ) {
