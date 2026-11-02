@@ -117,7 +117,7 @@ describe("financial ledger invariants", () => {
     };
     const operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
     expect(operation.postings[0]).toMatchObject({ accountId: "cash_collection_clearing", partyType: "CASH", deltaMinor: -500 });
-    expect(operation.postings[1]).toMatchObject({ accountId: "wallet_driver_driver_1", bucket: "PENDING", deltaMinor: 400 });
+    expect(operation.postings[1]).toMatchObject({ accountId: "cash_retained_driver_1", bucket: "AVAILABLE", deltaMinor: 400, partyType: "DRIVER" });
     expect(operation.postings[2]).toMatchObject({ accountId: "cash_owed_driver_1", bucket: "CASH_OWED", partyType: "CASH", partyId: "driver_1", deltaMinor: 100 });
     expect(() => validateFinancialOperation(operation)).not.toThrow();
     expect(() => createPaymentReceiptOperation(payment, allocations)).toThrow(/confirmed cash collection/i);
@@ -161,6 +161,9 @@ describe("financial ledger invariants", () => {
     }));
     expect(operation.postings).toContainEqual(expect.objectContaining({
       accountId: "cash_owed_courier_1", bucket: "CASH_OWED", deltaMinor: 100,
+    }));
+    expect(operation.postings).toContainEqual(expect.objectContaining({
+      accountId: "cash_retained_courier_1", bucket: "AVAILABLE", deltaMinor: 200, partyType: "COURIER",
     }));
     expect(operation.postings.reduce((sum, posting) => sum + posting.deltaMinor, 0)).toBe(0);
     expect(() => validateFinancialOperation(operation)).not.toThrow();
