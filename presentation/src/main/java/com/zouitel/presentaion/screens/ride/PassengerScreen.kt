@@ -29,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -51,6 +50,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.screens.payment.rememberCustomerPaymentAvailability
+import com.zouitel.presentaion.screens.payment.CustomerPaymentStatusCard
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
@@ -844,7 +844,6 @@ class PassengerScreen : Screen {
 
     @Composable
     private fun PassengerTripCard(trip: Trip, onCancel: () -> Unit) {
-        val uriHandler = LocalUriHandler.current
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -897,14 +896,11 @@ class PassengerScreen : Screen {
                     )
                 }
 
-                if (trip.paymentStatus != "PAID" && trip.checkoutUrl.isNotBlank()) {
-                    Button(onClick = { if (trip.checkoutUrl.startsWith("https://checkout.bdo.com.ph/")) uriHandler.openUri(trip.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Continue to BDO Checkout")
-                    }
-                    Text("Select GCash only. Other payment types are not supported in Labmda.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else if (trip.status == "PENDING_PAYMENT" && trip.checkoutUrl.isBlank()) {
-                    Text("Waiting for the BDO Checkout payment request link.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
-                }
+                CustomerPaymentStatusCard(
+                    paymentMethod = trip.paymentMethod,
+                    paymentStatus = trip.paymentStatus,
+                    checkoutUrl = trip.checkoutUrl
+                )
 
                 if (trip.driverId.isNotBlank()) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
