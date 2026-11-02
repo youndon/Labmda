@@ -337,8 +337,11 @@ export const cancelCustomerOrder = onCall({ enforceAppCheck: true }, async (call
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
     if (!root) return;
     const order = root.orders?.[orderId] as Record<string, any> | undefined;
-    if (!order || order.clientId !== uid
-      || !["PENDING_PAYMENT", "PLACED"].includes(readString(order.status))) return;
+    if (!order || order.clientId !== uid) return;
+    const orderStatus = readString(order.status);
+    const cancellable = ["PENDING_PAYMENT", "PLACED"].includes(orderStatus)
+      || (order.orderType === "DELIVERY" && orderStatus === "OUT_FOR_DELIVERY" && !readString(order.deliveryId));
+    if (!cancellable) return;
     const paymentId = readString(order.paymentId);
     const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
     if (payment && payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
