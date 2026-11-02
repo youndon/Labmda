@@ -54,7 +54,7 @@ export const createSimulatedGcashSession = onCall({ enforceAppCheck: true }, asy
     checkoutUrl: providerSession.checkoutUrl, simulationOnly: true,
     createdAt: now, updatedAt: now, expiresAt,
   };
-  const payment = {
+  const paymentIntent = {
     id: paymentId, transactionType: quote.kind === "RIDE" ? "RIDE" : "ORDER",
     orderId: "", tripId: "", deliveryId: "", payerId: uid, method: "GCASH",
     // Never mark a simulated transaction as a real successful payment.
@@ -64,7 +64,7 @@ export const createSimulatedGcashSession = onCall({ enforceAppCheck: true }, asy
   };
   const updates: Record<string, unknown> = {};
   updates[`paymentSessions/${sessionId}`] = session;
-  updates[`payments/${paymentId}`] = payment;
+  updates[`paymentIntents/${paymentId}`] = paymentIntent;
   updates[`pricing/quotes/${quoteId}/status`] = "CHECKOUT_STARTED";
   await db.ref().update(updates);
   return {
