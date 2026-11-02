@@ -82,6 +82,17 @@ export function createPaymentReceiptOperation(
     const partyType: LedgerPosting["partyType"] = allocation.beneficiaryType === "DELIVERY"
       ? "COURIER"
       : allocation.beneficiaryType;
+    if (isCash && (allocation.beneficiaryType === "DRIVER" || allocation.beneficiaryType === "DELIVERY")) {
+      // The driver/courier already holds this earning in the collected notes;
+      // it is recorded as retained cash, not as a second withdrawable wallet liability.
+      return {
+        accountId: `cash_retained_${cashCollection!.collectorId}`,
+        bucket: "AVAILABLE",
+        deltaMinor: allocation.amountMinor,
+        partyType,
+        partyId: allocation.beneficiaryId,
+      };
+    }
     const bucket = allocation.status === "READY" ? "AVAILABLE" : "PENDING";
     return {
       accountId: `wallet_${allocation.beneficiaryType.toLowerCase()}_${allocation.beneficiaryId}`,
@@ -96,6 +107,9 @@ export function createPaymentReceiptOperation(
     throw new Error("Payment allocations cannot exceed the succeeded payment amount.");
   }
   const unallocatedMinor = payment.amountMinor - allocatedMinor;
+  if (isCash && unallocatedMinor !== 0) {
+    throw new Error("Cash payment allocations must exactly equal the amount collected.");
+  }
   if (unallocatedMinor > 0) {
     allocationPostings.push({
       accountId: `unallocated_payment_${payment.id}`,
