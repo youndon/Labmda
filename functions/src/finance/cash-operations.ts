@@ -101,11 +101,17 @@ export const confirmMerchantCashSettlement = onCall({ enforceAppCheck: true }, a
   const collectionSnapshot = await db().ref(`cashCollections/${paymentId}`).get();
   if (!collectionSnapshot.exists()) throw new HttpsError("failed-precondition", "Cash collection evidence is missing.");
   const collection = collectionSnapshot.val() as CashCollection;
+  if (collection.status !== "COLLECTED" || collection.paymentId !== paymentId || collection.amountMinor !== payment.amountMinor) {
+    throw new HttpsError("failed-precondition", "Cash collection evidence does not match this payment.");
+  }
   const allocationsSnapshot = await db().ref(`paymentAllocations/${paymentId}`).get();
   const raw = allocationsSnapshot.val() as Record<string, PaymentAllocation> | null;
   const allocation = Object.values(raw ?? {}).find((item) => item.beneficiaryType === "MERCHANT" && item.beneficiaryId === merchantId);
   if (!allocation) throw new HttpsError("permission-denied", "This payment has no earnings allocation for your merchant account.");
-  if (allocation.transactionType !== payment.transactionType || allocation.orderId !== payment.orderId || allocation.tripId !== payment.tripId) {
+  if (allocation.paymentId !== paymentId || allocation.currency !== "PHP"
+    || !Number.isSafeInteger(allocation.amountMinor) || allocation.amountMinor <= 0
+    || allocation.transactionType !== payment.transactionType || allocation.orderId !== payment.orderId
+    || allocation.tripId !== payment.tripId || allocation.deliveryId !== payment.deliveryId) {
     throw new HttpsError("failed-precondition", "Merchant allocation does not match the payment.");
   }
   const handoverId = `merchant_${paymentId}_${merchantId}`;
