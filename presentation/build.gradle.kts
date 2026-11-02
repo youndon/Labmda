@@ -84,6 +84,7 @@ dependencies {
     api(libs.firebase.firestore)
     api(libs.firebase.database)
     api(libs.firebase.storage)
+    api(libs.firebase.functions)
     api(libs.firebase.messaging)
 
     implementation(libs.coil.compose)
