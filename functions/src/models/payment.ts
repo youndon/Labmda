@@ -33,6 +33,9 @@ export interface Payment {
   deliveryId: string;
   payerId: string;
   method: PaymentMethod;
+  /** Collection processor label; never a customer-selectable payment method. */
+  provider?: "BDO_CHECKOUT" | "CASH" | "SIMULATED";
+  providerReference?: string;
   status: PaymentStatus;
   amountMinor: number;
   currency: "PHP";
