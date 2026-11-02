@@ -29,4 +29,25 @@ This module implements a test checkout lifecycle, not a payment gateway integrat
 - `simulateGcashPaymentResult` (emulator only)
 - `createSimulatedGcashRefund` (emulator only)
 
+## Android development client
+
+The presentation module uses the GitLive `firebase-functions` SDK. Instantiate `FirebaseSimulatedPaymentCheckoutRepository` with an explicit Functions Emulator host before starting checkout:
+
+- Android Studio emulator: `10.0.2.2`
+- Physical Android device: the development machine's reachable LAN IP
+- Functions Emulator port: `5001`
+
+Example:
+
+```kotlin
+val checkout = FirebaseSimulatedPaymentCheckoutRepository(
+    emulatorHost = "10.0.2.2",
+    emulatorPort = 5001
+)
+val pending = checkout.createGcashSession(quoteId)
+val completed = checkout.simulateResult(pending, success = true)
+```
+
+Do not instantiate this development repository in a production build. It always redirects GitLive Functions to the emulator and does not provide a production fallback.
+
 The existing cash collection and financial ledger flows are unchanged.
