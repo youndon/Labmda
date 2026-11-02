@@ -221,6 +221,9 @@ export { getAdminPricingConfig, updateAdminPricingConfig } from "./finance/admin
 // Post trusted successful payments into the immutable financial journal.
 export { postSucceededPaymentToLedger } from "./finance/payment-ledger-trigger.js";
 
+// Phase 05 — project canonical payment status into customer order and ride records.
+export { syncPaymentStateToCustomerTransaction } from "./payments/payment-state-sync-trigger.js";
+
 // Phase 09 — manual BDO settlement records and bank-statement reconciliation.
 export { createExpectedBdoSettlement, recordBdoBankTransfer, reconcileBdoSettlements } from "./finance/bdo-settlement.js";
 
