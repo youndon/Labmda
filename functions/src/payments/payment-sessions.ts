@@ -62,11 +62,15 @@ export const createSimulatedGcashSession = onCall({ enforceAppCheck: true }, asy
     createdAt: now, updatedAt: now, completedAt: null,
     provider: "SIMULATED", simulationOnly: true, sessionId,
   };
+  const quoteClaim = await database().ref(`pricing/quotes/${quoteId}`).transaction((current: Record<string, any> | null) => {
+    if (!current || current.uid !== uid || current.status !== "QUOTED" || current.expiresAt <= Date.now()) return;
+    return { ...current, status: "CHECKOUT_STARTED", checkoutSessionId: sessionId };
+  }, undefined, false);
+  if (!quoteClaim.committed) throw new HttpsError("failed-precondition", "This quote has already started checkout or has expired.");
   const updates: Record<string, unknown> = {};
   updates[`paymentSessions/${sessionId}`] = session;
   updates[`paymentIntents/${paymentId}`] = paymentIntent;
-  updates[`pricing/quotes/${quoteId}/status`] = "CHECKOUT_STARTED";
-  await db.ref().update(updates);
+  await database().ref().update(updates);
   return {
     sessionId, paymentId, status: "PENDING", amountMinor, currency: "PHP",
     checkoutUrl: providerSession.checkoutUrl, expiresAt, simulationOnly: true,
@@ -82,7 +86,7 @@ export const simulateGcashPaymentResult = onCall({ enforceAppCheck: true }, asyn
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId) || (outcome !== "SUCCEEDED" && outcome !== "FAILED")) {
     throw new HttpsError("invalid-argument", "A valid session ID and simulated outcome are required.");
   }
-  const snapshot = await db.ref(`paymentSessions/${sessionId}`).get();
+  const snapshot = await database().ref(`paymentSessions/${sessionId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payment session was not found.");
   const session = snapshot.val() as Record<string, any>;
   if (session.payerId !== uid) throw new HttpsError("permission-denied", "This payment session belongs to another customer.");
