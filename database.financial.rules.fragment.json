@@ -149,6 +149,10 @@
       ".indexOn": [
         "createdAt"
       ]
+    },
+    "financialAdjustmentRequests": {
+      ".read": false,
+      ".write": false
     }
   }
 }
