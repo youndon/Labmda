@@ -214,7 +214,8 @@ class DeliveryDashboardScreen : Screen {
                                     isCompleted = selectedTab == 1,
                                     onAccept = { screenModel.claimCourierTask(orderItem) },
                                     onReject = { screenModel.rejectCourierTask(orderItem) },
-                                    onMarkDelivered = { screenModel.markCourierOrderDelivered(orderItem) }
+                                    onMarkDelivered = { screenModel.markCourierOrderDelivered(orderItem) },
+                                    onConfirmCash = { screenModel.confirmCashReceived(orderItem) }
                                 )
                             }
                         }
@@ -308,7 +309,8 @@ class DeliveryDashboardScreen : Screen {
                                 onMarkDelivered = {
                                     screenModel.markCourierOrderDelivered(selectedOrder)
                                     selectedOrderId = null
-                                }
+                                },
+                                onConfirmCash = { screenModel.confirmCashReceived(selectedOrder) }
                             )
                         }
                     }
@@ -323,8 +325,24 @@ class DeliveryDashboardScreen : Screen {
         isCompleted: Boolean,
         onAccept: () -> Unit,
         onReject: () -> Unit,
-        onMarkDelivered: () -> Unit
+        onMarkDelivered: () -> Unit,
+        onConfirmCash: () -> Unit
     ) {
+        var showCashConfirmation by remember(order.id) { mutableStateOf(false) }
+        if (showCashConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showCashConfirmation = false },
+                title = { Text("Confirm cash collection") },
+                text = { Text("Confirm that you physically received ₱${"%.2f".format(order.totalPrice)} from the customer for this delivered order.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showCashConfirmation = false
+                        onConfirmCash()
+                    }) { Text("I received the cash") }
+                },
+                dismissButton = { TextButton(onClick = { showCashConfirmation = false }) { Text("Not yet") } }
+            )
+        }
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -457,7 +475,7 @@ class DeliveryDashboardScreen : Screen {
                 ) {
                     Text("Total to collect:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(order.totalPrice)}",
+                        "₱${"%.2f".format(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -517,6 +535,22 @@ class DeliveryDashboardScreen : Screen {
                             }
                         }
                     }
+                } else if (order.paymentMethod.equals("CASH", ignoreCase = true)
+                    && order.paymentStatus != "PAID" && order.paymentId.isNotBlank()) {
+                    Text(
+                        "Cash is still due from the customer.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Button(
+                        onClick = { showCashConfirmation = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Confirm ₱ cash received")
+                    }
                 } else {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -529,7 +563,8 @@ class DeliveryDashboardScreen : Screen {
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            "Delivered Successfully",
+                            if (order.paymentMethod.equals("CASH", ignoreCase = true)) "Delivered · Cash collected"
+                            else "Delivered Successfully",
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
                             color = MaterialTheme.colorScheme.primary
                         )

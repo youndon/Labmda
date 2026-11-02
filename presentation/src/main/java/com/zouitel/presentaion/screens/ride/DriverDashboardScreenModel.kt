@@ -99,7 +99,9 @@ class DriverDashboardScreenModel : ScreenModel {
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
+                            paymentMethod = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("CASH"),
                             paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
+                            paymentId = runCatching { child.child("paymentId").value<String>() }.getOrDefault(""),
                             driverId = driverId,
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
@@ -110,7 +112,8 @@ class DriverDashboardScreenModel : ScreenModel {
 
                         if (status == "REQUESTED" && driverId.isBlank()) {
                             available.add(trip)
-                        } else if (driverId == uid && status != "COMPLETED" && status != "CANCELLED") {
+                        } else if (driverId == uid && status != "CANCELLED"
+                            && (status != "COMPLETED" || (trip.paymentMethod == "CASH" && trip.paymentStatus != "PAID"))) {
                             active.add(trip)
                         }
                     } catch (e: Exception) {
@@ -132,6 +135,17 @@ class DriverDashboardScreenModel : ScreenModel {
             com.zouitel.presentaion.screens.trustedTransactionCall(
                 "claimRide",
                 mapOf("tripId" to trip.id)
+            )
+        }
+    }
+
+    fun confirmCashReceived(trip: Trip) {
+        val paymentId = trip.paymentId
+        if (paymentId.isBlank()) return
+        screenModelScope.launch {
+            com.zouitel.presentaion.screens.trustedTransactionCall(
+                "confirmCashCollection",
+                mapOf("paymentId" to paymentId)
             )
         }
     }

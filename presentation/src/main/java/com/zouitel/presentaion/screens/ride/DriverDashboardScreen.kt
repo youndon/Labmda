@@ -64,7 +64,7 @@ class DriverDashboardScreen : Screen {
 
         val context = LocalContext.current
         val isOnline by screenModel.isOnline.collectAsState()
-        val hasActiveTrip = activeTrips.isNotEmpty()
+        val hasActiveTrip = activeTrips.any { it.status != "COMPLETED" }
         var myLocation by remember { mutableStateOf<LatLng?>(null) }
 
         var hasLocationPermission by remember {
@@ -309,7 +309,8 @@ class DriverDashboardScreen : Screen {
                                                 selectedTab = 1
                                                 focusedTripId = trip.id
                                             },
-                                            onUpdateStatus = { status -> screenModel.updateTripStatus(trip.id, status) }
+                                            onUpdateStatus = { status -> screenModel.updateTripStatus(trip.id, status) },
+                                            onConfirmCash = { screenModel.confirmCashReceived(trip) }
                                         )
                                     }
                                 }
@@ -329,8 +330,24 @@ class DriverDashboardScreen : Screen {
         isActiveTab: Boolean,
         onFocus: () -> Unit,
         onAccept: () -> Unit,
-        onUpdateStatus: (String) -> Unit
+        onUpdateStatus: (String) -> Unit,
+        onConfirmCash: () -> Unit
     ) {
+        var showCashConfirmation by remember(trip.id) { mutableStateOf(false) }
+        if (showCashConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showCashConfirmation = false },
+                title = { Text("Confirm cash collection") },
+                text = { Text("Confirm that you physically received ₱${"%.2f".format(trip.fare)} from the passenger for this completed ride.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showCashConfirmation = false
+                        onConfirmCash()
+                    }) { Text("I received the cash") }
+                },
+                dismissButton = { TextButton(onClick = { showCashConfirmation = false }) { Text("Not yet") } }
+            )
+        }
         Card(
             onClick = onFocus,
             modifier = Modifier.fillMaxWidth(),
@@ -350,7 +367,7 @@ class DriverDashboardScreen : Screen {
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            "$${"%.2f".format(trip.fare)}",
+                            "₱${"%.2f".format(trip.fare)}",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -405,6 +422,25 @@ class DriverDashboardScreen : Screen {
                             shape = RoundedCornerShape(12.dp)
                         ) { Text("Complete Trip", fontWeight = FontWeight.Bold) }
 
+                        "COMPLETED" -> {
+                            if (trip.paymentMethod.equals("CASH", ignoreCase = true)
+                                && trip.paymentStatus != "PAID" && trip.paymentId.isNotBlank()) {
+                                Text(
+                                    "Cash is still due from the passenger.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                                Button(
+                                    onClick = { showCashConfirmation = true },
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Confirm ₱ cash received", fontWeight = FontWeight.Bold)
+                                }
+                            } else {
+                                Text("Trip completed · ${trip.paymentStatus}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                         else -> Text("Trip Status: ${trip.status}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                     }
                 }
