@@ -139,7 +139,7 @@ class ShopActivitiesScreen : Screen {
                         Text("Track Status", fontWeight = FontWeight.Bold)
                     }
 
-                    if (order.status == OrderStatus.PLACED) {
+                    if (order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT) {
                         OutlinedButton(
                             onClick = onCancelOrder,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
