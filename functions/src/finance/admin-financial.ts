@@ -17,7 +17,7 @@ type RefundCase = {
   reason: string; status: "REQUESTED" | "APPROVED" | "PROCESSING" | "REJECTED" | "COMPLETED";
   requestedBy: string; createdAt: number; updatedAt: number; reviewedBy?: string;
   reviewedAt?: number; reviewNote?: string; completedBy?: string; completedAt?: number;
-  providerReference?: string; method?: string; ledgerOperationId?: string;
+  providerReference?: string; method?: string; ledgerOperationId?: string; processingAt?: number;
 };
 
 function admin(call: AdminCall): string {
@@ -122,6 +122,9 @@ export const resolveAdminFinancialDiscrepancy = onCall({ enforceAppCheck: true }
   const amountMinor = positiveMinor(data.amountMinor, "Amount");
   const referenceId = safeId(data.referenceId, "Reference ID");
   const note = text(data.note, "Resolution note");
+  if (!data.source || typeof data.source !== "object" || !data.destination || typeof data.destination !== "object") {
+    throw new HttpsError("invalid-argument", "Source and destination ledger postings are required.");
+  }
   const source = data.source as Record<string, unknown>;
   const destination = data.destination as Record<string, unknown>;
   const validBuckets: BalanceBucket[] = ["AVAILABLE", "PENDING", "CASH_OWED", "CLEARING"];
@@ -208,8 +211,12 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   const caseRef = db().ref(`refundCases/${refundId}`);
   const claim = await caseRef.transaction((raw: RefundCase | null) => {
     if (!raw || raw.status !== "APPROVED" && raw.status !== "PROCESSING") return;
-    if (raw.status === "PROCESSING") return raw;
-    return { ...raw, status: "PROCESSING", completedBy: uid, providerReference, updatedAt: Date.now() };
+    if (raw.status === "PROCESSING") {
+      if (raw.providerReference !== providerReference) return;
+      return raw;
+    }
+    return { ...raw, status: "PROCESSING", completedBy: uid, providerReference,
+      processingAt: Date.now(), updatedAt: Date.now() };
   }, undefined, false);
   if (!claim.committed) {
     const current = claim.snapshot.val() as RefundCase | null;
@@ -232,7 +239,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   }
   const reversal = buildRefundReversal({
     refundId, paymentId: refund.paymentId, paymentAmountMinor: payment.amountMinor,
-    refundAmountMinor: refund.amountMinor, createdAt: Date.now(), reason: refund.reason,
+    refundAmountMinor: refund.amountMinor, createdAt: refund.processingAt ?? refund.updatedAt, reason: refund.reason,
     originalPostings: postings,
   });
   const posted = await postFinancialOperation(db(), reversal);
