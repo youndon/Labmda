@@ -182,6 +182,44 @@ class PassengerScreenModel : ScreenModel {
         }
     }
 
+    fun requestDelivery(
+        pickupAddress: String,
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffAddress: String,
+        dropoffLat: Double,
+        dropoffLng: Double,
+        paymentMethod: String = "CASH",
+        onSuccess: (String) -> Unit
+    ) {
+        if (currentUser?.uid == null) return
+        screenModelScope.launch {
+            runCatching {
+                val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
+                val quote = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "quoteDelivery",
+                    mapOf(
+                        "pickup" to mapOf("latitude" to pickupLat, "longitude" to pickupLng),
+                        "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
+                        "pickupAddress" to pickupAddress,
+                        "dropoffAddress" to dropoffAddress,
+                        "paymentMethod" to method
+                    )
+                )
+                val quoteId = quote["quoteId"] as? String
+                    ?: error("The server did not return a delivery quote.")
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createDeliveryFromQuote",
+                    mapOf("quoteId" to quoteId)
+                )
+                created["orderId"] as? String
+                    ?: error("The server did not return the new delivery booking ID.")
+            }.onSuccess(onSuccess).onFailure { error ->
+                _requestError.value = error.message ?: "Could not book this delivery."
+            }
+        }
+    }
+
     fun cancelTrip(tripId: String) {
         screenModelScope.launch {
             com.zouitel.presentaion.screens.trustedTransactionCall("cancelPassengerTrip", mapOf("tripId" to tripId))
