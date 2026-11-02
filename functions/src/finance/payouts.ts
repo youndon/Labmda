@@ -226,20 +226,24 @@ export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call)
   return Object.values(payouts ?? {}).map((payout) => ({
     payoutId: payout.payoutId, amountMinor: payout.amountMinor, currency: payout.currency,
     method: payout.method, maskedAccountNumber: `••••••${String(payout.accountNumber ?? "").slice(-4)}`,
-    status: payout.status, createdAt: payout.createdAt, updatedAt: payout.updatedAt,
+    status: payout.status, transferReference: payout.transferReference ?? null, createdAt: payout.createdAt, updatedAt: payout.updatedAt,
     transferReference: payout.transferReference ?? null, adminNote: payout.adminNote ?? null,
   })).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
 });
 
 export const getPendingPayoutRequests = onCall({ enforceAppCheck: true }, async (call) => {
   requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
-  const [requested, approved] = await Promise.all([
+  const [requested, approved, rejecting, paying] = await Promise.all([
     db().ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get(),
     db().ref("payoutRequests").orderByChild("status").equalTo("APPROVED").get(),
+    db().ref("payoutRequests").orderByChild("status").equalTo("REJECTING").get(),
+    db().ref("payoutRequests").orderByChild("status").equalTo("PAYING").get(),
   ]);
   const pending = {
     ...((requested.val() ?? {}) as Record<string, Record<string, unknown>>),
     ...((approved.val() ?? {}) as Record<string, Record<string, unknown>>),
+    ...((rejecting.val() ?? {}) as Record<string, Record<string, unknown>>),
+    ...((paying.val() ?? {}) as Record<string, Record<string, unknown>>),
   };
   return Object.values(pending)
     .map((payout) => ({
@@ -278,23 +282,20 @@ export const rejectPayoutRequest = onCall({ enforceAppCheck: true }, async (call
   const snapshot = await db().ref(`payoutRequests/${payoutId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
-  if (payout.status !== "REQUESTED" && payout.status !== "APPROVED") throw new HttpsError("failed-precondition", "This payout cannot be rejected.");
-  await updatePayoutStatus(payoutId, ["REQUESTED", "APPROVED"], "REJECTING", {
-    rejectedBy: call.auth!.uid,
-  });
-  try {
-    await postFinancialOperation(db(), payoutRelease({
-      payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
-      providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
-    }));
-    await updatePayoutStatus(payoutId, ["REJECTING"], "REJECTED", {
-      rejectedAt: Date.now(), rejectedBy: call.auth!.uid,
-      adminNote: String((call.data as { note?: unknown }).note ?? "").slice(0, 500),
-    });
-  } catch (error) {
-    await updatePayoutStatus(payoutId, ["REJECTING"], payout.status as PayoutStatus, {});
-    throw error;
+  if (payout.status !== "REQUESTED" && payout.status !== "APPROVED" && payout.status !== "REJECTING") {
+    throw new HttpsError("failed-precondition", "This payout cannot be rejected.");
   }
+  if (payout.status !== "REJECTING") {
+    await updatePayoutStatus(payoutId, ["REQUESTED", "APPROVED"], "REJECTING", { rejectedBy: call.auth!.uid });
+  }
+  await postFinancialOperation(db(), payoutRelease({
+    payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
+    providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Number(payout.createdAt),
+  }));
+  await updatePayoutStatus(payoutId, ["REJECTING"], "REJECTED", {
+    rejectedAt: Date.now(), rejectedBy: call.auth!.uid,
+    adminNote: String((call.data as { note?: unknown }).note ?? "").slice(0, 500),
+  });
   return { payoutId, status: "REJECTED" };
 });
 
@@ -307,22 +308,23 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
   const snapshot = await db().ref(`payoutRequests/${payoutId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
-  if (payout.status !== "APPROVED") throw new HttpsError("failed-precondition", "Approve the payout before recording a transfer.");
-  await updatePayoutStatus(payoutId, ["APPROVED"], "PAYING", {
-    paidBy: call.auth!.uid, transferReference,
-  });
-  try {
-    await postFinancialOperation(db(), payoutPaid({
-      payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
-      providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
-    }));
-    await updatePayoutStatus(payoutId, ["PAYING"], "PAID", {
-      paidAt: Date.now(), paidBy: call.auth!.uid, transferReference,
-      adminNote: String(data.note ?? "").slice(0, 500),
-    });
-  } catch (error) {
-    await updatePayoutStatus(payoutId, ["PAYING"], "APPROVED", {});
-    throw error;
+  if (payout.status !== "APPROVED" && payout.status !== "PAYING") {
+    throw new HttpsError("failed-precondition", "Approve the payout before recording a transfer.");
   }
+  const confirmedReference = transferReference || String(payout.transferReference ?? "");
+  if (!confirmedReference) throw new HttpsError("invalid-argument", "Enter the GCash or BDO transfer reference.");
+  if (payout.status === "APPROVED") {
+    await updatePayoutStatus(payoutId, ["APPROVED"], "PAYING", {
+      paidBy: call.auth!.uid, transferReference: confirmedReference,
+    });
+  }
+  await postFinancialOperation(db(), payoutPaid({
+    payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
+    providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Number(payout.createdAt),
+  }));
+  await updatePayoutStatus(payoutId, ["PAYING"], "PAID", {
+    paidAt: Date.now(), paidBy: call.auth!.uid, transferReference: confirmedReference,
+    adminNote: String(data.note ?? "").slice(0, 500),
+  });
   return { payoutId, status: "PAID", transferReference };
 });
