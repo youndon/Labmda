@@ -82,6 +82,7 @@ class PassengerScreenModel : ScreenModel {
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
                             paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
+                            checkoutUrl = runCatching { child.child("checkoutUrl").value<String>() }.getOrDefault(""),
                             driverId = str("driverId"),
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
