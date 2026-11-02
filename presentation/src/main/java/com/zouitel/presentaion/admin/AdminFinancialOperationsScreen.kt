@@ -405,13 +405,17 @@ class AdminFinancialOperationsScreen : Screen {
                 title = { Text("Verify BDO GCash payment") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Only confirm after the BDO Checkout portal shows this exact payment as successful. Do not rely on the customer's return to the app.")
+                        Text("Only confirm after BDO Checkout shows this exact payment as successful. Verify that the actual payment method was GCash. Do not rely on the customer's return to the app.")
                         OutlinedTextField(value = bdoReference, onValueChange = { bdoReference = it }, label = { Text("BDO transaction reference") }, singleLine = true)
                         OutlinedTextField(value = bdoAmount, onValueChange = { bdoAmount = it }, label = { Text("Confirmed amount (PHP)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bdoMethodVerified, onCheckedChange = { bdoMethodVerified = it })
+                            Text("I verified the BDO transaction was paid using GCash.", style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                 },
                 confirmButton = {
-                    Button(onClick = { model.confirmBdoGcashPayment(payment.paymentId, bdoReference, bdoAmount); bdoConfirmTarget = null }, enabled = !busy && bdoReference.isNotBlank() && bdoAmount.isNotBlank()) { Text("Confirm paid") }
+                    Button(onClick = { model.confirmBdoGcashPayment(payment.paymentId, bdoReference, bdoAmount); bdoConfirmTarget = null }, enabled = !busy && bdoReference.isNotBlank() && bdoAmount.isNotBlank() && bdoMethodVerified) { Text("Confirm paid") }
                 },
                 dismissButton = { TextButton(onClick = { bdoConfirmTarget = null }) { Text("Cancel") } }
             )
