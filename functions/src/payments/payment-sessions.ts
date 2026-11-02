@@ -71,6 +71,7 @@ export const createSimulatedGcashSession = onCall({ enforceAppCheck: true }, asy
   updates[`paymentSessions/${sessionId}`] = session;
   updates[`paymentIntents/${paymentId}`] = paymentIntent;
   updates[`payments/${paymentId}/status`] = "PROCESSING";
+  updates[`payments/${paymentId}/provider`] = "SIMULATED";
   updates[`payments/${paymentId}/updatedAt`] = now;
   await database().ref().update(updates);
   return {
