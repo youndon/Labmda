@@ -98,7 +98,7 @@ Sensitive destination data is stored under `payoutProfiles/{uid}` and copied int
 6. `rejectPayoutRequest` releases the reserved amount back to `AVAILABLE`.
 7. `getMyPayoutHistory` returns the provider's own payout records with account numbers masked.
 
-The payout state is locked while rejection or paid confirmation is being posted to the ledger, preventing two administrators from completing competing state transitions. The ledger rejects a payout reservation that would make the provider's available balance negative. Ledger operations use stable payout-specific idempotency keys.
+The payout state is locked while rejection or paid confirmation is being posted to the ledger, preventing two administrators from completing competing state transitions. The ledger rejects a payout reservation that would make the provider's available balance negative. Ledger operations use stable payout-specific idempotency keys. Once a payout enters `PAYING`, its saved GCash/BDO transfer reference is immutable; retries may reuse the saved reference but cannot replace it. A `PAYING` record missing its reference fails closed and requires manual review.
 
 ### Callable exports
 
@@ -114,4 +114,4 @@ The payout state is locked while rejection or paid confirmation is being posted 
 
 ### Important operational boundary
 
-This phase does not connect to a BDO API, GCash disbursement API, payment gateway, or Xendit. Admins manually send the transfer and record its reference in Labmda. The app must not mark a payout as paid before the real transfer has been completed. Before production, merge the financial rules fragment into the deployed RTDB ruleset and verify that the callable functions are deployed with App Check enforcement and the expected `admin` custom claim.
+This phase does not connect to a BDO API, GCash disbursement API, or customer payment gateway. Admins manually send provider payouts through the selected GCash or BDO channel and record the actual transfer reference in Labmda. The app must not mark a payout as paid before the real transfer has been completed. The admin custom claim can be provisioned from a trusted environment with `cd functions && npm run set-admin-claim -- <firebase-auth-uid>` using Application Default Credentials; never expose this operation as a client callable. Before production, merge the financial rules fragment into the complete deployed RTDB ruleset, add rules for every existing app path, run RTDB Rules Emulator tests, configure Android App Check, and verify the callable functions with App Check enforcement and the expected `admin` custom claim.

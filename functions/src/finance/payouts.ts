@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolvePayoutTransferReference, PayoutTransferReferenceError } from "./payout-transfer-reference.js";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import {
@@ -366,16 +367,25 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
   requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const data = call.data as { payoutId?: unknown; transferReference?: unknown; note?: unknown };
   const payoutId = String(data.payoutId ?? "");
-  const transferReference = typeof data.transferReference === "string" ? data.transferReference.trim() : "";
-  if (transferReference.length > 120) throw new HttpsError("invalid-argument", "The transfer reference is too long.");
+  if (!safeId(payoutId)) throw new HttpsError("invalid-argument", "Payout ID is invalid.");
+  const transferReference = typeof data.transferReference === "string" ? data.transferReference : "";
   const snapshot = await db().ref(`payoutRequests/${payoutId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
   if (payout.status !== "APPROVED" && payout.status !== "PAYING") {
     throw new HttpsError("failed-precondition", "Approve the payout before recording a transfer.");
   }
-  const confirmedReference = transferReference || String(payout.transferReference ?? "");
-  if (!confirmedReference) throw new HttpsError("invalid-argument", "Enter the GCash or BDO transfer reference.");
+  let confirmedReference: string;
+  try {
+    confirmedReference = resolvePayoutTransferReference(
+      payout.status as "APPROVED" | "PAYING",
+      payout.transferReference,
+      transferReference,
+    );
+  } catch (error) {
+    if (error instanceof PayoutTransferReferenceError) throw new HttpsError(error.code, error.message);
+    throw error;
+  }
   if (payout.status === "APPROVED") {
     await updatePayoutStatus(payoutId, ["APPROVED"], "PAYING", {
       paidBy: call.auth!.uid, transferReference: confirmedReference,

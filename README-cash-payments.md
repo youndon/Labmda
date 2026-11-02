@@ -30,7 +30,7 @@ At collection, the receipt operation balances the full customer payment against 
 - Merchant allocation: held in `cash_owed_{collectorId}_merchant_{merchantId}` until merchant confirmation.
 - Platform commission: held in `cash_owed_{collectorId}` until an administrator confirms remittance.
 - Driver/courier earning: recorded in `cash_retained_{collectorId}`, because the collector already has this portion in cash. It is not also credited to a withdrawable wallet, avoiding double payment.
-- No BDO account, bank transfer, Xendit account, or GCash transaction is required for CASH.
+- No external bank transfer or GCash transaction is required for CASH.
 
 The merchant and platform cash-owed accounts are deliberately separate. A merchant settlement cannot reduce the commission owed to the platform, and a platform remittance cannot consume the merchant's cash.
 
