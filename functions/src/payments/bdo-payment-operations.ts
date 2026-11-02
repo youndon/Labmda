@@ -4,6 +4,16 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 const db = () => getDatabase();
 const safeId = /^[A-Za-z0-9_-]{1,128}$/;
 
+export function isBdoCheckoutPaymentRequestUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname === "checkout.bdo.com.ph" && parsed.pathname.length > 1;
+  } catch {
+    return false;
+  }
+}
+
+
 /**
  * Manual verification bridge for BDO Checkout while BDO's merchant-specific
  * server integration/webhook specification is not available to the project.
@@ -101,13 +111,7 @@ export const attachBdoCheckoutLink = onCall({ enforceAppCheck: true }, async (ca
   if (!safeId.test(paymentId) || !Number.isSafeInteger(amountMinor) || (amountMinor as number) <= 0) {
     throw new HttpsError("invalid-argument", "Payment ID and positive PHP-centavo amount are required.");
   }
-  let parsed: URL;
-  try {
-    parsed = new URL(checkoutUrl);
-  } catch {
-    throw new HttpsError("invalid-argument", "The BDO Checkout payment request URL is invalid.");
-  }
-  if (parsed.protocol !== "https:" || parsed.hostname !== "checkout.bdo.com.ph" || parsed.pathname.length < 2) {
+  if (!isBdoCheckoutPaymentRequestUrl(checkoutUrl)) {
     throw new HttpsError("invalid-argument", "Only a genuine https://checkout.bdo.com.ph payment request link is accepted.");
   }
 
