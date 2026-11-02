@@ -48,6 +48,7 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
+import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
@@ -221,6 +222,7 @@ class PassengerScreen : Screen {
             ) { orderId ->
                 destination = null
                 destinationAddress = ""
+                navigator?.push(LiveOrderTrackingScreen(orderId))
                 scope.launch { snackbarHostState.showSnackbar(if (paymentMethod == "GCASH") "Delivery created. GCash payment is pending BDO Checkout verification." else "Delivery booking $orderId created.") }
             }
         }
