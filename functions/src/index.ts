@@ -165,3 +165,7 @@ export {
   getMyCashOutstanding,
   reconcileCashPayments,
 } from "./finance/cash-operations.js";
+
+
+// Phase 05 — server-authoritative cash payment creation from a customer quote.
+export { createCashPaymentFromQuote } from "./finance/payment-creation.js";
