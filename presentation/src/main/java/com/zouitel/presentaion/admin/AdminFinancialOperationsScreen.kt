@@ -309,6 +309,11 @@ class AdminFinancialOperationsScreen : Screen {
                                     } else {
                                         Text("BDO Checkout link attached", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                                         OutlinedButton(onClick = {
+                                            checkoutTarget = payment
+                                            checkoutUrl = ""
+                                            checkoutAmount = BigDecimal.valueOf(payment.amountMinor, 2).stripTrailingZeros().toPlainString()
+                                        }, enabled = !busy) { Text("Replace payment request link") }
+                                        OutlinedButton(onClick = {
                                             bdoConfirmTarget = payment
                                             bdoReference = ""
                                             bdoAmount = BigDecimal.valueOf(payment.amountMinor, 2).stripTrailingZeros().toPlainString()
