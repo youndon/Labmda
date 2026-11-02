@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { reconcileFinancialLedger, createFinancialTransfer, postFinancialOperation, type BalanceBucket, type LedgerPosting } from "./ledger.js";
+import { buildRefundReversal } from "./refund-ledger.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -229,33 +230,11 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   if (!postings.length || !Number.isSafeInteger(original.createdAt)) {
     throw new HttpsError("failed-precondition", "The original payment journal entry is invalid.");
   }
-  const distribute = (items: LedgerPosting[], total: number): number[] => {
-    const weightTotal = items.reduce((sum, item) => sum + Math.abs(item.deltaMinor), 0);
-    if (weightTotal <= 0) throw new HttpsError("failed-precondition", "Original payment journal has no refundable postings.");
-    const rows = items.map((item, index) => {
-      const numerator = BigInt(Math.abs(item.deltaMinor)) * BigInt(refund.amountMinor);
-      return { index, amount: Number(numerator / BigInt(weightTotal)), remainder: numerator % BigInt(weightTotal) };
-    });
-    const allocated = rows.reduce((sum, row) => sum + row.amount, 0);
-    rows.sort((a, b) => a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1);
-    for (let i = 0; i < total - allocated; i++) rows[i % rows.length].amount += 1;
-    rows.sort((a, b) => a.index - b.index);
-    return rows.map((row) => row.amount);
-  };
-  const reverse: LedgerPosting[] = [];
-  for (const sign of [-1, 1]) {
-    const side = postings.filter((item) => Math.sign(item.deltaMinor) === sign);
-    if (!side.length) continue;
-    const amounts = distribute(side, refund.amountMinor);
-    side.forEach((item, index) => reverse.push({ ...item, deltaMinor: -Math.sign(item.deltaMinor) * amounts[index] }));
-  }
-  const reversal = {
-    operationId: `refund_${refundId}_posted`, eventType: "REFUND" as const,
-    referenceType: "REFUND" as const, referenceId: refundId, currency: "PHP" as const,
-    idempotencyKey: `refund_${refundId}_posted`, createdAt: Date.now(),
-    description: `Refund reversal for payment ${refund.paymentId}: ${refund.reason}`,
-    postings: reverse,
-  };
+  const reversal = buildRefundReversal({
+    refundId, paymentId: refund.paymentId, paymentAmountMinor: payment.amountMinor,
+    refundAmountMinor: refund.amountMinor, createdAt: Date.now(), reason: refund.reason,
+    originalPostings: postings,
+  });
   const posted = await postFinancialOperation(db(), reversal);
   const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
     if (!root) return;
