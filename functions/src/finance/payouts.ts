@@ -164,14 +164,22 @@ export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
       createdAt: operation.createdAt, description: operation.description,
       postings: operation.postings.filter((posting) => accountIds.has(posting.accountId)),
     }));
+  const financeValues = (finance.val() ?? {}) as Record<string, { cashOwedMinor?: number }>;
+  const collectorPrefix = `cash_owed_${uid}`;
+  const merchantSuffix = `_merchant_${uid}`;
+  const cashOwedMinor = Object.entries(financeValues)
+    .filter(([accountId]) => accountId === collectorPrefix
+      || accountId.startsWith(`${collectorPrefix}_merchant_`)
+      || accountId.endsWith(merchantSuffix))
+    .reduce((sum, [, value]) => sum + Number(value.cashOwedMinor ?? 0), 0);
   return {
     currency: "PHP",
     totals: balances.reduce((sum, item) => ({
       availableMinor: sum.availableMinor + item.availableMinor,
       pendingMinor: sum.pendingMinor + item.pendingMinor,
-      cashOwedMinor: sum.cashOwedMinor + item.cashOwedMinor,
       clearingMinor: sum.clearingMinor + item.clearingMinor,
-    }), { availableMinor: 0, pendingMinor: 0, cashOwedMinor: 0, clearingMinor: 0 }),
+    }), { availableMinor: 0, pendingMinor: 0, clearingMinor: 0 }),
+    cashOwedMinor,
     accounts: balances, transactions: history,
   };
 });
