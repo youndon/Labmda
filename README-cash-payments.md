@@ -58,7 +58,11 @@ Before enabling cash in production, the trusted order/trip backend must:
 3. attach the assigned courier to order payments before collection, and read the assigned driver from the trip record for rides;
 4. reject client attempts to edit payment amounts, payment status, beneficiary splits, or cash evidence.
 
-The current Android order flows write order records directly. They must be migrated to that trusted payment/order creation boundary before this phase can honestly be considered end-to-end complete. Also merge the financial rules fragment into the full application ruleset; do not deploy the fragment alone. The repository's `firebase.json` currently deploys Functions only.
+Food, shop, ride and standalone delivery creation now consume one-time server quotes and persist the payment record from the trusted Cloud Functions. The Android food, shop and passenger ride paths call these trusted endpoints; standalone delivery is created through the same quote flow. The courier/driver assignment operations create the quote-derived allocations once the actual beneficiary is known.
+
+The GCash processor is BDO Checkout, not a customer-facing "BDO" payment method. The payment method remains `GCASH`; `CASH` remains the alternative. Until BDO supplies the merchant-specific API/webhook contract, `confirmBdoGcashPayment` is a manual admin verification bridge: an administrator must verify the successful transaction in the BDO merchant portal and provide its exact reference and amount. It must not be called merely because the customer returned from checkout.
+
+The financial rules fragment still needs to be merged into the complete application ruleset and tested before deployment. Do not deploy the fragment alone.
 
 ## Operational acceptance checks
 
