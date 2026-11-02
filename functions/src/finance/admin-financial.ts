@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { reconcileFinancialLedger, createFinancialTransfer, postFinancialOperation, type BalanceBucket, type LedgerPosting } from "./ledger.js";
@@ -245,24 +245,37 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   const uid = admin(call);
   const refundId = safeId(call.data?.refundId, "Refund ID");
   const providerReference = text(call.data?.providerReference, "Provider/bank refund reference", 160);
-  const caseRef = db().ref(`refundCases/${refundId}`);
-  const claim = await caseRef.transaction((raw: RefundCase | null) => {
-    if (!raw || raw.status !== "APPROVED" && raw.status !== "PROCESSING") return;
-    if (raw.status === "PROCESSING") {
-      if (raw.providerReference !== providerReference) return;
-      return raw;
-    }
-    return { ...raw, status: "PROCESSING", completedBy: uid, providerReference,
-      processingAt: Date.now(), updatedAt: Date.now() };
+  const referenceKey = createHash("sha256").update(providerReference.trim().toUpperCase()).digest("hex");
+  const now = Date.now();
+  const claim = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const current = root.refundCases?.[refundId] as RefundCase | undefined;
+    if (!current) return;
+    if (current.status === "COMPLETED") return root;
+    if (current.status !== "APPROVED" && current.status !== "PROCESSING") return;
+    if (current.status === "PROCESSING" && current.providerReference !== providerReference) return;
+    const payment = root.payments?.[current.paymentId] as PaymentRecord | undefined;
+    if (!payment || payment.id !== current.paymentId) return;
+    if (payment.refundProcessingId && payment.refundProcessingId !== refundId) return;
+    const referenceOwner = root.refundProviderReferenceIndex?.[referenceKey];
+    if (referenceOwner && referenceOwner !== refundId) return;
+    const nextCase = current.status === "PROCESSING"
+      ? current
+      : { ...current, status: "PROCESSING", completedBy: uid, providerReference,
+          processingAt: now, updatedAt: now };
+    return {
+      ...root,
+      payments: { ...root.payments, [current.paymentId]: { ...payment, refundProcessingId: refundId } },
+      refundCases: { ...root.refundCases, [refundId]: nextCase },
+      refundProviderReferenceIndex: { ...(root.refundProviderReferenceIndex ?? {}), [referenceKey]: refundId },
+    };
   }, undefined, false);
   if (!claim.committed) {
-    const current = claim.snapshot.val() as RefundCase | null;
+    const current = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase | null;
     if (current?.status === "COMPLETED") return { refundId, status: "COMPLETED", duplicate: true };
-    if (current?.status !== "PROCESSING" || current.providerReference !== providerReference) {
-      throw new HttpsError("failed-precondition", "Only an approved refund can be completed.");
-    }
+    throw new HttpsError("failed-precondition", "Refund is not approved, another refund for this payment is processing, or the transfer reference is already assigned.");
   }
-  const refund = claim.snapshot.val() as RefundCase;
+  const refund = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
   const paymentSnapshot = await db().ref(`payments/${refund.paymentId}`).get();
   if (!paymentSnapshot.exists()) throw new HttpsError("not-found", "Refund payment was not found.");
   const payment = paymentSnapshot.val() as PaymentRecord;
@@ -286,7 +299,8 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     if (!root) return;
     const currentCase = root.refundCases?.[refundId] as RefundCase | undefined;
     const currentPayment = root.payments?.[refund.paymentId] as PaymentRecord | undefined;
-    if (!currentCase || currentCase.status !== "PROCESSING" || !currentPayment) return;
+    if (!currentCase || currentCase.status !== "PROCESSING" || currentCase.providerReference !== providerReference
+      || !currentPayment || currentPayment.refundProcessingId !== refundId) return;
     const refunded = currentPayment.refundedAmountMinor ?? 0;
     const reserved = currentPayment.refundReservedAmountMinor ?? 0;
     if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved) || reserved < refund.amountMinor
@@ -295,6 +309,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     const nextRefunded = refunded + refund.amountMinor;
     const nextPayment = { ...currentPayment, refundedAmountMinor: nextRefunded,
       refundReservedAmountMinor: reserved - refund.amountMinor,
+      refundProcessingId: null,
       status: nextRefunded === currentPayment.amountMinor ? "REFUNDED" : "PARTIALLY_REFUNDED",
       updatedAt: Date.now() };
     const nextCase = { ...currentCase, status: "COMPLETED", providerReference,
