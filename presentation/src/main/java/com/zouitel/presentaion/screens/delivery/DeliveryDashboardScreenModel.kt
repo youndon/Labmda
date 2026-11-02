@@ -113,6 +113,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
                             status = status,
                             createdAtTimestamp = createdAt,
                             paymentMethod = paymentMethod,
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
                             deliveryPhone = deliveryPhone,
