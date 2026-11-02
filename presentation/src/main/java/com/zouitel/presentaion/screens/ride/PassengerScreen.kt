@@ -883,7 +883,7 @@ class PassengerScreen : Screen {
                     }
                 }
 
-                if (trip.status == "PENDING_PAYMENT" || trip.status == "REQUESTED" || trip.status == "ACCEPTED") {
+                if (trip.paymentStatus != "PAID" && (trip.status == "PENDING_PAYMENT" || trip.status == "REQUESTED" || trip.status == "ACCEPTED")) {
                     Spacer(Modifier.height(4.dp))
                     OutlinedButton(
                         onClick = onCancel,
