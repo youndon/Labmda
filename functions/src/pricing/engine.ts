@@ -68,11 +68,10 @@ function roundBps(amountMinor: number, bps: number): number {
   assertBps(bps, "basisPoints");
   return Number((BigInt(amountMinor) * BigInt(bps) + 5000n) / 10000n);
 }
-function roundUpPerKm(distanceMeters: number, perKmMinor: number): number {
+function proratePerKm(distanceMeters: number, perKmMinor: number): number {
   if (!Number.isSafeInteger(distanceMeters) || distanceMeters < 0) throw new Error("distanceMeters must be a non-negative integer.");
   assertMinor(perKmMinor, "perKmMinor");
-  const wholeOrPartialKm = Math.ceil(distanceMeters / 1000);
-  const amount = BigInt(wholeOrPartialKm) * BigInt(perKmMinor);
+  const amount = (BigInt(distanceMeters) * BigInt(perKmMinor) + 500n) / 1000n;
   const result = Number(amount);
   assertMinor(result, "distance charge");
   return result;
@@ -109,7 +108,7 @@ export function calculateDeliveryFee(config: DeliveryRate, route: RouteMetrics):
   assertMinor(config.baseFeeMinor, "delivery.baseFeeMinor");
   assertMinor(config.minimumFeeMinor, "delivery.minimumFeeMinor");
   assertBps(config.platformCommissionBps, "delivery.platformCommissionBps");
-  const variable = roundUpPerKm(route.distanceMeters, config.perKmMinor);
+  const variable = proratePerKm(route.distanceMeters, config.perKmMinor);
   const feeMinor = Math.max(config.minimumFeeMinor, config.baseFeeMinor + variable);
   assertMinor(feeMinor, "delivery.feeMinor");
   const platformCommissionMinor = roundBps(feeMinor, config.platformCommissionBps);
