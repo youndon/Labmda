@@ -223,7 +223,7 @@ fun PaymentCheckoutScreen(
                 )
             } else {
                 InfoPanel(
-                    text = "You'll continue to the GCash payment page. Keep this screen open until Labmda receives the verified payment result."
+                    text = "You'll continue to BDO Checkout. Select GCash on the payment page and wait for Labmda to show verified payment status."
                 )
             }
 
@@ -247,7 +247,7 @@ fun PaymentCheckoutScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp)
                 ) {
                     Text(
-                        if (model.paymentMethod == PaymentMethod.GCASH) "Continue to GCash" else "Confirm cash order",
+                        if (model.paymentMethod == PaymentMethod.GCASH) "Continue to BDO Checkout" else "Confirm cash order",
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -258,7 +258,7 @@ fun PaymentCheckoutScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp)
                         ) {
-                            Text("Open GCash checkout", fontWeight = FontWeight.Bold)
+                            Text("Open BDO Checkout", fontWeight = FontWeight.Bold)
                         }
                     } else {
                         OutlinedButton(
