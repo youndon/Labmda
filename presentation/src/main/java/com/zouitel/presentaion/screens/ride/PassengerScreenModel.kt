@@ -26,6 +26,10 @@ class PassengerScreenModel : ScreenModel {
     private val _paymentError = MutableStateFlow<String?>(null)
     val paymentError: StateFlow<String?> = _paymentError.asStateFlow()
 
+    fun clearPaymentError() {
+        _paymentError.value = null
+    }
+
     private val _trips = MutableStateFlow<List<Trip>>(emptyList())
     val trips: StateFlow<List<Trip>> = _trips.asStateFlow()
 
