@@ -190,3 +190,6 @@ export { getAdminFinancialOverview } from "./finance/admin-overview.js";
 
 // Phase 08 — administrator pricing and commission configuration.
 export { getAdminPricingConfig, updateAdminPricingConfig } from "./finance/admin-pricing.js";
+
+// Phase 09 — read-only administrator payment and refund monitoring.
+export { getAdminPaymentMonitor } from "./finance/admin-payments.js";
