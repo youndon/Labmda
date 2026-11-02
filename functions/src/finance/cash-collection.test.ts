@@ -9,7 +9,7 @@ function fakeDatabase(seed: Record<string, any>) {
       ref: () => ({
         transaction: async (update: (value: Record<string, any> | null) => Record<string, any> | undefined) => {
           const next = update(structuredClone(root));
-          const committed = next !== undefined && next !== root;
+          const committed = next !== undefined && JSON.stringify(next) !== JSON.stringify(root);
           if (committed) root = next!;
           return { committed, snapshot: { val: () => structuredClone(root) } };
         },
