@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCashPaymentBundle,
+  isApprovedCourier,
+  isApprovedDriver,
   validateOrderMatches,
   validateRideMatches,
 } from "./payment-initialization.js";
@@ -40,6 +42,22 @@ const rideQuote = {
     driverEarningsMinor: 2_400, platformCommissionMinor: 600, providerFeeMinor: 0,
   },
 };
+
+describe("trusted provider assignment", () => {
+  it("accepts only approved courier and driver service records matching their UIDs", () => {
+    const root = {
+      users: {
+        courier_1: { deliveryServices: { id: "courier_1", status: "APPROVED" } },
+        driver_1: { driverService: { id: "driver_1", status: "APPROVED" } },
+        pending_driver: { driverService: { id: "pending_driver", status: "PENDING" } },
+      },
+    };
+    expect(isApprovedCourier(root, "courier_1")).toBe(true);
+    expect(isApprovedCourier(root, "driver_1")).toBe(false);
+    expect(isApprovedDriver(root, "driver_1")).toBe(true);
+    expect(isApprovedDriver(root, "pending_driver")).toBe(false);
+  });
+});
 
 describe("trusted payment initialization validation", () => {
   it("accepts an order only when ownership, item quantities, route and server quote totals match", () => {
