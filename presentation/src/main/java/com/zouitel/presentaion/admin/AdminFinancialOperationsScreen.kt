@@ -323,7 +323,7 @@ class AdminFinancialOperationsScreen : Screen {
                                         }, enabled = !busy) { Text("Verify paid transaction") }
                                     }
                                 }
-                                Text("Refunded ${formatAdminMoney(payment.refundedAmountMinor)} • Remaining ${formatAdminMoney(payment.refundableMinor)}", style = MaterialTheme.typography.bodySmall)
+                                Text("Refunded ${formatAdminMoney(payment.refundedAmountMinor)} • Reserved ${formatAdminMoney(payment.refundReservedAmountMinor)} • Available to refund ${formatAdminMoney(payment.refundableMinor)}", style = MaterialTheme.typography.bodySmall)
                                 if (payment.refundableMinor > 0 && (payment.status == "SUCCEEDED" || payment.status == "PARTIALLY_REFUNDED")) {
                                     OutlinedButton(onClick = { refundTarget = payment; refundAmount = ""; refundReason = "" }, enabled = !busy) {
                                         Text("Create refund case")
