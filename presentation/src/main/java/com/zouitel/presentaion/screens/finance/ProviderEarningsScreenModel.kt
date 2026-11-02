@@ -83,6 +83,9 @@ data class PayoutHistoryItem(
 @Serializable
 data class PayoutHistoryResponse(val items: List<PayoutHistoryItem> = emptyList())
 
+@Serializable
+data class PayoutRequestPayload(val amountMinor: Long, val accountId: String)
+
 class ProviderEarningsScreenModel : ScreenModel {
     private val functions = Firebase.functions
 
@@ -149,7 +152,7 @@ class ProviderEarningsScreenModel : ScreenModel {
             _isSubmitting.value = true
             _message.value = null
             runCatching {
-                functions.httpsCallable("requestMyPayout").invoke(mapOf("amountMinor" to amountMinor, "accountId" to accountId))
+                functions.httpsCallable("requestMyPayout").invoke(PayoutRequestPayload(amountMinor, accountId))
                 _message.value = "Payout request submitted for admin review."
                 refresh()
             }.onFailure { error ->
