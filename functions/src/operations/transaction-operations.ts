@@ -23,12 +23,12 @@ function fail(message: string): never {
 function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
-function isAllowedOrderTransition(from: string, to: string): boolean {
+export function isAllowedOrderTransition(from: string, to: string): boolean {
   return (from === "PLACED" && (to === "ACCEPTED" || to === "CANCELLED"))
     || (from === "ACCEPTED" && (to === "PREPARING" || to === "CANCELLED"))
     || (from === "PREPARING" && to === "OUT_FOR_DELIVERY");
 }
-function isAllowedTripTransition(from: string, to: string): boolean {
+export function isAllowedTripTransition(from: string, to: string): boolean {
   return (from === "ACCEPTED" && to === "IN_PROGRESS")
     || (from === "IN_PROGRESS" && to === "COMPLETED");
 }
