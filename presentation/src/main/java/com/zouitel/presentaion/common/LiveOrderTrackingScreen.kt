@@ -266,6 +266,11 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
             OrderStatus.DELIVERED to "Delivered"
         )
 
+        if (currentStatus == OrderStatus.PENDING_PAYMENT) {
+            Text("Waiting for GCash payment confirmation before the merchant receives this order.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.tertiary)
+            return
+        }
+
         if (currentStatus == OrderStatus.CANCELLED) {
             Box(
                 modifier = Modifier
