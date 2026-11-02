@@ -84,3 +84,69 @@ export const confirmBdoGcashPayment = onCall({ enforceAppCheck: true }, async (c
   }
   return { paymentId, status: "SUCCEEDED", transferReference, duplicate };
 });
+
+
+/**
+ * Attaches a one-time payment request link manually generated in the BDO
+ * Checkout merchant portal. It does not mark the payment successful.
+ */
+export const attachBdoCheckoutLink = onCall({ enforceAppCheck: true }, async (call) => {
+  const uid = call.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
+  if (call.auth?.token?.admin !== true) throw new HttpsError("permission-denied", "Administrator access is required.");
+
+  const paymentId = String(call.data?.paymentId ?? "");
+  const checkoutUrl = String(call.data?.checkoutUrl ?? "").trim();
+  const amountMinor = call.data?.amountMinor;
+  if (!safeId.test(paymentId) || !Number.isSafeInteger(amountMinor) || (amountMinor as number) <= 0) {
+    throw new HttpsError("invalid-argument", "Payment ID and positive PHP-centavo amount are required.");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(checkoutUrl);
+  } catch {
+    throw new HttpsError("invalid-argument", "The BDO Checkout payment request URL is invalid.");
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== "checkout.bdo.com.ph" || parsed.pathname.length < 2) {
+    throw new HttpsError("invalid-argument", "Only a genuine https://checkout.bdo.com.ph payment request link is accepted.");
+  }
+
+  const result = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const payment = root.payments?.[paymentId] as Record<string, any> | undefined;
+    if (!payment || payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
+      || payment.currency !== "PHP" || payment.amountMinor !== amountMinor
+      || (payment.status !== "PENDING" && payment.status !== "PROCESSING")) return;
+    if (payment.checkoutUrl) {
+      if (payment.checkoutUrl === checkoutUrl && payment.checkoutAmountMinor === amountMinor) return root;
+      return;
+    }
+    const now = Date.now();
+    const nextPayment = {
+      ...payment, checkoutUrl, checkoutAmountMinor: amountMinor,
+      checkoutLinkCreatedAt: now, checkoutLinkCreatedBy: uid, updatedAt: now,
+    };
+    const nextRoot: Record<string, any> = {
+      ...root, payments: { ...root.payments, [paymentId]: nextPayment },
+    };
+    if (payment.transactionType === "ORDER" && payment.orderId) {
+      const order = root.orders?.[payment.orderId];
+      if (!order || order.paymentId !== paymentId || order.status !== "PENDING_PAYMENT") return;
+      nextRoot.orders = { ...root.orders, [payment.orderId]: { ...order, checkoutUrl, updatedAtTimestamp: now } };
+    } else if (payment.transactionType === "RIDE" && payment.tripId) {
+      const trip = root.trips?.[payment.tripId];
+      if (!trip || trip.paymentId !== paymentId || trip.status !== "PENDING_PAYMENT") return;
+      nextRoot.trips = { ...root.trips, [payment.tripId]: { ...trip, checkoutUrl, updatedAtTimestamp: now } };
+    } else {
+      return;
+    }
+    return nextRoot;
+  }, undefined, false);
+
+  const current = result.snapshot.val() as Record<string, any> | null;
+  const saved = current?.payments?.[paymentId];
+  if (!saved || saved.checkoutUrl !== checkoutUrl || saved.checkoutAmountMinor !== amountMinor) {
+    throw new HttpsError("failed-precondition", "The BDO Checkout link could not be attached to this pending payment.");
+  }
+  return { paymentId, checkoutUrl, status: saved.status, duplicate: !result.committed };
+});
