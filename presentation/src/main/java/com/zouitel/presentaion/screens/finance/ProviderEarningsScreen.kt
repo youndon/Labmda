@@ -465,6 +465,7 @@ private fun PayoutProfileDialog(
 @Composable
 private fun EarningsBarChart(days: List<EarningsAnalyticsDay>) {
     val maximum = (days.maxOfOrNull { it.earnedMinor } ?: 0L).coerceAtLeast(1L)
+    val barColor = MaterialTheme.colorScheme.primary
     Canvas(modifier = Modifier.fillMaxWidth().height(132.dp)) {
         if (days.isEmpty()) return@Canvas
         val slot = size.width / days.size
@@ -474,7 +475,7 @@ private fun EarningsBarChart(days: List<EarningsAnalyticsDay>) {
             val barHeight = (size.height - 8f) * fraction
             val left = index * slot + (slot - barWidth) / 2f
             drawRoundRect(
-                color = MaterialTheme.colorScheme.primary,
+                color = barColor,
                 topLeft = Offset(left, size.height - barHeight),
                 size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
                 cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
