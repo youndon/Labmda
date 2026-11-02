@@ -175,8 +175,10 @@ export const initializeOrderCashPayment = onCall({ enforceAppCheck: true }, asyn
     if (!currentQuote || !currentOrder) return;
     if (currentQuote.status === "PAYMENT_CREATED" && currentQuote.orderId === orderId
       && typeof currentQuote.paymentId === "string" && raw.payments?.[currentQuote.paymentId]) return;
-    if (currentQuote.status !== "QUOTED" || currentQuote.uid !== uid || currentQuote.expiresAt <= Date.now()) return;
-    if (raw.paymentByOrder?.[orderId]) return;
+    if (currentQuote.status !== "QUOTED" || currentQuote.uid !== uid || currentQuote.expiresAt <= Date.now()
+      || currentQuote.kind !== quote.kind || currentQuote.sourceId !== quote.sourceId
+      || currentQuote.breakdown?.customerTotalMinor !== amountMinor) return;
+    if (raw.paymentByOrder?.[orderId] || currentOrder.paymentId) return;
     validateOrderMatches(currentOrder, currentQuote, uid);
     if (currentOrder.deliveryId !== courierId) return;
     const source = raw[quote.kind === "FOOD" ? "restaurants" : "shops"]?.[quote.sourceId];
@@ -241,8 +243,9 @@ export const initializeRideCashPayment = onCall({ enforceAppCheck: true }, async
     if (!currentQuote || !currentTrip) return;
     if (currentQuote.status === "PAYMENT_CREATED" && currentQuote.tripId === tripId
       && typeof currentQuote.paymentId === "string" && raw.payments?.[currentQuote.paymentId]) return;
-    if (currentQuote.status !== "QUOTED" || currentQuote.uid !== uid || currentQuote.expiresAt <= Date.now()) return;
-    if (raw.paymentByTrip?.[tripId]) return;
+    if (currentQuote.status !== "QUOTED" || currentQuote.uid !== uid || currentQuote.expiresAt <= Date.now()
+      || currentQuote.kind !== "RIDE" || currentQuote.breakdown?.customerTotalMinor !== amountMinor) return;
+    if (raw.paymentByTrip?.[tripId] || currentTrip.paymentId) return;
     validateRideMatches(currentTrip, currentQuote, uid);
     if (currentTrip.driverId !== driverId) return;
     return {
