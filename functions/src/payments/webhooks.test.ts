@@ -22,7 +22,7 @@ const event: SimulatedPaymentEvent = {
   outcome: "SUCCEEDED", amountMinor: 12500, currency: "PHP",
   provider: "SIMULATED", simulationOnly: true, occurredAt: 1000,
 };
-function seed(expiresAt = 5000) {
+function seed(expiresAt = Date.now() + 5000) {
   return {
     paymentSessions: { session_1: { id: "session_1", paymentId: "payment_1", amountMinor: 12500, currency: "PHP", status: "PENDING", provider: "SIMULATED", simulationOnly: true, expiresAt } },
     paymentIntents: { payment_1: { id: "payment_1", sessionId: "session_1", amountMinor: 12500, currency: "PHP", status: "PROCESSING", provider: "SIMULATED", simulationOnly: true } },
