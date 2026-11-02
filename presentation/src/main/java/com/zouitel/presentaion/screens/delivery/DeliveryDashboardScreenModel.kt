@@ -103,7 +103,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
                         Order(
                             id = id,
                             clientId = clientId,
-                            orderType = OrderType.RETAIL,
+                            orderType = runCatching { OrderType.valueOf(child.child("orderType").value<String>()) }.getOrDefault(OrderType.RETAIL),
                             sourceId = sourceId,
                             sourceName = sourceName,
                             items = items,
