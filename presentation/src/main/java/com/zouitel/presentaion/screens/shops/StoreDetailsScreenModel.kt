@@ -5,6 +5,9 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.payment.CashPaymentRepository
+import com.zouitel.presentaion.payment.CashQuoteItem
+import com.zouitel.presentaion.payment.CashQuotePoint
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -19,6 +22,7 @@ data class MapPoint(val lat: Double, val lng: Double)
 class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
     private val db = Firebase.database.reference()
     private val auth = Firebase.auth
+    private val cashPayments = CashPaymentRepository()
 
     private val _products = MutableStateFlow<List<Product>>(emptyList())
     val products: StateFlow<List<Product>> = _products.asStateFlow()
@@ -91,10 +95,23 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         dropoffLat: Double,
         dropoffLng: Double,
         paymentMethod: String,
-        onSuccess: (String) -> Unit
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit = {}
     ) {
-        val uid = auth.currentUser?.uid ?: "guest_client"
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            onError("Please sign in before placing a shop order.")
+            return
+        }
         screenModelScope.launch {
+            try {
+            val quote = cashPayments.quoteShopOrder(
+                sourceId = shop.id,
+                items = cartItems.map { CashQuoteItem(it.productId, it.quantity) },
+                pickup = CashQuotePoint(pickupLat, pickupLng),
+                dropoff = CashQuotePoint(dropoffLat, dropoffLng),
+                paymentMethod = paymentMethod
+            )
             val orderRef = db.child("orders").push()
             val orderId = orderRef.key ?: System.currentTimeMillis().toString()
 
@@ -115,9 +132,9 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
                 sourceId = shop.id,
                 sourceName = shop.name,
                 items = mappedItems,
-                subtotal = subtotal,
-                deliveryFee = courierFee,
-                totalPrice = totalPrice,
+                subtotal = quote.amountMinor("subtotalMinor") / 100.0,
+                deliveryFee = quote.amountMinor("deliveryFeeMinor") / 100.0,
+                totalPrice = quote.amountMinor("customerTotalMinor") / 100.0,
                 pickupLocation = shop.address,
                 pickupLat = pickupLat,
                 pickupLng = pickupLng,
@@ -125,11 +142,15 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
                 dropoffLat = dropoffLat,
                 dropoffLng = dropoffLng,
                 createdAtTimestamp = System.currentTimeMillis(),
-                paymentMethod = paymentMethod
+                paymentMethod = "CASH"
             )
 
             orderRef.setValue(universalOrder)
+            cashPayments.createCashPayment(quote.quoteId, orderId)
             onSuccess(orderId)
+            } catch (error: Exception) {
+                onError(error.message ?: "Could not create the cash payment. Please retry.")
+            }
         }
     }
 }
