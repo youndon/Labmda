@@ -410,6 +410,7 @@ class PassengerScreen : Screen {
                         fare = fare,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
+                        canRequestRide = ridePaymentAvailability.serviceEnabled && paymentMethod in ridePaymentAvailability.methods,
                         onRequest = { name, phone ->
                             val p = pickup
                             val d = destination
@@ -475,8 +476,10 @@ class PassengerScreen : Screen {
                         destinationAddress = destinationAddress,
                         tripDistanceKm = distanceKm,
                         fare = fare,
+                        canRequestRide = ridePaymentAvailability.serviceEnabled && paymentMethod in ridePaymentAvailability.methods,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
+                        canRequestRide = ridePaymentAvailability.serviceEnabled && paymentMethod in ridePaymentAvailability.methods,
                         onPickDestination = { tappedDriverId = null },
                         onRequest = { name, phone -> submitTrip(name, phone, tappedDriver) }
                     )
@@ -648,6 +651,7 @@ class PassengerScreen : Screen {
         destinationAddress: String,
         tripDistanceKm: Double,
         fare: Double,
+        canRequestRide: Boolean,
         initialName: String,
         initialPhone: String,
         onPickDestination: () -> Unit,
@@ -718,7 +722,7 @@ class PassengerScreen : Screen {
 
                 Button(
                     onClick = { onRequest(name.trim(), phone.trim()) },
-                    enabled = name.isNotBlank() && tripDistanceKm > 0.05,
+                    enabled = name.isNotBlank() && tripDistanceKm > 0.05 && canRequestRide,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) {
@@ -739,6 +743,7 @@ class PassengerScreen : Screen {
         fare: Double,
         initialName: String,
         initialPhone: String,
+        canRequestRide: Boolean,
         onRequest: (String, String) -> Unit
     ) {
         var name by remember(initialName) { mutableStateOf(initialName) }
@@ -829,7 +834,7 @@ class PassengerScreen : Screen {
 
             Button(
                 onClick = { onRequest(name.trim(), phone.trim()) },
-                enabled = hasPickup && hasDestination && name.isNotBlank() && distanceKm > 0.05,
+                enabled = hasPickup && hasDestination && name.isNotBlank() && distanceKm > 0.05 && canRequestRide,
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) {
