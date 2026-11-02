@@ -2,6 +2,7 @@ package com.zouitel.presentaion.admin
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,11 +14,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -219,11 +218,6 @@ class AdminSettlementReconciliationScreen : Screen {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     },
-                    actions = {
-                        IconButton(onClick = { report?.let { report } }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Report")
-                        }
-                    }
                 )
             }
         ) { padding ->
@@ -315,14 +309,11 @@ class AdminSettlementReconciliationScreen : Screen {
             }
         }
 
-        if (busy) {
-            // The screen remains interactive only through disabled action buttons while a callable is running.
-        }
     }
 }
 
 @Composable
-private fun SectionCard(title: String, description: String, content: @Composable Column.() -> Unit) {
+private fun SectionCard(title: String, description: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
