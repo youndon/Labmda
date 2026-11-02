@@ -35,6 +35,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +65,13 @@ class ProviderEarningsScreen : Screen {
 
         var showProfileDialog by remember { mutableStateOf(false) }
         var payoutAmount by remember { mutableStateOf("") }
+        var selectedAccountId by remember { mutableStateOf("") }
+
+        LaunchedEffect(earnings.accounts) {
+            if (selectedAccountId.isBlank() || earnings.accounts.none { it.accountId == selectedAccountId }) {
+                selectedAccountId = earnings.accounts.firstOrNull()?.accountId.orEmpty()
+            }
+        }
 
         Scaffold(
             topBar = {
@@ -148,6 +156,32 @@ class ProviderEarningsScreen : Screen {
                         }
                     }
 
+                    if (earnings.accounts.size > 1) {
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(18.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                            ) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("Select earnings wallet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    earnings.accounts.forEach { account ->
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            RadioButton(
+                                                selected = selectedAccountId == account.accountId,
+                                                onClick = { selectedAccountId = account.accountId }
+                                            )
+                                            Column {
+                                                Text(account.providerKind, fontWeight = FontWeight.SemiBold)
+                                                Text("Available: ${formatPhp(account.availableMinor)}", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -166,8 +200,8 @@ class ProviderEarningsScreen : Screen {
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                                 )
                                 Button(
-                                    onClick = { model.requestPayout(payoutAmount) },
-                                    enabled = profile.configured && !submitting && earnings.totals.availableMinor >= 10_000,
+                                    onClick = { model.requestPayout(payoutAmount, selectedAccountId) },
+                                    enabled = profile.configured && selectedAccountId.isNotBlank() && !submitting && earnings.accounts.any { it.accountId == selectedAccountId && it.availableMinor >= 10_000 },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(if (submitting) "Submitting…" else "Submit payout request")
