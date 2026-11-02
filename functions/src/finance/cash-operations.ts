@@ -117,7 +117,8 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
     id: `cash_${paymentId}`, paymentId, orderId: payment.orderId, tripId: payment.tripId,
     deliveryId: payment.deliveryId, collectorId: uid, payerId: payment.payerId,
     amountMinor: payment.amountMinor, currency: "PHP", status: "COLLECTED",
-    collectedAt: now, createdAt: existing.exists() ? (existing.val() as CashCollection).createdAt : now,
+    collectedAt: existing.exists() ? ((existing.val() as CashCollection).collectedAt ?? now) : now,
+    createdAt: existing.exists() ? (existing.val() as CashCollection).createdAt : now,
     notes: typeof call.data?.notes === "string" ? call.data.notes.slice(0, 500) : "",
   };
   await collectionRef.set(collection);
