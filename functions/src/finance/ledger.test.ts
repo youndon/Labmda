@@ -78,15 +78,15 @@ describe("financial ledger invariants", () => {
   it("allocates a succeeded customer payment to merchant, courier, and platform wallets", () => {
     const payment: Payment = {
       id: "payment_1", transactionType: "ORDER", orderId: "order_1", tripId: "",
-      deliveryId: "delivery_1", payerId: "customer_1", method: "GCASH",
+      deliveryId: "courier_1", payerId: "customer_1", method: "GCASH",
       status: "SUCCEEDED", amountMinor: 1_000, currency: "PHP", refundedAmountMinor: 0,
       createdAt: 1_798_000_000_000, updatedAt: 1_798_000_000_100,
       completedAt: 1_798_000_000_100,
     };
     const allocations: PaymentAllocation[] = [
-      { id: "allocation_merchant", paymentId: payment.id, transactionType: "ORDER", orderId: "order_1", tripId: "", deliveryId: "delivery_1", beneficiaryId: "merchant_1", beneficiaryType: "MERCHANT", amountMinor: 700, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
-      { id: "allocation_courier", paymentId: payment.id, transactionType: "ORDER", orderId: "order_1", tripId: "", deliveryId: "delivery_1", beneficiaryId: "courier_1", beneficiaryType: "DELIVERY", amountMinor: 200, currency: "PHP", status: "READY", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
-      { id: "allocation_platform", paymentId: payment.id, transactionType: "ORDER", orderId: "order_1", tripId: "", deliveryId: "delivery_1", beneficiaryId: "platform", beneficiaryType: "PLATFORM", amountMinor: 100, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+      { id: "allocation_merchant", paymentId: payment.id, transactionType: "ORDER", orderId: "order_1", tripId: "", deliveryId: "courier_1", beneficiaryId: "merchant_1", beneficiaryType: "MERCHANT", amountMinor: 700, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+      { id: "allocation_courier", paymentId: payment.id, transactionType: "ORDER", orderId: "order_1", tripId: "", deliveryId: "courier_1", beneficiaryId: "courier_1", beneficiaryType: "DELIVERY", amountMinor: 200, currency: "PHP", status: "READY", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
+      { id: "allocation_platform", paymentId: payment.id, transactionType: "ORDER", orderId: "order_1", tripId: "", deliveryId: "courier_1", beneficiaryId: "platform", beneficiaryType: "PLATFORM", amountMinor: 100, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
     ];
     const operation = createPaymentReceiptOperation(payment, allocations);
     expect(operation.postings.reduce((sum, posting) => sum + posting.deltaMinor, 0)).toBe(0);
