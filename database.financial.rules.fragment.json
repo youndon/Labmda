@@ -1,0 +1,70 @@
+{
+  "rules": {
+    "payments": {
+      "$paymentId": {
+        ".write": false,
+        ".read": "auth != null && data.child('payerId').val() === auth.uid"
+      }
+    },
+    "paymentAllocations": {
+      "$paymentId": {
+        "$allocationId": {
+          ".write": false,
+          ".read": "auth != null && (root.child('payments').child($paymentId).child('payerId').val() === auth.uid || data.child('beneficiaryId').val() === auth.uid)"
+        }
+      }
+    },
+    "paymentSettlements": {
+      "$settlementId": {
+        ".write": false,
+        ".read": "auth != null && data.child('beneficiaryId').val() === auth.uid"
+      }
+    },
+    "wallets": {
+      "$walletId": {
+        ".write": false,
+        ".read": "auth != null && data.child('ownerId').val() === auth.uid"
+      }
+    },
+    "ledger": {
+      "$entryId": {
+        ".write": false,
+        ".read": "auth != null && data.child('ownerId').val() === auth.uid"
+      }
+    },
+    "cashCollections": {
+      "$paymentId": {
+        ".write": false,
+        ".read": "auth != null && (data.child('payerId').val() === auth.uid || data.child('collectorId').val() === auth.uid)"
+      }
+    },
+    "payouts": {
+      "$payoutId": {
+        ".write": false,
+        ".read": "auth != null && data.child('beneficiaryId').val() === auth.uid"
+      }
+    },
+    "refunds": {
+      "$refundId": {
+        ".write": false,
+        ".read": "auth != null && data.child('requestedBy').val() === auth.uid"
+      }
+    },
+    "finance": {
+      ".read": false,
+      ".write": false
+    },
+    "paymentProviderEvents": {
+      ".read": false,
+      ".write": false
+    },
+    "cashHandovers": {
+      ".read": false,
+      ".write": false
+    },
+    "cashReconciliations": {
+      ".read": false,
+      ".write": false
+    }
+  }
+}
