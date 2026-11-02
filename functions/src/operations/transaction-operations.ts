@@ -77,8 +77,11 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
   const orderId = requireId(call.data?.orderId, "Order ID");
   const profileRef = db().ref(`users/${uid}`);
   const profile = await profileRef.get();
-  if (!profile.exists() || !profile.child("deliveryServices").exists()) {
+  if (!profile.exists() || profile.child("deliveryServices/status").val() !== "APPROVED") {
     throw new HttpsError("permission-denied", "An approved delivery account is required.");
+  }
+  if (profile.child("deliveryServices/isOnline").val() !== true) {
+    throw new HttpsError("failed-precondition", "Go online before claiming a delivery.");
   }
   const name = readString(profile.child("fullName").val()) || "Delivery";
   const phone = readString(profile.child("phoneNumber").val()) || readString(profile.child("phone").val());
@@ -127,7 +130,7 @@ export const claimRide = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
   const tripId = requireId(call.data?.tripId, "Trip ID");
   const profile = await db().ref(`users/${uid}`).get();
-  if (!profile.exists() || !profile.child("driverService").exists()) {
+  if (!profile.exists() || profile.child("driverService/status").val() !== "APPROVED") {
     throw new HttpsError("permission-denied", "An approved driver account is required.");
   }
   if (profile.child("driverService/isOnline").val() !== true) {
