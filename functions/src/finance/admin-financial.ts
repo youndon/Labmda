@@ -66,7 +66,8 @@ export const getAdminPaymentMonitor = onCall({ enforceAppCheck: true }, async (c
       paymentId: item.id, payerId: item.payerId, status: item.status, method: item.method,
       transactionType: item.transactionType, orderId: item.orderId ?? "", tripId: item.tripId ?? "",
       amountMinor: item.amountMinor, provider: item.provider ?? "", checkoutUrl: item.checkoutUrl ?? "", providerReference: item.providerReference ?? "", refundedAmountMinor: item.refundedAmountMinor ?? 0,
-      refundableMinor: Math.max(0, item.amountMinor - (item.refundedAmountMinor ?? 0)),
+      refundReservedAmountMinor: item.refundReservedAmountMinor ?? 0,
+      refundableMinor: Math.max(0, item.amountMinor - (item.refundedAmountMinor ?? 0) - (item.refundReservedAmountMinor ?? 0)),
       currency: item.currency, createdAt: item.createdAt, updatedAt: item.updatedAt ?? item.createdAt,
     }));
   return { currency: "PHP", limit, count: payments.length, payments };
