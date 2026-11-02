@@ -208,6 +208,37 @@ describe("financial ledger invariants", () => {
     await expect(postFinancialOperation(database, remittance)).rejects.toThrow(/exceeds the collector cash-owed balance/i);
   });
 
+  it("maintains a private user-scoped activity projection for provider wallets", async () => {
+    const operation = createFinancialTransfer({
+      ...base,
+      operationId: "merchant_earning_projection_1",
+      eventType: "MERCHANT_EARNING",
+      referenceType: "ORDER",
+      referenceId: "order_projection_1",
+      idempotencyKey: "merchant_earning_projection_1",
+      amountMinor: 4_250,
+      source: { accountId: "platform_escrow", bucket: "CLEARING", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
+      destination: { accountId: "wallet_merchant_owner_1", bucket: "AVAILABLE", deltaMinor: 0, partyType: "MERCHANT", partyId: "owner_1" },
+    });
+    let committedState: unknown = {};
+    const database = {
+      ref: () => ({
+        transaction: async (update: (state: unknown) => unknown) => {
+          committedState = update(committedState);
+          return { committed: true, snapshot: { val: () => committedState } };
+        },
+      }),
+    } as unknown as Database;
+    await postFinancialOperation(database, operation);
+    const state = committedState as {
+      providerActivity: Record<string, Record<string, { postings: Array<{ partyType: string; partyId: string }> }>>;
+    };
+    expect(state.providerActivity.owner_1.merchant_earning_projection_1.postings).toEqual([
+      expect.objectContaining({ partyType: "MERCHANT", partyId: "owner_1" }),
+    ]);
+    expect(state.providerActivity.platform).toBeUndefined();
+  });
+
   it("rejects payout reservations that exceed the provider available balance", async () => {
     const operation = createFinancialTransfer({
       ...base,
