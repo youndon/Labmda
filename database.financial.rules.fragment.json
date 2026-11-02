@@ -1,9 +1,24 @@
 {
   "rules": {
     "payments": {
+      ".indexOn": ["createdAt"],
       "$paymentId": {
         ".write": false,
         ".read": "auth != null && data.child('payerId').val() === auth.uid"
+      }
+    },
+    "paymentSessions": {
+      ".indexOn": ["createdAt"],
+      "$sessionId": {
+        ".write": false,
+        ".read": "auth != null && data.child('payerId').val() === auth.uid"
+      }
+    },
+    "paymentRefunds": {
+      ".indexOn": ["createdAt"],
+      "$refundId": {
+        ".write": false,
+        ".read": "auth != null && data.child('requestedBy').val() === auth.uid"
       }
     },
     "paymentAllocations": {
@@ -59,6 +74,7 @@
       }
     },
     "refunds": {
+      ".indexOn": ["createdAt"],
       "$refundId": {
         ".write": false,
         ".read": "auth != null && data.child('requestedBy').val() === auth.uid"
