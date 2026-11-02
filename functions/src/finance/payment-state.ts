@@ -27,6 +27,6 @@ export function assertPaymentStatusTransition(from: PaymentStatus, to: PaymentSt
 }
 
 export function isFinalPaymentStatus(status: PaymentStatus): boolean {
-  return status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED"
+  return status === "FAILED" || status === "CANCELLED"
     || status === "EXPIRED" || status === "REFUNDED";
 }
