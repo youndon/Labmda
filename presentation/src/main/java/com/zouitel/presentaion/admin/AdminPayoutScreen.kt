@@ -65,6 +65,7 @@ data class PendingPayout(
     val accountName: String = "",
     val accountNumber: String = "",
     val status: String = "REQUESTED",
+    val transferReference: String? = null,
     val createdAt: Long = 0
 )
 
@@ -174,7 +175,17 @@ class AdminPayoutScreen : Screen {
                                 )
                                 Text("Request ID: ${request.payoutId}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 Text("Status: ${request.status}", color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.SemiBold)
-                                if (request.status == "REQUESTED") {
+                                if (request.status == "REJECTING") {
+                                    Button(onClick = { model.reject(request.payoutId) }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Retry rejection")
+                                    }
+                                } else if (request.status == "PAYING") {
+                                    Button(
+                                        onClick = { selectedForPayment = request; transferReference = request.transferReference.orEmpty() },
+                                        enabled = !busy,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("Finish payout recording") }
+                                } else if (request.status == "REQUESTED") {
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         OutlinedButton(onClick = { model.reject(request.payoutId) }, enabled = !busy, modifier = Modifier.weight(1f)) {
                                             Text("Reject")
@@ -189,7 +200,7 @@ class AdminPayoutScreen : Screen {
                                             Text("Reject")
                                         }
                                         Button(
-                                            onClick = { selectedForPayment = request; transferReference = "" },
+                                            onClick = { selectedForPayment = request; transferReference = request.transferReference.orEmpty() },
                                             enabled = !busy,
                                             modifier = Modifier.weight(1f)
                                         ) { Text("Record transfer") }
