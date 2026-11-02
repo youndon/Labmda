@@ -63,7 +63,7 @@ data class AdminPaymentRow(
     val paymentId: String = "", val payerId: String = "", val status: String = "",
     val method: String = "", val transactionType: String = "", val orderId: String = "",
     val tripId: String = "", val amountMinor: Long = 0, val provider: String = "",
-    val checkoutUrl: String = "", val providerReference: String = "", val refundedAmountMinor: Long = 0,
+    val checkoutUrl: String = "", val providerReference: String = "", val refundedAmountMinor: Long = 0, val refundReservedAmountMinor: Long = 0,
     val refundableMinor: Long = 0, val currency: String = "PHP", val createdAt: Long = 0
 )
 
@@ -323,7 +323,7 @@ class AdminFinancialOperationsScreen : Screen {
                                         }, enabled = !busy) { Text("Verify paid transaction") }
                                     }
                                 }
-                                Text("Refunded ${formatAdminMoney(payment.refundedAmountMinor)} • Remaining ${formatAdminMoney(payment.refundableMinor)}", style = MaterialTheme.typography.bodySmall)
+                                Text("Refunded ${formatAdminMoney(payment.refundedAmountMinor)} • Reserved ${formatAdminMoney(payment.refundReservedAmountMinor)} • Available to refund ${formatAdminMoney(payment.refundableMinor)}", style = MaterialTheme.typography.bodySmall)
                                 if (payment.refundableMinor > 0 && (payment.status == "SUCCEEDED" || payment.status == "PARTIALLY_REFUNDED")) {
                                     OutlinedButton(onClick = { refundTarget = payment; refundAmount = ""; refundReason = "" }, enabled = !busy) {
                                         Text("Create refund case")

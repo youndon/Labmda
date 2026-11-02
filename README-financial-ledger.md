@@ -167,3 +167,19 @@ Labmda currently has no production BDO Checkout refund API integration. The refu
 ### Reconciliation boundary
 
 The ledger reconciliation compares immutable journal entries with cached account-balance projections. Cash and BDO statement reconciliation remain separate reports because they also need physical collection/remittance or bank-statement evidence. A balanced ledger projection alone does not prove that the external provider or bank settled funds. Resolve every reported discrepancy with source evidence and a documented balanced adjustment; never directly edit finance account balances.
+
+
+## Phase 10 — refunds and financial edge cases
+
+Refund cases are administrator-controlled and use integer PHP centavos:
+
+1. `createAdminRefundCase` reserves the requested amount against a succeeded or partially refunded payment. The reservation prevents multiple open cases from exceeding the remaining refundable amount.
+2. `reviewAdminRefundCase` approves or rejects the case. Rejection releases its reservation.
+3. The administrator sends the refund externally through the applicable bank/provider channel, then `completeAdminRefundCase` records the actual provider/bank reference and posts an immutable proportional reversal of the original payment journal.
+4. The payment becomes `PARTIALLY_REFUNDED` or `REFUNDED` only after the reversal is posted and the payment/case transaction commits.
+
+Completion is serialized per payment so two partial refunds cannot complete concurrently against the same payment snapshot. The external refund reference is indexed by a normalized SHA-256 digest and cannot be reused for a different refund case. A retry of the same processing case must use the same reference; its ledger operation is idempotent. If posting fails after the case enters `PROCESSING`, retry that same case and reference after resolving the underlying ledger issue—do not create another case or invent a second reference.
+
+Refund recording does not call BDO or GCash and does not prove that money was sent. The admin must verify the external refund before recording completion. Development-only simulated refunds remain isolated from the production financial journal.
+
+Refunds that would violate a ledger invariant (for example, reversing a cash-owed balance that has already been remitted) must fail closed and be reviewed as a manual accounting exception. Do not force a negative cash-owed balance or edit/delete existing journal entries; resolve such cases through a documented, balanced compensating operation after confirming the real cash movement.
