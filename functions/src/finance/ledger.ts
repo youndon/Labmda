@@ -61,7 +61,7 @@ const BUCKET_FIELD: Record<BalanceBucket, keyof AccountBalance> = {
 };
 
 function validKey(value: string, field: string): void {
-  if (!value || value.length > 180 || /[.#$\\[\\]/]/.test(value)) {
+  if (!value || value.length > 180 || [".", "#", "$", "[", "]", "/"].some((part) => value.includes(part))) {
     throw new Error(`${field} must be a non-empty Firebase-safe identifier.`);
   }
 }
