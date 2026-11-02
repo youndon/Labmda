@@ -185,7 +185,7 @@ class PassengerScreenModel : ScreenModel {
 
     fun cancelTrip(tripId: String) {
         screenModelScope.launch {
-            db.child("trips").child(tripId).child("status").setValue("CANCELLED")
+            com.zouitel.presentaion.screens.trustedTransactionCall("cancelPassengerTrip", mapOf("tripId" to tripId))
         }
     }
 }
