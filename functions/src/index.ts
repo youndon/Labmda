@@ -180,7 +180,7 @@ export {
 } from "./finance/cash-operations.js";
 
 // BDO Checkout GCash verification bridge (admin-verified until BDO provides its merchant webhook contract).
-export { confirmBdoGcashPayment } from "./payments/bdo-payment-operations.js";
+export { confirmBdoGcashPayment, attachBdoCheckoutLink } from "./payments/bdo-payment-operations.js";
 
 // Development-only simulated GCash checkout, webhook and refund lifecycle.
 export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payments/payment-sessions.js";
