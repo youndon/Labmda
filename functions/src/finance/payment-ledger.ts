@@ -12,6 +12,8 @@ export function createPaymentReceiptOperation(
   payment: Payment,
   allocations: PaymentAllocation[],
 ): FinancialOperation {
+  if (payment.transactionType !== "ORDER" && payment.transactionType !== "RIDE") throw new Error("Payment transaction type is invalid.");
+  if (payment.method !== "GCASH" && payment.method !== "CASH") throw new Error("Payment method is unsupported.");
   assertPaymentRelationship(payment);
   if (payment.status !== "SUCCEEDED") {
     throw new Error("Only a succeeded payment can be posted to the financial ledger.");
@@ -38,6 +40,7 @@ export function createPaymentReceiptOperation(
       || allocation.deliveryId !== payment.deliveryId) {
       throw new Error("Payment allocation transaction references do not match the payment.");
     }
+    if (!["PLATFORM", "MERCHANT", "DELIVERY", "DRIVER"].includes(allocation.beneficiaryType)) throw new Error("Payment allocation beneficiary type is invalid.");
     if (allocation.status !== "PENDING" && allocation.status !== "READY") {
       throw new Error("Only pending or ready allocations can be included in the initial payment receipt.");
     }
