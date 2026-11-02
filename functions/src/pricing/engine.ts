@@ -121,7 +121,7 @@ export function calculateRideFare(config: PricingConfig["ride"], route: RouteMet
   assertMinor(config.perMinuteMinor, "ride.perMinuteMinor");
   assertBps(config.platformCommissionBps, "ride.platformCommissionBps");
   if (!Number.isSafeInteger(route.durationSeconds) || route.durationSeconds < 0) throw new Error("durationSeconds must be a non-negative integer.");
-  const distanceCharge = roundUpPerKm(route.distanceMeters, config.perKmMinor);
+  const distanceCharge = proratePerKm(route.distanceMeters, config.perKmMinor);
   const minutes = Math.ceil(route.durationSeconds / 60);
   const timeCharge = minutes * config.perMinuteMinor;
   assertMinor(timeCharge, "ride.timeCharge");
