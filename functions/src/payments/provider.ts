@@ -20,6 +20,22 @@ export interface PaymentProvider {
   readonly name: string;
   createSession(input: CreatePaymentSessionInput): Promise<ProviderSession>;
 }
+export interface CreateRefundInput {
+  paymentId: string;
+  providerSessionId: string;
+  amountMinor: number;
+  currency: "PHP";
+  reason: string;
+}
+export interface ProviderRefund {
+  provider: "SIMULATED";
+  providerRefundId: string;
+  status: "SIMULATED_SUCCEEDED";
+  simulationOnly: true;
+}
+export interface PaymentRefundProvider {
+  createRefund(input: CreateRefundInput): Promise<ProviderRefund>;
+}
 export interface PaymentSignatureVerifier {
   verify(rawBody: string, signature: string): boolean;
 }
@@ -39,6 +55,23 @@ export class SimulatedPaymentProvider implements PaymentProvider {
       providerSessionId: id,
       checkoutUrl: `labmda-dev://payments/${encodeURIComponent(id)}`,
       expiresAt: input.expiresAt,
+      simulationOnly: true,
+    };
+  }
+}
+
+export class SimulatedPaymentRefundProvider implements PaymentRefundProvider {
+  constructor(private readonly allowSimulation: boolean) {
+    if (!allowSimulation) throw new Error("Simulated refunds are disabled outside the development emulator.");
+  }
+  async createRefund(input: CreateRefundInput): Promise<ProviderRefund> {
+    if (!Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || input.currency !== "PHP") {
+      throw new Error("A simulated refund requires a positive PHP-centavo amount.");
+    }
+    return {
+      provider: "SIMULATED",
+      providerRefundId: `sim_refund_${input.paymentId}_${input.amountMinor}`,
+      status: "SIMULATED_SUCCEEDED",
       simulationOnly: true,
     };
   }
