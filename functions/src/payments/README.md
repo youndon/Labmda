@@ -21,7 +21,7 @@ This module implements a test checkout lifecycle, not a payment gateway integrat
 5. The webhook processor verifies an HMAC signature, atomically records the event ID and updates checkout state. Repeated event IDs are no-ops; late events become `EXPIRED`.
 6. A scheduled task expires abandoned pending sessions.
 7. `createSimulatedGcashRefund({ sessionId, reason, amountMinor? })` demonstrates refund state without issuing a real refund.
-8. A future real Xendit adapter must implement provider creation/refund and signature-verification interfaces, validate event identity/amount/currency, and only then transition a real payment to `SUCCEEDED`. That live adapter is intentionally not part of this phase.
+8. This simulation is not a real GCash collection channel. A production GCash flow must not be enabled until the business collection account/QR arrangement and an authoritative transaction-verification mechanism are selected and approved. BDO is the administrator's bank/settlement destination; it is not implemented as a customer GCash checkout provider.
 
 ## Callable exports
 
