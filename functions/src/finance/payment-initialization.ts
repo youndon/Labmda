@@ -89,6 +89,14 @@ export function validateRideMatches(trip: Record<string, any>, quote: QuoteRecor
     throw new HttpsError("failed-precondition", "Ride fare does not match the server-generated quote.");
   }
 }
+function isApprovedCourier(root: RootRecord, uid: string): boolean {
+  const service = root.users?.[uid]?.deliveryServices;
+  return service?.id === uid && service?.status === "APPROVED";
+}
+function isApprovedDriver(root: RootRecord, uid: string): boolean {
+  const service = root.users?.[uid]?.driverService;
+  return service?.id === uid && service?.status === "APPROVED";
+}
 function allocationMap(rows: PaymentAllocation[]): Record<string, PaymentAllocation> {
   return Object.fromEntries(rows.map((row) => [row.id, row]));
 }
@@ -152,6 +160,11 @@ export const initializeOrderCashPayment = onCall({ enforceAppCheck: true }, asyn
   validateOrderMatches(order, quote, uid);
   const courierId = typeof order.deliveryId === "string" ? order.deliveryId : "";
   if (!courierId) throw new HttpsError("failed-precondition", "A courier must be assigned before cash payment can be initialized.");
+  const courierSnapshot = await db().ref("users/" + courierId + "/deliveryServices").get();
+  if (!courierSnapshot.exists() || courierSnapshot.child("id").val() !== courierId
+    || courierSnapshot.child("status").val() !== "APPROVED") {
+    throw new HttpsError("failed-precondition", "The assigned courier is not an approved delivery provider.");
+  }
   const sourcePath = quote.kind === "FOOD" ? `restaurants/${quote.sourceId}` : `shops/${quote.sourceId}`;
   const sourceSnapshot = await db().ref(sourcePath).get();
   if (!sourceSnapshot.exists()) throw new HttpsError("not-found", "The merchant record was not found.");
@@ -182,7 +195,7 @@ export const initializeOrderCashPayment = onCall({ enforceAppCheck: true }, asyn
       || currentQuote.breakdown?.customerTotalMinor !== amountMinor) return;
     if (raw.paymentByOrder?.[orderId] || currentOrder.paymentId) return;
     validateOrderMatches(currentOrder, currentQuote, uid);
-    if (currentOrder.deliveryId !== courierId) return;
+    if (currentOrder.deliveryId !== courierId || !isApprovedCourier(raw, courierId)) return;
     const source = raw[quote.kind === "FOOD" ? "restaurants" : "shops"]?.[quote.sourceId];
     if (!source) return;
     const currentOwnerId = quote.kind === "FOOD" ? String(source.ownerUid ?? quote.sourceId) : String(source.ownerUid ?? "");
@@ -222,6 +235,11 @@ export const initializeRideCashPayment = onCall({ enforceAppCheck: true }, async
   const trip = tripSnapshot.val() as Record<string, any>;
   validateRideMatches(trip, quote, uid);
   const driverId = trip.driverId as string;
+  const driverSnapshot = await db().ref("users/" + driverId + "/driverService").get();
+  if (!driverSnapshot.exists() || driverSnapshot.child("id").val() !== driverId
+    || driverSnapshot.child("status").val() !== "APPROVED") {
+    throw new HttpsError("failed-precondition", "The assigned driver is not an approved ride provider.");
+  }
   const breakdown = quote.breakdown;
   const now = Date.now();
   const paymentId = randomUUID();
@@ -249,7 +267,7 @@ export const initializeRideCashPayment = onCall({ enforceAppCheck: true }, async
       || currentQuote.kind !== "RIDE" || currentQuote.breakdown?.customerTotalMinor !== amountMinor) return;
     if (raw.paymentByTrip?.[tripId] || currentTrip.paymentId) return;
     validateRideMatches(currentTrip, currentQuote, uid);
-    if (currentTrip.driverId !== driverId) return;
+    if (currentTrip.driverId !== driverId || !isApprovedDriver(raw, driverId)) return;
     return {
       ...raw,
       trips: { ...raw.trips, [tripId]: { ...currentTrip, paymentId } },
