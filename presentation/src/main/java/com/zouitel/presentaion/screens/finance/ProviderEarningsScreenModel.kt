@@ -143,8 +143,8 @@ class ProviderEarningsScreenModel : ScreenModel {
 
     fun requestPayout(amountText: String, accountId: String) {
         val amountMinor = parsePesosToMinor(amountText)
-        if (amountMinor == null || amountMinor < 10_000L) {
-            _message.value = "Enter at least ₱100.00."
+        if (amountMinor == null || amountMinor <= 0L) {
+            _message.value = "Enter a valid amount greater than zero."
             return
         }
         if (_isSubmitting.value) return
