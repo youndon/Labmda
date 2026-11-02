@@ -3,6 +3,7 @@ package com.zouitel.presentaion.screens.finance
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -46,6 +47,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -66,6 +69,8 @@ class ProviderEarningsScreen : Screen {
         val earnings by model.earnings.collectAsState()
         val profile by model.profile.collectAsState()
         val payouts by model.payouts.collectAsState()
+        val analytics by model.analytics.collectAsState()
+        val analyticsPeriod by model.analyticsPeriod.collectAsState()
         val loading by model.isLoading.collectAsState()
         val submitting by model.isSubmitting.collectAsState()
         val message by model.message.collectAsState()
@@ -139,6 +144,39 @@ class ProviderEarningsScreen : Screen {
                     }
                     item {
                         BalanceTile("Reserved for payouts", earnings.totals.clearingMinor, Modifier.fillMaxWidth())
+                    }
+
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                        ) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("Earnings analytics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text("Posted earnings from your financial ledger", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        FilterChip(selected = analyticsPeriod == "WEEK", onClick = { model.loadAnalytics("WEEK") }, label = { Text("7D") })
+                                        FilterChip(selected = analyticsPeriod == "MONTH", onClick = { model.loadAnalytics("MONTH") }, label = { Text("30D") })
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                                    BalanceTile("Earned", analytics.totals.earnedMinor, Modifier.weight(1f))
+                                    BalanceTile("Payouts reserved", analytics.totals.payoutMinor, Modifier.weight(1f))
+                                }
+                                EarningsBarChart(analytics.days)
+                                if (analytics.days.isNotEmpty()) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(analytics.days.first().date.takeLast(5), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(analytics.days[analytics.days.size / 2].date.takeLast(5), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(analytics.days.last().date.takeLast(5), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     item {
@@ -423,6 +461,29 @@ private fun PayoutProfileDialog(
     )
 }
 
+
+@Composable
+private fun EarningsBarChart(days: List<EarningsAnalyticsDay>) {
+    val maximum = (days.maxOfOrNull { it.earnedMinor } ?: 0L).coerceAtLeast(1L)
+    val barColor = MaterialTheme.colorScheme.primary
+    Canvas(modifier = Modifier.fillMaxWidth().height(132.dp)) {
+        if (days.isEmpty()) return@Canvas
+        val slot = size.width / days.size
+        val barWidth = (slot * 0.56f).coerceAtLeast(2f)
+        days.forEachIndexed { index, day ->
+            val fraction = (day.earnedMinor.toDouble() / maximum.toDouble()).toFloat().coerceIn(0f, 1f)
+            val barHeight = (size.height - 8f) * fraction
+            val left = index * slot + (slot - barWidth) / 2f
+            drawRoundRect(
+                color = barColor,
+                topLeft = Offset(left, size.height - barHeight),
+                size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
+            )
+        }
+    }
+}
+
 private fun formatPhp(minor: Long): String {
     val pesos = minor / 100
     val centavos = kotlin.math.abs(minor % 100).toString().padStart(2, '0')
@@ -432,10 +493,10 @@ private fun formatPhp(minor: Long): String {
 private fun transactionMatchesFilter(transaction: FinancialTransaction, filter: String): Boolean {
     val event = transaction.eventType.uppercase()
     return when (filter) {
-        "EARNINGS" -> event.contains("EARNING") || event.contains("COMMISSION")
+        "EARNINGS" -> event.contains("EARNING") || event.contains("COMMISSION") || event == "CUSTOMER_PAYMENT"
         "PAYOUTS" -> event.contains("PAYOUT")
         "CASH" -> event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE")
-        "OTHER" -> !(event.contains("EARNING") || event.contains("COMMISSION") || event.contains("PAYOUT") || event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE"))
+        "OTHER" -> !(event.contains("EARNING") || event.contains("COMMISSION") || event == "CUSTOMER_PAYMENT" || event.contains("PAYOUT") || event.contains("CASH") || event.contains("COLLECTION") || event.contains("REMITTANCE"))
         else -> true
     }
 }

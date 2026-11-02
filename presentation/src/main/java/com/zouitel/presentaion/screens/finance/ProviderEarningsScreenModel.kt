@@ -58,6 +58,29 @@ data class EarningsResponse(
 )
 
 @Serializable
+data class EarningsAnalyticsDay(
+    val date: String = "",
+    val earnedMinor: Long = 0,
+    val payoutMinor: Long = 0
+)
+
+@Serializable
+data class EarningsAnalyticsTotals(
+    val earnedMinor: Long = 0,
+    val payoutMinor: Long = 0
+)
+
+@Serializable
+data class EarningsAnalyticsResponse(
+    val currency: String = "PHP",
+    val period: String = "WEEK",
+    val startDate: String = "",
+    val endDate: String = "",
+    val days: List<EarningsAnalyticsDay> = emptyList(),
+    val totals: EarningsAnalyticsTotals = EarningsAnalyticsTotals()
+)
+
+@Serializable
 data class PayoutProfileResponse(
     val configured: Boolean = false,
     val method: String? = null,
@@ -92,6 +115,12 @@ class ProviderEarningsScreenModel : ScreenModel {
     private val _earnings = MutableStateFlow(EarningsResponse())
     val earnings: StateFlow<EarningsResponse> = _earnings.asStateFlow()
 
+    private val _analytics = MutableStateFlow(EarningsAnalyticsResponse())
+    val analytics: StateFlow<EarningsAnalyticsResponse> = _analytics.asStateFlow()
+
+    private val _analyticsPeriod = MutableStateFlow("WEEK")
+    val analyticsPeriod: StateFlow<String> = _analyticsPeriod.asStateFlow()
+
     private val _profile = MutableStateFlow(PayoutProfileResponse())
     val profile: StateFlow<PayoutProfileResponse> = _profile.asStateFlow()
 
@@ -117,10 +146,25 @@ class ProviderEarningsScreenModel : ScreenModel {
                 _earnings.value = functions.httpsCallable("getMyEarnings").invoke().data()
                 _profile.value = functions.httpsCallable("getMyPayoutProfile").invoke().data()
                 _payouts.value = functions.httpsCallable("getMyPayoutHistory").invoke().data()
+                _analytics.value = functions.httpsCallable("getMyEarningsAnalytics")
+                    .invoke(mapOf("period" to _analyticsPeriod.value)).data()
             }.onFailure { error ->
                 _message.value = error.message ?: "Could not load earnings."
             }
             _isLoading.value = false
+        }
+    }
+
+    fun loadAnalytics(period: String) {
+        if (period != "WEEK" && period != "MONTH") return
+        _analyticsPeriod.value = period
+        screenModelScope.launch {
+            runCatching {
+                _analytics.value = functions.httpsCallable("getMyEarningsAnalytics")
+                    .invoke(mapOf("period" to period)).data()
+            }.onFailure { error ->
+                _message.value = error.message ?: "Could not load earnings analytics."
+            }
         }
     }
 

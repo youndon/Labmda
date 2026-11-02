@@ -176,6 +176,7 @@ export {
   saveMyPayoutProfile,
   getMyPayoutProfile,
   getMyEarnings,
+  getMyEarningsAnalytics,
   requestMyPayout,
   getMyPayoutHistory,
   getPendingPayoutRequests,
