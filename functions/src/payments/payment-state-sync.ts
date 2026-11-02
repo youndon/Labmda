@@ -84,4 +84,3 @@ export async function synchronizePaymentState(database: Database, paymentId: str
 }
 
 /** Triggered by trusted payment-record writes; never accepts client-supplied status. */
-export { syncPaymentStateToCustomerTransaction } from "./payment-state-sync-trigger.js";
