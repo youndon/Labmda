@@ -190,7 +190,7 @@ class ProviderEarningsScreen : Screen {
                         ) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text("Request a payout", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("Minimum request: ₱100.00. An administrator reviews the request and manually sends the transfer.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Choose an amount within the selected wallet’s available balance. An administrator reviews the request and manually sends the transfer.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 OutlinedTextField(
                                     value = payoutAmount,
                                     onValueChange = { payoutAmount = it },
@@ -201,7 +201,7 @@ class ProviderEarningsScreen : Screen {
                                 )
                                 Button(
                                     onClick = { model.requestPayout(payoutAmount, selectedAccountId) },
-                                    enabled = profile.configured && selectedAccountId.isNotBlank() && !submitting && earnings.accounts.any { it.accountId == selectedAccountId && it.availableMinor >= 10_000 },
+                                    enabled = profile.configured && selectedAccountId.isNotBlank() && !submitting && earnings.accounts.any { it.accountId == selectedAccountId && it.availableMinor > 0 },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(if (submitting) "Submitting…" else "Submit payout request")
