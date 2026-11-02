@@ -61,7 +61,7 @@ export const confirmBdoGcashPayment = onCall({ enforceAppCheck: true }, async (c
       if (!order || order.paymentId !== paymentId || order.status !== "PENDING_PAYMENT") return;
       updates.orders = {
         ...root.orders,
-        [payment.orderId]: { ...order, status: "PLACED", paymentStatus: "PAID", updatedAtTimestamp: now },
+        [payment.orderId]: { ...order, status: order.orderType === "DELIVERY" ? "OUT_FOR_DELIVERY" : "PLACED", paymentStatus: "PAID", updatedAtTimestamp: now },
       };
     } else if (payment.transactionType === "RIDE" && payment.tripId) {
       const trip = root.trips?.[payment.tripId];
