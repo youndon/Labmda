@@ -161,10 +161,6 @@
     "bdoPaymentReferenceIndex": {
       ".read": false,
       ".write": false
-    },
-    "driverPresence": {
-      ".read": "auth != null",
-      ".write": false
     }
   }
 }
