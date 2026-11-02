@@ -208,7 +208,7 @@ export const getMyEarningsAnalytics = onCall({ enforceAppCheck: true }, async (c
     db().ref(`finance/providerActivity/${uid}`).get(),
   ]);
   const accountIds = new Set(accounts.map((account) => account.accountId));
-  const earningEvents = new Set(["MERCHANT_EARNING", "DRIVER_EARNING", "COURIER_EARNING"]);
+  const earningEvents = new Set(["MERCHANT_EARNING", "DRIVER_EARNING", "COURIER_EARNING", "CUSTOMER_PAYMENT"]);
   Object.values((activity.val() ?? {}) as Record<string, FinancialOperation>).forEach((operation) => {
     if (!Number.isFinite(operation.createdAt)) return;
     const date = new Date(operation.createdAt + manilaOffsetMs).toISOString().slice(0, 10);
