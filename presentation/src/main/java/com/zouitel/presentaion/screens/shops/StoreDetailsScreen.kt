@@ -62,6 +62,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
         var deliveryAddress by remember { mutableStateOf("") }
         var paymentMethod by remember { mutableStateOf("Cash on Delivery") }
+        var orderError by remember { mutableStateOf<String?>(null) }
         var isSubmitting by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
@@ -323,6 +324,9 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        orderError?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Total Demand Price", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
@@ -334,6 +338,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             onClick = {
                                 val drop = dropoff ?: return@Button
                                 isSubmitting = true
+                                orderError = null
                                 scope.launch {
                                     screenModel.placeShopOrder(
                                         cartItems = cartItems.values.toList(),
@@ -353,6 +358,10 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                             dropoff = null
                                             deliveryAddress = ""
                                             navigator?.push(LiveOrderTrackingScreen(orderId))
+                                        },
+                                        onError = { message ->
+                                            isSubmitting = false
+                                            orderError = message
                                         }
                                     )
                                 }
