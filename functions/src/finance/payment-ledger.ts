@@ -8,6 +8,30 @@ import { createFinancialTransfer, type FinancialOperation, type LedgerPosting } 
  * Realtime Database in trusted Cloud Functions; never pass client-calculated
  * amounts directly into this adapter.
  */
+/** Reject beneficiary roles that do not belong to the payment transaction. */
+function assertAllocationBeneficiary(payment: Payment, allocation: PaymentAllocation, cashCollection?: CashCollection): void {
+  switch (allocation.beneficiaryType) {
+    case "PLATFORM": return;
+    case "MERCHANT":
+      if (payment.transactionType !== "ORDER") throw new Error("Merchant allocations are valid only for order payments.");
+      return;
+    case "DELIVERY":
+      if (payment.transactionType !== "ORDER" || !payment.deliveryId || allocation.beneficiaryId !== payment.deliveryId) {
+        throw new Error("Courier allocation must match the assigned order delivery provider.");
+      }
+      if (payment.method === "CASH" && cashCollection?.collectorId !== allocation.beneficiaryId) {
+        throw new Error("Cash courier earnings must belong to the assigned cash collector.");
+      }
+      return;
+    case "DRIVER":
+      if (payment.transactionType !== "RIDE") throw new Error("Driver allocations are valid only for ride payments.");
+      if (payment.method === "CASH" && cashCollection?.collectorId !== allocation.beneficiaryId) {
+        throw new Error("Cash driver earnings must belong to the assigned cash collector.");
+      }
+      return;
+    default: throw new Error("Payment allocation beneficiary type is invalid.");
+  }
+}
 export function createPaymentReceiptOperation(
   payment: Payment,
   allocations: PaymentAllocation[],
@@ -32,6 +56,7 @@ export function createPaymentReceiptOperation(
       || cashCollection.currency !== "PHP" || cashCollection.payerId !== payment.payerId
       || cashCollection.orderId !== payment.orderId || cashCollection.tripId !== payment.tripId
       || cashCollection.deliveryId !== payment.deliveryId || !cashCollection.collectorId
+      || (payment.transactionType === "ORDER" && cashCollection.collectorId !== payment.deliveryId)
       || !Number.isSafeInteger(cashCollection.collectedAt) || !cashCollection.collectedAt) {
       throw new Error("Cash collection evidence does not match the succeeded payment.");
     }
@@ -55,7 +80,7 @@ export function createPaymentReceiptOperation(
       || allocation.deliveryId !== payment.deliveryId) {
       throw new Error("Payment allocation transaction references do not match the payment.");
     }
-    if (!["PLATFORM", "MERCHANT", "DELIVERY", "DRIVER"].includes(allocation.beneficiaryType)) throw new Error("Payment allocation beneficiary type is invalid.");
+    assertAllocationBeneficiary(payment, allocation, cashCollection);
     if (allocation.status !== "PENDING" && allocation.status !== "READY") {
       throw new Error("Only pending or ready allocations can be included in the initial payment receipt.");
     }
