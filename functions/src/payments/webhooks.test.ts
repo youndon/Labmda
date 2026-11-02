@@ -57,7 +57,7 @@ describe("simulated GCash payment webhook", () => {
     expect(duplicate.duplicate).toBe(true);
     expect(Object.keys(db.value().paymentWebhookEvents)).toHaveLength(1);
   });
-  it("records failure without marking the payment intent successful", async () => {
+  it("rejects reuse of an event ID with a different outcome", async () => {\n    const db = fakeDatabase(seed());\n    const first = signed(event);\n    await processSignedPaymentWebhook(db, first.body, first.signature, verifier);\n    const reused = signed({ ...event, outcome: "FAILED" });\n    await expect(processSignedPaymentWebhook(db, reused.body, reused.signature, verifier)).rejects.toThrow("reused");\n  });\n  it("records failure without marking the payment intent successful", async () => {
     const db = fakeDatabase(seed());
     const payload = signed({ ...event, outcome: "FAILED" });
     const result = await processSignedPaymentWebhook(db, payload.body, payload.signature, verifier);
