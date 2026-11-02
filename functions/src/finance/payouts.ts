@@ -139,9 +139,9 @@ export const getMyPayoutProfile = onCall({ enforceAppCheck: true }, async (call)
 export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
   const accounts = await providerAccounts(uid);
-  const [finance, operations] = await Promise.all([
+  const [finance, activity] = await Promise.all([
     db().ref("finance/accounts").get(),
-    db().ref("finance/operations").get(),
+    db().ref(`finance/providerActivity/${uid}`).get(),
   ]);
   const accountIds = new Set(accounts.map((account) => account.accountId));
   const balances = accounts.map((account) => {
@@ -154,7 +154,7 @@ export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
       clearingMinor: Number(value.child("clearingMinor").val() ?? 0),
     };
   });
-  const history = Object.values((operations.val() ?? {}) as Record<string, FinancialOperation>)
+  const history = Object.values((activity.val() ?? {}) as Record<string, FinancialOperation>)
     .filter((operation) => operation.postings?.some((posting) => accountIds.has(posting.accountId)))
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 100)
