@@ -228,13 +228,20 @@ export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call)
 
 export const getPendingPayoutRequests = onCall({ enforceAppCheck: true }, async (call) => {
   requireAdmin(call);
-  const snapshot = await db().ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get();
-  return Object.values((snapshot.val() ?? {}) as Record<string, Record<string, unknown>>)
+  const [requested, approved] = await Promise.all([
+    db().ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get(),
+    db().ref("payoutRequests").orderByChild("status").equalTo("APPROVED").get(),
+  ]);
+  const pending = {
+    ...((requested.val() ?? {}) as Record<string, Record<string, unknown>>),
+    ...((approved.val() ?? {}) as Record<string, Record<string, unknown>>),
+  };
+  return Object.values(pending)
     .map((payout) => ({
       payoutId: payout.payoutId, uid: payout.uid, providerKind: payout.providerKind,
       providerId: payout.providerId, amountMinor: payout.amountMinor, currency: payout.currency,
       method: payout.method, accountName: payout.accountName, accountNumber: payout.accountNumber,
-      createdAt: payout.createdAt,
+      status: payout.status, createdAt: payout.createdAt,
     })).sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
 });
 
