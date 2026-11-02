@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";\nimport type { Database } from "firebase-admin/database";
 import {
   createFinancialTransfer,
   validateFinancialOperation,
@@ -142,5 +142,27 @@ describe("financial ledger invariants", () => {
     };
     expect(() => createPaymentReceiptOperation(payment, [allocation])).toThrow(/succeeded/i);
     expect(() => createPaymentReceiptOperation({ ...payment, status: "SUCCEEDED" }, [allocation])).toThrow(/exactly equal/i);
+  });
+
+  it("rejects a cash remittance larger than the collector's recorded cash owed", async () => {
+    const remittance = createCashRemittanceOperation({
+      cashCollectionId: "cash_collection_over",
+      collectorId: "driver_1",
+      amountMinor: 101,
+      createdAt: 1_798_000_000_200,
+    });
+    const database = {
+      ref: () => ({
+        transaction: async (update: (state: unknown) => unknown) => update({
+          accounts: {
+            cash_owed_driver_1: {
+              availableMinor: 0, pendingMinor: 0, cashOwedMinor: 100,
+              clearingMinor: 0, updatedAt: 1_798_000_000_100,
+            },
+          },
+        }),
+      }),
+    } as unknown as Database;
+    await expect(postFinancialOperation(database, remittance)).rejects.toThrow(/exceeds the collector cash-owed balance/i);
   });
 });
