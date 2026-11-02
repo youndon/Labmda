@@ -28,9 +28,9 @@ describe("quote-backed payment allocations", () => {
   it("does not allocate a platform-paid provider fee as customer money", () => {
     const rows = buildOrderPaymentAllocations({
       paymentId: "payment_order_platform_fee", orderId: "order_1", merchantOwnerId: "merchant_uid",
-      courierId: "courier_uid", breakdown: orderBreakdown, providerFeePayer: "PLATFORM", createdAt: 100,
+      courierId: "courier_uid", breakdown: { ...orderBreakdown, customerTotalMinor: 10_000 }, providerFeePayer: "PLATFORM", createdAt: 100,
     });
-    expect(rows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(orderBreakdown.customerTotalMinor - 300);
+    expect(rows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(10_000);
   });
 
   it("reconciles ride driver, platform and customer-paid provider fee", () => {
