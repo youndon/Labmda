@@ -156,6 +156,8 @@ export const quoteDelivery = onCall({ secrets: [mapsApiKey], enforceAppCheck: tr
   return saveQuote(uid, "DELIVERY", config, data, breakdown, { route, paymentMethod: method });
 });
 
+export { createOrderFromQuote, createRideFromQuote } from "./operations/quote-operations.js";
+
 export {
   transitionOrderStatus,
   claimOrderDelivery,
