@@ -10,6 +10,7 @@ import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,8 +42,13 @@ class DeliveryDashboardScreenModel : ScreenModel {
 
     private fun listenToOrdersTable() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
-                val allTasks = snapshot.children.mapNotNull { child ->
+            val uid = currentUid ?: run { _isLoading.value = false; return@launch }
+            val openOrders = db.child("orders").orderByChild("status").equalTo("OUT_FOR_DELIVERY").valueEvents
+            val assignedOrders = db.child("orders").orderByChild("deliveryId").equalTo(uid).valueEvents
+            combine(openOrders, assignedOrders) { open, assigned ->
+                (open.children + assigned.children).associateBy { it.key }.values.toList()
+            }.collect { children ->
+                val allTasks = children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
 
@@ -119,7 +125,7 @@ class DeliveryDashboardScreenModel : ScreenModel {
                 }
 
                 val points = mutableMapOf<String, OrderPoint>()
-                snapshot.children.forEach { child ->
+                children.forEach { child ->
                     val id = child.key ?: return@forEach
                     val lat = runCatching { child.child("clientLat").value<Double>() }.getOrNull()
                     val lng = runCatching { child.child("clientLng").value<Double>() }.getOrNull()
@@ -128,8 +134,6 @@ class DeliveryDashboardScreenModel : ScreenModel {
                     }
                 }
 //                _orderPoints.value = points
-
-                val uid = currentUid
 
                 _activeDeliveries.value = allTasks
                     .filter { it.status == OrderStatus.OUT_FOR_DELIVERY }
