@@ -75,3 +75,18 @@ The financial and order/ride rules fragments still need to be merged into the co
 - An over-remittance is rejected by the ledger.
 - Collector outstanding totals include both merchant and platform obligations.
 - Reconciliation rebuilds balances from immutable journal entries and reports projection discrepancies.
+
+
+## Phase 08 — cash collection completion gate
+
+A courier/driver may confirm cash only after the service is complete:
+
+- FOOD, SHOP and DELIVERY orders must already be `DELIVERED`, and both the payment's `deliveryId` and the order's `deliveryId` must still match the authenticated courier.
+- RIDE payments must belong to a `COMPLETED` trip whose `driverId` still matches the authenticated driver.
+- The linked order/trip must still reference the exact payment ID being collected.
+- These checks run inside the same Realtime Database root transaction that writes `cashCollections/{paymentId}` and changes the payment to `SUCCEEDED`. A stale read, changed assignment, incomplete service, or mismatched transaction reference aborts the entire write.
+- The amount remains loaded from the server-created payment record in PHP centavos. The caller cannot choose or edit the amount or the collector.
+
+This prevents a courier or driver from prematurely recording a cash receipt while a service is still active, and closes the race where a service could be reassigned or its linked payment changed between the callable's initial read and the collection transaction.
+
+Focused tests cover successful delivered-order and completed-ride collection, retries, wrong collector assignments, incomplete services, changed order courier assignment, failed payments, and amount mismatches.
