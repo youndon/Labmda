@@ -114,10 +114,13 @@ export const attachBdoCheckoutLink = onCall({ enforceAppCheck: true }, async (ca
   if (!isBdoCheckoutPaymentRequestUrl(checkoutUrl)) {
     throw new HttpsError("invalid-argument", "Only a genuine https://checkout.bdo.com.ph payment request link is accepted.");
   }
+  const linkKey = Buffer.from(new URL(checkoutUrl).pathname).toString("base64url");
 
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
     if (!root) return;
     const payment = root.payments?.[paymentId] as Record<string, any> | undefined;
+    const linkOwner = root.bdoCheckoutLinkIndex?.[linkKey];
+    if (linkOwner && linkOwner !== paymentId) return;
     if (!payment || payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
       || payment.currency !== "PHP" || payment.amountMinor !== amountMinor
       || (payment.status !== "PENDING" && payment.status !== "PROCESSING")) return;
@@ -139,7 +142,9 @@ export const attachBdoCheckoutLink = onCall({ enforceAppCheck: true }, async (ca
       checkoutLinkCreatedAt: now, checkoutLinkCreatedBy: uid, updatedAt: now,
     };
     const nextRoot: Record<string, any> = {
-      ...root, payments: { ...root.payments, [paymentId]: nextPayment },
+      ...root,
+      payments: { ...root.payments, [paymentId]: nextPayment },
+      bdoCheckoutLinkIndex: { ...(root.bdoCheckoutLinkIndex ?? {}), [linkKey]: paymentId },
     };
     if (payment.transactionType === "ORDER" && payment.orderId) {
       const order = root.orders?.[payment.orderId];
