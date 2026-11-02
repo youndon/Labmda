@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase, type Reference } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { isQuoteClaimable } from "./quote-guards.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -21,8 +22,7 @@ async function claimQuote(quoteId: string, uid: string, kind: string) {
   if (!idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
   const ref = db().ref(`pricing/quotes/${quoteId}`);
   const result = await ref.transaction((quote: Record<string, any> | null) => {
-    if (!quote || quote.uid !== uid || quote.kind !== kind || quote.status !== "QUOTED"
-      || !Number.isSafeInteger(quote.expiresAt) || quote.expiresAt <= Date.now()) return;
+    if (!isQuoteClaimable(quote, uid, kind, Date.now())) return;
     return { ...quote, status: "CREATING", creationStartedAt: Date.now() };
   }, undefined, false);
   if (!result.committed) throw new HttpsError("failed-precondition", "This quote is expired, already used, or belongs to another account.");
