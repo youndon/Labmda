@@ -234,7 +234,7 @@ class AdminFinanceOverviewScreen : Screen {
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment volume", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("Last 7 days • PHP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Last 7 days • latest ${data.paymentSampleLimit} ledger operations only • PHP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 FinanceVolumeChart(data.dailyPaymentVolume)
                             }
                         }
