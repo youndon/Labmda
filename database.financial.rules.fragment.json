@@ -67,9 +67,11 @@
     "finance": {
       ".read": false,
       ".write": false,
-      ".indexOn": [
-        "createdAt"
-      ]
+      "operations": {
+        ".indexOn": [
+          "createdAt"
+        ]
+      }
     },
     "paymentProviderEvents": {
       ".read": false,
