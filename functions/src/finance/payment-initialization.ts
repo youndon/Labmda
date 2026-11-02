@@ -53,7 +53,7 @@ function validateRouteMatches(record: Record<string, any>, quote: QuoteRecord, l
     throw new HttpsError("failed-precondition", `${label} locations do not match the server quote.`);
   }
 }
-function validateOrderMatches(order: Record<string, any>, quote: QuoteRecord, uid: string): void {
+export function validateOrderMatches(order: Record<string, any>, quote: QuoteRecord, uid: string): void {
   if (order.clientId !== uid || order.sourceId !== quote.sourceId
     || order.status !== "PLACED" || order.paymentMethod !== "CASH") {
     throw new HttpsError("failed-precondition", "Order ownership, status, merchant or payment method does not match the quote.");
@@ -78,7 +78,7 @@ function validateOrderMatches(order: Record<string, any>, quote: QuoteRecord, ui
     throw new HttpsError("failed-precondition", "Order totals do not match the server-generated quote.");
   }
 }
-function validateRideMatches(trip: Record<string, any>, quote: QuoteRecord, uid: string): void {
+export function validateRideMatches(trip: Record<string, any>, quote: QuoteRecord, uid: string): void {
   if (trip.passengerId !== uid || trip.status !== "ACCEPTED" || typeof trip.driverId !== "string" || !trip.driverId) {
     throw new HttpsError("failed-precondition", "The ride must belong to you and have an accepted driver before cash payment is initialized.");
   }
@@ -90,7 +90,7 @@ function validateRideMatches(trip: Record<string, any>, quote: QuoteRecord, uid:
 function allocationMap(rows: PaymentAllocation[]): Record<string, PaymentAllocation> {
   return Object.fromEntries(rows.map((row) => [row.id, row]));
 }
-function paymentBundle(args: {
+export function buildCashPaymentBundle(args: {
   paymentId: string; uid: string; transactionType: "ORDER" | "RIDE";
   orderId: string; tripId: string; deliveryId: string; collectorId: string;
   amountMinor: number; allocations: PaymentAllocation[]; now: number;
@@ -164,7 +164,7 @@ export const initializeOrderCashPayment = onCall({ enforceAppCheck: true }, asyn
     paymentId, orderId, merchantOwnerId, courierId, breakdown,
     providerFeePayer: "PLATFORM", createdAt: now,
   });
-  const bundle = paymentBundle({
+  const bundle = buildCashPaymentBundle({
     paymentId, uid, transactionType: "ORDER", orderId, tripId: "", deliveryId: courierId,
     collectorId: courierId, amountMinor, allocations, now,
   });
@@ -180,7 +180,8 @@ export const initializeOrderCashPayment = onCall({ enforceAppCheck: true }, asyn
     validateOrderMatches(currentOrder, currentQuote, uid);
     if (currentOrder.deliveryId !== courierId) return;
     const source = raw[quote.kind === "FOOD" ? "restaurants" : "shops"]?.[quote.sourceId];
-    const currentOwnerId = quote.kind === "FOOD" ? String(source?.ownerUid ?? quote.sourceId) : String(source?.ownerUid ?? "");
+    if (!source) return;
+    const currentOwnerId = quote.kind === "FOOD" ? String(source.ownerUid ?? quote.sourceId) : String(source.ownerUid ?? "");
     if (currentOwnerId !== merchantOwnerId) return;
     return {
       ...raw,
