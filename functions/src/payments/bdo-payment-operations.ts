@@ -117,13 +117,21 @@ export const attachBdoCheckoutLink = onCall({ enforceAppCheck: true }, async (ca
     if (!payment || payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
       || payment.currency !== "PHP" || payment.amountMinor !== amountMinor
       || (payment.status !== "PENDING" && payment.status !== "PROCESSING")) return;
-    if (payment.checkoutUrl) {
-      if (payment.checkoutUrl === checkoutUrl && payment.checkoutAmountMinor === amountMinor) return root;
-      return;
-    }
+    if (payment.checkoutUrl === checkoutUrl && payment.checkoutAmountMinor === amountMinor) return root;
     const now = Date.now();
+    const version = Number.isSafeInteger(payment.checkoutLinkVersion) ? payment.checkoutLinkVersion + 1 : 1;
+    const history = { ...(payment.checkoutLinkHistory ?? {}) };
+    if (payment.checkoutUrl) {
+      history[String(version - 1)] = {
+        checkoutUrl: payment.checkoutUrl,
+        createdAt: payment.checkoutLinkCreatedAt ?? null,
+        replacedAt: now,
+        replacedBy: uid,
+      };
+    }
     const nextPayment = {
       ...payment, checkoutUrl, checkoutAmountMinor: amountMinor,
+      checkoutLinkVersion: version, checkoutLinkHistory: history,
       checkoutLinkCreatedAt: now, checkoutLinkCreatedBy: uid, updatedAt: now,
     };
     const nextRoot: Record<string, any> = {
