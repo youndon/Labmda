@@ -14,9 +14,9 @@ export interface SimulatedPaymentEvent {
 }
 
 /**
- * Processes the simulated provider event using a single RTDB root transaction:
+ * Processes a simulated provider event using one RTDB root transaction:
  * event de-duplication and checkout-state transition commit atomically.
- * The linked Payment remains PROCESSING and can never be posted to the real ledger.
+ * The payment intent remains PROCESSING and is never eligible for ledger posting.
  */
 export async function processSimulatedPaymentEvent(
   database: Database,
@@ -32,14 +32,14 @@ export async function processSimulatedPaymentEvent(
     const events = root.paymentWebhookEvents ?? {};
     if (events[event.eventId]) return root;
     const sessions = root.paymentSessions ?? {};
-    const payments = root.payments ?? {};
+    const intents = root.paymentIntents ?? {};
     const session = sessions[event.sessionId];
-    const payment = payments[event.paymentId];
-    if (!session || !payment || session.paymentId !== event.paymentId || payment.sessionId !== event.sessionId) return;
-    if (session.simulationOnly !== true || payment.simulationOnly !== true
-      || session.provider !== "SIMULATED" || payment.provider !== "SIMULATED") return;
-    if (session.amountMinor !== event.amountMinor || payment.amountMinor !== event.amountMinor
-      || session.currency !== event.currency || payment.currency !== event.currency) return;
+    const intent = intents[event.paymentId];
+    if (!session || !intent || session.paymentId !== event.paymentId || intent.sessionId !== event.sessionId) return;
+    if (session.simulationOnly !== true || intent.simulationOnly !== true
+      || session.provider !== "SIMULATED" || intent.provider !== "SIMULATED") return;
+    if (session.amountMinor !== event.amountMinor || intent.amountMinor !== event.amountMinor
+      || session.currency !== event.currency || intent.currency !== event.currency) return;
     if (session.status !== "PENDING") return;
     const now = Date.now();
     const expired = session.expiresAt <= now || event.occurredAt > session.expiresAt;
@@ -50,8 +50,8 @@ export async function processSimulatedPaymentEvent(
         ...sessions,
         [event.sessionId]: { ...session, status, updatedAt: now, completedAt: now },
       },
-      // Intentionally do not change payments/{id}.status from PROCESSING.
-      payments,
+      // Intentionally do not change paymentIntents/{id}.status from PROCESSING.
+      paymentIntents: intents,
       paymentWebhookEvents: {
         ...events,
         [event.eventId]: { eventId: event.eventId, sessionId: event.sessionId, paymentId: event.paymentId, status: "PROCESSED", outcome: status, processedAt: now, simulationOnly: true },
