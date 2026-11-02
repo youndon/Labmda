@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const rules = JSON.parse(
-  readFileSync(new URL("../../../database.order-ride.rules.fragment.json", import.meta.url), "utf8"),
+  readFileSync(resolve(process.cwd(), "../database.order-ride.rules.fragment.json"), "utf8"),
 ).rules;
 
 describe("order and ride Realtime Database rules fragment", () => {
