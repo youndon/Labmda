@@ -60,12 +60,11 @@ class PassengerScreenModel : ScreenModel {
         }
 
         screenModelScope.launch {
-            db.child("trips").valueEvents.collect { snapshot ->
+            db.child("trips").orderByChild("passengerId").equalTo(uid).valueEvents.collect { snapshot ->
                 val list = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
                         val passengerId = child.child("passengerId").value<String>()
-                        if (passengerId != uid) return@mapNotNull null
 
                         fun str(key: String) = runCatching { child.child(key).value<String>() }.getOrDefault("")
                         fun dbl(key: String) = runCatching { child.child(key).value<Double>() }.getOrDefault(0.0)
