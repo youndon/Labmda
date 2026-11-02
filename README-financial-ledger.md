@@ -22,7 +22,7 @@
 
 ## Required financial events
 
-- `CUSTOMER_PAYMENT`: record the external GCash/Xendit collection or cash collection against a clearing account.
+- `CUSTOMER_PAYMENT`: record the external payment-provider collection or cash collection against a clearing account.
 - `MERCHANT_EARNING`: credit the merchant's pending or available account.
 - `DRIVER_EARNING`: credit the driver's pending or available account.
 - `COURIER_EARNING`: credit the courier's pending or available account.
