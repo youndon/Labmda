@@ -101,24 +101,23 @@ class PassengerScreenModel : ScreenModel {
 
     private fun listenToOnlineDrivers() {
         screenModelScope.launch {
-            db.child("users").valueEvents.collect { snapshot ->
+            db.child("driverPresence").valueEvents.collect { snapshot ->
                 val drivers = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
-                        val isOnline = runCatching { child.child("isDriverOnline").value<Boolean>() }.getOrDefault(false)
+                        val isOnline = true
                         if (!isOnline) return@mapNotNull null
 
                         val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
-                        val phone = runCatching { child.child("phoneNumber").value<String>() }
-                            .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
+                        val phone = ""
 
-                        val loc = child.child("currentLocation")
+                        val loc = child
                         val lat = runCatching { loc.child("latitude").value<Double>() }.getOrDefault(0.0)
                         val lng = runCatching { loc.child("longitude").value<Double>() }.getOrDefault(0.0)
                         val heading = runCatching { loc.child("heading").value<Float>() }.getOrDefault(0f)
 
                         val v = child.child("vehicleInfo")
-                        val typeStr = runCatching { v.child("type").value<String>() }.getOrDefault("CAR")
+                        val typeStr = runCatching { child.child("vehicleType").value<String>() }.getOrDefault("CAR")
                         val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
 
                         UserProfile(
