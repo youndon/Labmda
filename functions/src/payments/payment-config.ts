@@ -116,7 +116,7 @@ export const getPaymentConfiguration = onCall({ enforceAppCheck: true }, async (
 export const updateAdminPaymentConfiguration = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = call.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
-  if (call.auth.token.admin !== true) throw new HttpsError("permission-denied", "Administrator access is required.");
+  if (call.auth?.token?.admin !== true) throw new HttpsError("permission-denied", "Administrator access is required.");
 
   const data = call.data as Record<string, unknown> | undefined;
   if (!isRecord(data)) throw new HttpsError("invalid-argument", "Payment configuration changes are required.");
