@@ -207,6 +207,37 @@ describe("financial ledger invariants", () => {
     } as unknown as Database;
     await expect(postFinancialOperation(database, remittance)).rejects.toThrow(/exceeds the collector cash-owed balance/i);
   });
+
+  it("rejects payout reservations that exceed the provider available balance", async () => {
+    const operation = createFinancialTransfer({
+      ...base,
+      operationId: "payout_request_1",
+      eventType: "PAYOUT",
+      referenceType: "PAYOUT",
+      referenceId: "payout_1",
+      idempotencyKey: "payout:payout_1:reserve",
+      amountMinor: 10_001,
+      source: { accountId: "wallet_driver_driver_1", bucket: "AVAILABLE", deltaMinor: 0, partyType: "DRIVER", partyId: "driver_1" },
+      destination: { accountId: "wallet_driver_driver_1", bucket: "CLEARING", deltaMinor: 0, partyType: "DRIVER", partyId: "driver_1" },
+    });
+    const database = {
+      ref: () => ({
+        transaction: async (update: (state: unknown) => unknown) => {
+          const next = update({
+            accounts: {
+              wallet_driver_driver_1: {
+                availableMinor: 10_000, pendingMinor: 0, cashOwedMinor: 0,
+                clearingMinor: 0, updatedAt: 1_798_000_000_100,
+              },
+            },
+          });
+          return { committed: true, snapshot: { val: () => next } };
+        },
+      }),
+    } as unknown as Database;
+    await expect(postFinancialOperation(database, operation)).rejects.toThrow(/available balance/i);
+  });
+
   it("keeps unallocated payment remainder in a clearing account", () => {
     const payment: Payment = {
       id: "payment_remainder", transactionType: "ORDER", orderId: "order_remainder", tripId: "",
