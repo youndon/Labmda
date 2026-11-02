@@ -5,6 +5,8 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
+import com.zouitel.presentaion.payment.CashPaymentRepository
+import com.zouitel.presentaion.payment.CashQuotePoint
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -19,6 +21,14 @@ data class PassengerInfo(val name: String = "", val phone: String = "")
 class PassengerScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
     private val currentUser = Firebase.auth.currentUser
+    private val cashPayments = CashPaymentRepository()
+
+    private val _paymentError = MutableStateFlow<String?>(null)
+    val paymentError: StateFlow<String?> = _paymentError.asStateFlow()
+
+    fun clearPaymentError() {
+        _paymentError.value = null
+    }
 
     private val _trips = MutableStateFlow<List<Trip>>(emptyList())
     val trips: StateFlow<List<Trip>> = _trips.asStateFlow()
@@ -149,10 +159,19 @@ class PassengerScreenModel : ScreenModel {
         fare: Double,
         passengerName: String,
         passengerPhone: String,
-        targetDriver: UserProfile? = null
+        targetDriver: UserProfile? = null,
+        paymentMethod: String = "CASH"
     ) {
         val uid = currentUser?.uid ?: return
         screenModelScope.launch {
+            try {
+            _paymentError.value = null
+            val quote = cashPayments.quoteRide(
+                pickup = CashQuotePoint(pickupLat, pickupLng),
+                dropoff = CashQuotePoint(dropoffLat, dropoffLng),
+                rideType = "STANDARD",
+                paymentMethod = paymentMethod
+            )
             val ref = db.child("trips").push()
             val tripId = ref.key ?: System.currentTimeMillis().toString()
 
@@ -171,7 +190,7 @@ class PassengerScreenModel : ScreenModel {
                 pickupLng = pickupLng,
                 dropoffLat = dropoffLat,
                 dropoffLng = dropoffLng,
-                fare = fare,
+                fare = quote.amountMinor("fareMinor") / 100.0,
                 driverId = targetDriver?.uid ?: "",
                 driverName = targetDriver?.fullName ?: "",
                 driverPhone = targetDriver?.phoneNumber ?: "",
@@ -180,6 +199,10 @@ class PassengerScreenModel : ScreenModel {
                 createdAtTimestamp = System.currentTimeMillis()
             )
             ref.setValue(trip)
+            cashPayments.createCashPayment(quote.quoteId, tripId)
+            } catch (error: Exception) {
+                _paymentError.value = error.message ?: "Could not create the cash ride payment."
+            }
         }
     }
 

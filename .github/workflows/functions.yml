@@ -2,12 +2,12 @@ name: Firebase Functions CI
 
 on:
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "phase-04-cash-payments", "phase-05-server-payment-creation" ]
     paths:
       - "functions/**"
       - ".github/workflows/functions.yml"
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "phase-04-cash-payments", "phase-05-server-payment-creation" ]
     paths:
       - "functions/**"
       - ".github/workflows/functions.yml"

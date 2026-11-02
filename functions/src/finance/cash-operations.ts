@@ -33,13 +33,59 @@ async function loadPayment(paymentId: string): Promise<Payment> {
 }
 async function assignedCollector(payment: Payment): Promise<string> {
   if (payment.transactionType === "ORDER") {
-    if (!payment.deliveryId) throw new HttpsError("failed-precondition", "Assign a courier before cash collection.");
-    return payment.deliveryId;
+    const order = await db().ref(`orders/${payment.orderId}`).get();
+    if (!order.exists() || order.child("status").val() === "CANCELLED") throw new HttpsError("failed-precondition", "The order is missing or cancelled.");
+    const deliveryId = order.child("deliveryId").val();
+    if (typeof deliveryId !== "string" || !deliveryId) throw new HttpsError("failed-precondition", "Assign a courier before cash collection.");
+    if (payment.deliveryId && payment.deliveryId !== deliveryId) throw new HttpsError("failed-precondition", "The order courier changed; refresh the payment assignment.");
+    return deliveryId;
   }
   const trip = await db().ref(`trips/${payment.tripId}`).get();
+  if (!trip.exists() || trip.child("status").val() === "CANCELLED") throw new HttpsError("failed-precondition", "The trip is missing or cancelled.");
   const driverId = trip.child("driverId").val();
   if (typeof driverId !== "string" || !driverId) throw new HttpsError("failed-precondition", "Assign a driver before cash collection.");
   return driverId;
+}
+
+async function bindCashCollector(payment: Payment, collectorId: string): Promise<Payment> {
+  const database = db();
+  const paymentRef = database.ref(`payments/${payment.id}`);
+  const transaction = await paymentRef.transaction((current: Payment | null) => {
+    if (!current || current.id !== payment.id || current.method !== "CASH" || current.amountMinor !== payment.amountMinor) return;
+    if (current.transactionType !== payment.transactionType || current.orderId !== payment.orderId || current.tripId !== payment.tripId) return;
+    if (current.deliveryId && current.deliveryId !== (current.transactionType === "ORDER" ? collectorId : "")) return;
+    return current.transactionType === "ORDER" ? { ...current, deliveryId: collectorId, updatedAt: Date.now() } : current;
+  }, undefined, false);
+  const bound = transaction.snapshot.val() as Payment | null;
+  if (!bound) throw new HttpsError("aborted", "Payment assignment changed while confirming cash collection.");
+
+  if (bound.transactionType === "ORDER") {
+    const order = await database.ref(`orders/${bound.orderId}`).get();
+    if (order.child("deliveryId").val() !== collectorId) throw new HttpsError("aborted", "The courier assignment changed. Try again.");
+  } else {
+    const trip = await database.ref(`trips/${bound.tripId}`).get();
+    if (trip.child("driverId").val() !== collectorId) throw new HttpsError("aborted", "The driver assignment changed. Try again.");
+  }
+
+  const allocationRef = database.ref(`paymentAllocations/${bound.id}`);
+  const allocationSnapshot = await allocationRef.get();
+  if (!allocationSnapshot.exists()) throw new HttpsError("failed-precondition", "Payment allocations are missing.");
+  const allocations = allocationSnapshot.val() as Record<string, PaymentAllocation>;
+  const updates: Record<string, unknown> = {};
+  for (const [allocationId, item] of Object.entries(allocations)) {
+    if (!item || item.paymentId !== bound.id) throw new HttpsError("failed-precondition", "A payment allocation is invalid.");
+    const expectedType = bound.transactionType === "ORDER" ? "DELIVERY"
+      : (item.beneficiaryType === "DELIVERY" ? "DELIVERY" : "DRIVER");
+    if (item.beneficiaryType === expectedType) {
+      if (item.beneficiaryId !== "UNASSIGNED" && item.beneficiaryId !== collectorId) {
+        throw new HttpsError("failed-precondition", "The collector allocation is already assigned to another provider.");
+      }
+      updates[`paymentAllocations/${bound.id}/${allocationId}/beneficiaryId`] = collectorId;
+      updates[`paymentAllocations/${bound.id}/${allocationId}/deliveryId`] = bound.deliveryId;
+    }
+  }
+  await database.ref().update(updates);
+  return bound;
 }
 
 /**
@@ -71,7 +117,8 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
     id: `cash_${paymentId}`, paymentId, orderId: payment.orderId, tripId: payment.tripId,
     deliveryId: payment.deliveryId, collectorId: uid, payerId: payment.payerId,
     amountMinor: payment.amountMinor, currency: "PHP", status: "COLLECTED",
-    collectedAt: now, createdAt: existing.exists() ? (existing.val() as CashCollection).createdAt : now,
+    collectedAt: existing.exists() ? ((existing.val() as CashCollection).collectedAt ?? now) : now,
+    createdAt: existing.exists() ? (existing.val() as CashCollection).createdAt : now,
     notes: typeof call.data?.notes === "string" ? call.data.notes.slice(0, 500) : "",
   };
   await collectionRef.set(collection);
@@ -89,6 +136,8 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
     throw new HttpsError("failed-precondition", "Payment could not be confirmed. The cash evidence was retained for safe retry.");
   }
   const posted = await postPaymentReceiptFromDatabase(db(), paymentId);
+  const transactionPath = payment.transactionType === "ORDER" ? `orders/${payment.orderId}` : `trips/${payment.tripId}`;
+  await db().ref(`${transactionPath}/paymentStatus`).set("SUCCEEDED");
   return { paymentId, status: "COLLECTED", ...posted };
 });
 

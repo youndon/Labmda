@@ -1,6 +1,22 @@
 {
   "rules": {
-    "payments": {
+    "pricing": {
+    "config": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "discounts": {
+      ".read": "auth != null",
+      ".write": false
+    },
+    "quotes": {
+      "$quoteId": {
+        ".read": "auth != null && data.child('uid').val() === auth.uid",
+        ".write": false
+      }
+    }
+  },
+  "payments": {
       "$paymentId": {
         ".write": false,
         ".read": "auth != null && data.child('payerId').val() === auth.uid"

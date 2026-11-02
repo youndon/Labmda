@@ -5,6 +5,9 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.model.CartItem
 import com.zouitel.presentaion.model.Order
 import com.zouitel.presentaion.model.OrderType
+import com.zouitel.presentaion.payment.CashPaymentRepository
+import com.zouitel.presentaion.payment.CashQuoteItem
+import com.zouitel.presentaion.payment.CashQuotePoint
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -20,6 +23,7 @@ class RestaurantScreenModel(
 
     private val db = Firebase.database.reference()
     private val auth = Firebase.auth
+    private val cashPayments = CashPaymentRepository()
 
     private val _meals = MutableStateFlow<List<Meal>>(emptyList())
     val meals: StateFlow<List<Meal>> = _meals.asStateFlow()
@@ -75,7 +79,8 @@ class RestaurantScreenModel(
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        onSuccess: (String) -> Unit
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit = {}
     ) {
         if (_isSubmitting.value) return
         val uid = auth.currentUser?.uid
@@ -88,6 +93,13 @@ class RestaurantScreenModel(
         _isSubmitting.value = true
         screenModelScope.launch {
             try {
+                val quote = cashPayments.quoteFoodOrder(
+                    sourceId = restaurant.id,
+                    items = lines.map { CashQuoteItem(it.id, _quantities.value[it.id] ?: 1) },
+                    pickup = CashQuotePoint(restaurant.latitude, restaurant.longitude),
+                    dropoff = CashQuotePoint(dropoffLat, dropoffLng),
+                    paymentMethod = paymentMethod
+                )
                 val orderRef = db.child("orders").push()
                 val orderId = orderRef.key ?: System.currentTimeMillis().toString()
 
@@ -99,8 +111,8 @@ class RestaurantScreenModel(
                         quantity = _quantities.value[meal.id] ?: 1
                     )
                 }
-                val subtotal = items.sumOf { it.totalPrice }
-                val fee = restaurant.deliveryFee
+                val subtotal = quote.amountMinor("subtotalMinor") / 100.0
+                val fee = quote.amountMinor("deliveryFeeMinor") / 100.0
 
                 val order = Order(
                     id = orderId,
@@ -111,7 +123,7 @@ class RestaurantScreenModel(
                     items = items,
                     subtotal = subtotal,
                     deliveryFee = fee,
-                    totalPrice = subtotal + fee,
+                    totalPrice = quote.amountMinor("customerTotalMinor") / 100.0,
                     pickupLocation = restaurant.address,
                     pickupLat = restaurant.latitude,
                     pickupLng = restaurant.longitude,
@@ -119,14 +131,16 @@ class RestaurantScreenModel(
                     dropoffLat = dropoffLat,
                     dropoffLng = dropoffLng,
                     createdAtTimestamp = System.currentTimeMillis(),
-                    paymentMethod = paymentMethod
+                    paymentMethod = "CASH"
                 )
 
                 orderRef.setValue(order)
+                cashPayments.createCashPayment(quote.quoteId, orderId)
                 clearCart()
                 onSuccess(orderId)
             } catch (e: Exception) {
                 _error.value = e.message ?: "Could not place the order. Please try again."
+                onError(_error.value ?: "Could not create the cash payment.")
             } finally {
                 _isSubmitting.value = false
             }
