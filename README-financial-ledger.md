@@ -75,7 +75,7 @@ Provider balances continue to come from the immutable `finance/entries` journal 
 
 ### Provider identity and wallet accounts
 
-- Merchant wallets use `wallet_merchant_{merchantId}`. The signed-in user is associated with merchant IDs by matching `ownerUid` on `shops` and `restaurants`.
+- Merchant wallets use `wallet_merchant_{uid}`. This matches the payment allocation contract: the merchant beneficiary ID is the authenticated merchant owner UID, confirmed by matching `ownerUid` on `shops` and `restaurants`.
 - Driver wallets use `wallet_driver_{uid}`.
 - Delivery courier wallets use `wallet_delivery_{uid}`.
 - The earnings callable aggregates only wallet accounts belonging to the authenticated user. It does not expose the private journal or another provider's balances.
@@ -92,8 +92,8 @@ Sensitive destination data is stored under `payoutProfiles/{uid}` and copied int
 
 1. `saveMyPayoutProfile` validates and stores the provider's GCash or BDO destination.
 2. `getMyEarnings` returns the provider's available, pending, cash-owed and clearing balances plus the latest 100 matching ledger operations.
-3. `requestMyPayout` requires a configured destination and a minimum request of PHP 100.00. It reserves funds by moving the amount from the provider wallet's `AVAILABLE` bucket to its `CLEARING` bucket.
-4. `getPendingPayoutRequests` is administrator-only. `approvePayoutRequest` moves a request to approved.
+3. `requestMyPayout` requires a configured destination, a selected wallet owned by the authenticated user, and a minimum request of PHP 100.00. It reserves funds by moving the amount from that wallet's `AVAILABLE` bucket to its `CLEARING` bucket.
+4. `getPendingPayoutRequests` is administrator-only and includes requests awaiting approval plus approved or interrupted processing states. `approvePayoutRequest` moves a request to approved.
 5. The administrator sends the money outside Labmda using GCash or BDO, then calls `markPayoutAsPaid` with the actual transfer reference. This moves the reserved amount out of the provider wallet's clearing balance and records an external payout-clearing posting.
 6. `rejectPayoutRequest` releases the reserved amount back to `AVAILABLE`.
 7. `getMyPayoutHistory` returns the provider's own payout records with account numbers masked.
