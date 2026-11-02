@@ -479,7 +479,6 @@ class PassengerScreen : Screen {
                         canRequestRide = ridePaymentAvailability.serviceEnabled && paymentMethod in ridePaymentAvailability.methods,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
-                        canRequestRide = ridePaymentAvailability.serviceEnabled && paymentMethod in ridePaymentAvailability.methods,
                         onPickDestination = { tappedDriverId = null },
                         onRequest = { name, phone -> submitTrip(name, phone, tappedDriver) }
                     )
