@@ -47,7 +47,10 @@
     "payoutRequests": {
       ".read": false,
       ".write": false,
-      ".indexOn": ["uid", "status"]
+      ".indexOn": [
+        "uid",
+        "status"
+      ]
     },
     "payouts": {
       "$payoutId": {
@@ -63,7 +66,10 @@
     },
     "finance": {
       ".read": false,
-      ".write": false
+      ".write": false,
+      ".indexOn": [
+        "createdAt"
+      ]
     },
     "paymentProviderEvents": {
       ".read": false,
@@ -80,6 +86,26 @@
     "cashReconciliations": {
       ".read": false,
       ".write": false
+    },
+    "pricing": {
+      ".read": false,
+      ".write": false,
+      "config": {
+        ".read": false,
+        ".write": false
+      },
+      "configHistory": {
+        ".read": false,
+        ".write": false
+      },
+      "quotes": {
+        ".read": false,
+        ".write": false
+      },
+      "discounts": {
+        ".read": false,
+        ".write": false
+      }
     }
   }
 }
