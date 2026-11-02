@@ -1,5 +1,5 @@
 import { assertMinorAmount, assertPaymentRelationship } from "../models/payment.js";
-import type { Payment, PaymentAllocation } from "../models/payment.js";
+import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 import { createFinancialTransfer, type FinancialOperation, type LedgerPosting } from "./ledger.js";
 
 /**
@@ -11,7 +11,7 @@ import { createFinancialTransfer, type FinancialOperation, type LedgerPosting } 
 export function createPaymentReceiptOperation(
   payment: Payment,
   allocations: PaymentAllocation[],
-  options: { cashCollectorId?: string } = {},
+  options: { cashCollection?: CashCollection } = {},
 ): FinancialOperation {
   if (payment.transactionType !== "ORDER" && payment.transactionType !== "RIDE") throw new Error("Payment transaction type is invalid.");
   if (payment.method !== "GCASH" && payment.method !== "CASH") throw new Error("Payment method is unsupported.");
@@ -23,7 +23,19 @@ export function createPaymentReceiptOperation(
   assertMinorAmount(payment.amountMinor, "payment.amountMinor");
   if (payment.amountMinor === 0) throw new Error("Payment amount must be greater than zero.");
   const isCash = payment.method === "CASH";
-  if (isCash && !options.cashCollectorId) throw new Error("Cash payments require the verified cash collector ID.");
+  const cashCollection = options.cashCollection;
+  if (isCash) {
+    if (!cashCollection || cashCollection.status !== "COLLECTED") {
+      throw new Error("Cash payments require a confirmed cash collection record.");
+    }
+    if (cashCollection.paymentId !== payment.id || cashCollection.amountMinor !== payment.amountMinor
+      || cashCollection.currency !== "PHP" || cashCollection.payerId !== payment.payerId
+      || cashCollection.orderId !== payment.orderId || cashCollection.tripId !== payment.tripId
+      || cashCollection.deliveryId !== payment.deliveryId || !cashCollection.collectorId
+      || !Number.isSafeInteger(cashCollection.collectedAt) || !cashCollection.collectedAt) {
+      throw new Error("Cash collection evidence does not match the succeeded payment.");
+    }
+  }
   if (!Array.isArray(allocations) || allocations.length === 0) {
     throw new Error("A succeeded payment requires at least one persisted allocation.");
   }
@@ -56,11 +68,11 @@ export function createPaymentReceiptOperation(
 
     if (isCash && allocation.beneficiaryType === "PLATFORM") {
       return {
-        accountId: `cash_owed_${options.cashCollectorId}`,
+        accountId: `cash_owed_${cashCollection!.collectorId}`,
         bucket: "CASH_OWED",
         deltaMinor: allocation.amountMinor,
         partyType: "CASH",
-        partyId: options.cashCollectorId!,
+        partyId: cashCollection!.collectorId,
       };
     }
     const partyType: LedgerPosting["partyType"] = allocation.beneficiaryType === "DELIVERY"
