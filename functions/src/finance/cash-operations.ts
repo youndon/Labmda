@@ -135,9 +135,9 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
   if (!updated || updated.status !== "SUCCEEDED") {
     throw new HttpsError("failed-precondition", "Payment could not be confirmed. The cash evidence was retained for safe retry.");
   }
+  const posted = await postPaymentReceiptFromDatabase(db(), paymentId);
   const transactionPath = payment.transactionType === "ORDER" ? `orders/${payment.orderId}` : `trips/${payment.tripId}`;
   await db().ref(`${transactionPath}/paymentStatus`).set("SUCCEEDED");
-  const posted = await postPaymentReceiptFromDatabase(db(), paymentId);
   return { paymentId, status: "COLLECTED", ...posted };
 });
 
