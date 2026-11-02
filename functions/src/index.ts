@@ -4,9 +4,9 @@ import { getDatabase } from "firebase-admin/database";
 import { defineSecret } from "firebase-functions/params";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import {
-  calculateDeliveryOnlyBreakdown, calculateOrderBreakdown, calculateRideFare,
+  calculateDeliveryOnlyBreakdown, calculateOrderBreakdown, calculateRideFare, calculateProviderFee,
   decimalPesosToMinor, type DiscountRule, type PaymentMethod, type PricingConfig,
-} from "./pricing/engine";
+} from "./pricing/engine.js";
 
 initializeApp();
 const database = getDatabase();
@@ -128,14 +128,13 @@ export const quoteRide = onCall({ secrets: [mapsApiKey], enforceAppCheck: true }
   const [config, route] = await Promise.all([loadConfig(), routeMetrics(data)]);
   const fare = calculateRideFare(config.ride, route);
   const method = paymentMethod(data.paymentMethod);
-  const feeConfig = config.providerFees.GCASH;
-  const providerFeeMinor = method === "GCASH"
-    ? Math.round(fare.fareMinor * feeConfig.rateBps / 10000) + feeConfig.fixedFeeMinor : 0;
-  const customerTotalMinor = fare.fareMinor + (method === "GCASH" && feeConfig.payer === "CUSTOMER" ? providerFeeMinor : 0);
+  const fee = calculateProviderFee(config, method, fare.fareMinor);
+  const providerFeeMinor = fee.amount;
+  const customerTotalMinor = fare.fareMinor + (fee.payer === "CUSTOMER" ? providerFeeMinor : 0);
   return saveQuote(uid, "RIDE", config, data, {
     currency: "PHP", fareMinor: fare.fareMinor, providerFeeMinor, customerTotalMinor,
     platformCommissionMinor: fare.platformCommissionMinor, driverEarningsMinor: fare.driverEarningsMinor,
-    platformNetBeforeOtherCostsMinor: fare.platformCommissionMinor - (method === "GCASH" && feeConfig.payer === "PLATFORM" ? providerFeeMinor : 0),
+    platformNetBeforeOtherCostsMinor: fare.platformCommissionMinor - (method === "GCASH" && fee.payer === "PLATFORM" ? providerFeeMinor : 0),
   }, { route, paymentMethod: method, rideType: data.rideType ?? "STANDARD" });
 });
 
