@@ -123,43 +123,16 @@ class DriverDashboardScreenModel : ScreenModel {
         val driverUid = currentUser?.uid ?: return
 
         screenModelScope.launch {
-            val tripRef = db.child("trips").child(trip.id)
-
-            val status = runCatching { tripRef.child("status").valueEvents.first().value<String>() }.getOrDefault("")
-            val takenBy = runCatching { tripRef.child("driverId").valueEvents.first().value<String>() }.getOrDefault("")
-            if (status != "REQUESTED" || takenBy.isNotBlank()) return@launch
-
-            val profile = db.child("users").child(driverUid).valueEvents.first()
-
-            val fullName = runCatching { profile.child("fullName").value<String>() }
-                .getOrElse { currentUser.displayName ?: "Verified Driver" }
-            val phone = runCatching { profile.child("phoneNumber").value<String>() }
-                .getOrElse {
-                    runCatching { profile.child("phone").value<String>() }
-                        .getOrDefault(currentUser.phoneNumber ?: "")
-                }
-
-            val vehicle = profile.child("driverService").child("vehicleInfo")
-            val make = runCatching { vehicle.child("make").value<String>() }.getOrDefault("Toyota")
-            val model = runCatching { vehicle.child("model").value<String>() }.getOrDefault("Corolla")
-            val color = runCatching { vehicle.child("color").value<String>() }.getOrDefault("Silver")
-            val plate = runCatching { vehicle.child("licensePlate").value<String>() }.getOrDefault("N/A")
-
-            tripRef.updateChildren(
-                mapOf(
-                    "driverId" to driverUid,
-                    "driverName" to fullName,
-                    "driverPhone" to phone,
-                    "vehicleDetails" to "$color $make $model ($plate)",
-                    "status" to "ACCEPTED"
-                )
+            com.zouitel.presentaion.screens.trustedTransactionCall(
+                "claimRide",
+                mapOf("tripId" to trip.id)
             )
         }
     }
 
     fun updateTripStatus(tripId: String, newStatus: String) {
         screenModelScope.launch {
-            db.child("trips").child(tripId).child("status").setValue(newStatus)
+            com.zouitel.presentaion.screens.trustedTransactionCall("transitionTripStatus", mapOf("tripId" to tripId, "nextStatus" to newStatus))
         }
     }
 
