@@ -25,6 +25,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
+import com.zouitel.presentaion.screens.payment.rememberCustomerPaymentAvailability
 import kotlinx.coroutines.launch
 import android.content.Context
 import android.location.Geocoder
@@ -56,12 +57,19 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         val screenModel = rememberScreenModel { StoreDetailsScreenModel(shop) }
         val products by screenModel.products.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val paymentAvailability = rememberCustomerPaymentAvailability("SHOP")
+        val paymentOptions = paymentAvailability.methods.map { method ->
+            if (method == "GCASH") "GCash" else "Cash on Delivery"
+        }
 
         val cartItems = remember { mutableStateMapOf<String, ShopCartItem>() }
         var showOrderSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
-        var paymentMethod by remember { mutableStateOf("Cash on Delivery") }
+        var paymentMethod by remember { mutableStateOf("") }
+        LaunchedEffect(paymentOptions) {
+            if (paymentMethod !in paymentOptions) paymentMethod = paymentOptions.firstOrNull().orEmpty()
+        }
         var isSubmitting by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
         val snackbarHostState = remember { SnackbarHostState() }
@@ -318,13 +326,30 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             )
                         }
 
-                        OutlinedTextField(
-                            value = paymentMethod,
-                            onValueChange = { paymentMethod = it },
-                            label = { Text("Payment Method") },
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        Text("Payment Method", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        when {
+                            paymentAvailability.isLoading -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                            !paymentAvailability.error.isNullOrBlank() -> Text(
+                                paymentAvailability.error.orEmpty(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            !paymentAvailability.serviceEnabled -> Text(
+                                "Shop ordering is temporarily unavailable.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                paymentOptions.forEach { option ->
+                                    FilterChip(
+                                        selected = paymentMethod == option,
+                                        onClick = { paymentMethod = option },
+                                        label = { Text(option) },
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                }
+                            }
+                        }
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Total Demand Price", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
@@ -332,7 +357,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         }
 
                         Button(
-                            enabled = dropoff != null && deliveryAddress.isNotBlank() && cartItems.isNotEmpty() && !isSubmitting,
+                            enabled = dropoff != null && deliveryAddress.isNotBlank() && cartItems.isNotEmpty() && !isSubmitting &&
+                                !paymentAvailability.isLoading && paymentAvailability.serviceEnabled && paymentMethod.isNotBlank(),
                             onClick = {
                                 val drop = dropoff ?: return@Button
                                 isSubmitting = true

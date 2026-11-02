@@ -32,6 +32,7 @@ import coil3.compose.AsyncImage
 import com.google.android.gms.maps.model.LatLng
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.LocationPickerDialog
+import com.zouitel.presentaion.screens.payment.rememberCustomerPaymentAvailability
 
 data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
@@ -59,10 +60,14 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var showMapPicker by remember { mutableStateOf(false) }
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var deliveryAddress by remember { mutableStateOf("") }
-        val paymentOptions = remember(restaurant) {
-            restaurant.paymentMethods.ifEmpty { listOf("Cash on Delivery") }
+        val paymentAvailability = rememberCustomerPaymentAvailability("FOOD")
+        val paymentOptions = paymentAvailability.methods.map { method ->
+            if (method == "GCASH") "GCash" else "Cash on Delivery"
         }
-        var paymentMethod by remember { mutableStateOf(paymentOptions.first()) }
+        var paymentMethod by remember { mutableStateOf("") }
+        LaunchedEffect(paymentOptions) {
+            if (paymentMethod !in paymentOptions) paymentMethod = paymentOptions.firstOrNull().orEmpty()
+        }
 
         val restaurantPoint = remember(restaurant) {
             if (restaurant.latitude != 0.0 || restaurant.longitude != 0.0)
@@ -313,14 +318,27 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     }
 
                     Text("Payment Method", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        paymentOptions.forEach { option ->
-                            FilterChip(
-                                selected = paymentMethod == option,
-                                onClick = { paymentMethod = option },
-                                label = { Text(option) },
-                                shape = RoundedCornerShape(8.dp)
-                            )
+                    when {
+                        paymentAvailability.isLoading -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                        !paymentAvailability.error.isNullOrBlank() -> Text(
+                            paymentAvailability.error.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        !paymentAvailability.serviceEnabled -> Text(
+                            "Food ordering is temporarily unavailable.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            paymentOptions.forEach { option ->
+                                FilterChip(
+                                    selected = paymentMethod == option,
+                                    onClick = { paymentMethod = option },
+                                    label = { Text(option) },
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                            }
                         }
                     }
 
@@ -347,7 +365,9 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
                     Button(
                         enabled = restaurant.isOpen && restaurantPoint != null && dropoff != null &&
-                                deliveryAddress.isNotBlank() && cartLines.isNotEmpty() && !isSubmitting,
+                                deliveryAddress.isNotBlank() && cartLines.isNotEmpty() && !isSubmitting &&
+                                !paymentAvailability.isLoading && paymentAvailability.serviceEnabled &&
+                                paymentMethod.isNotBlank(),
                         onClick = {
                             val drop = dropoff ?: return@Button
                             screenModel.placeOrder(
