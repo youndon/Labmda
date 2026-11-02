@@ -88,8 +88,18 @@ export function createPaymentReceiptOperation(
     };
   });
 
-  if (allocatedMinor !== payment.amountMinor) {
-    throw new Error("Payment allocations must exactly equal the succeeded payment amount.");
+  if (allocatedMinor > payment.amountMinor) {
+    throw new Error("Payment allocations cannot exceed the succeeded payment amount.");
+  }
+  const unallocatedMinor = payment.amountMinor - allocatedMinor;
+  if (unallocatedMinor > 0) {
+    allocationPostings.push({
+      accountId: `unallocated_payment_${payment.id}`,
+      bucket: "CLEARING",
+      deltaMinor: unallocatedMinor,
+      partyType: "PLATFORM",
+      partyId: "platform",
+    });
   }
 
   const source: LedgerPosting = {
