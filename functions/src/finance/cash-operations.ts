@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
+import { commitCashCollection } from "./cash-collection.js";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
 import { createFinancialTransfer, postFinancialOperation, reconcileFinancialLedger } from "./ledger.js";
 
@@ -54,39 +55,23 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
   if (collectorId !== uid) throw new HttpsError("permission-denied", "Only the assigned driver or courier can confirm collection.");
   if (!Number.isSafeInteger(payment.amountMinor) || payment.amountMinor <= 0) throw new HttpsError("failed-precondition", "Payment amount is invalid.");
 
-  const collectionRef = db().ref(`cashCollections/${paymentId}`);
   const now = Date.now();
-  const existing = await collectionRef.get();
-  if (existing.exists()) {
-    const prior = existing.val() as CashCollection;
-    if (prior.paymentId !== paymentId || prior.collectorId !== uid || prior.amountMinor !== payment.amountMinor) {
-      throw new HttpsError("already-exists", "A conflicting cash collection record already exists.");
-    }
-    if (prior.status !== "COLLECTED" && prior.status !== "PENDING") {
-      throw new HttpsError("failed-precondition", "Cash collection is not in a confirmable state.");
-    }
-  }
-
   const collection: CashCollection = {
     id: `cash_${paymentId}`, paymentId, orderId: payment.orderId, tripId: payment.tripId,
     deliveryId: payment.deliveryId, collectorId: uid, payerId: payment.payerId,
     amountMinor: payment.amountMinor, currency: "PHP", status: "COLLECTED",
-    collectedAt: now, createdAt: existing.exists() ? (existing.val() as CashCollection).createdAt : now,
+    collectedAt: now, createdAt: now,
     notes: typeof call.data?.notes === "string" ? call.data.notes.slice(0, 500) : "",
   };
-  await collectionRef.set(collection);
-
-  const paymentRef = db().ref(`payments/${paymentId}`);
-  const result = await paymentRef.transaction((current: Payment | null) => {
-    if (!current) return;
-    if (current.id !== paymentId || current.method !== "CASH" || current.amountMinor !== payment.amountMinor) return;
-    if (current.status === "SUCCEEDED") return current;
-    if (current.status !== "PENDING") return;
-    return { ...current, status: "SUCCEEDED", updatedAt: now, completedAt: now };
-  }, undefined, false);
-  const updated = result.snapshot.val() as Payment | null;
-  if (!updated || updated.status !== "SUCCEEDED") {
-    throw new HttpsError("failed-precondition", "Payment could not be confirmed. The cash evidence was retained for safe retry.");
+  try {
+    // Payment success and collection evidence are committed together. The
+    // helper re-checks the courier/driver assignment inside the RTDB transaction.
+    await commitCashCollection(db(), payment, collection);
+  } catch (error) {
+    throw new HttpsError(
+      "failed-precondition",
+      error instanceof Error ? error.message : "Cash collection could not be confirmed.",
+    );
   }
   const posted = await postPaymentReceiptFromDatabase(db(), paymentId);
   return { paymentId, status: "COLLECTED", ...posted };
