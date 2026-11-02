@@ -39,7 +39,7 @@ export const confirmBdoGcashPayment = onCall({ enforceAppCheck: true }, async (c
     const payments = root.payments ?? {};
     const payment = payments[paymentId];
     if (!payment || payment.id !== paymentId || payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
-      || payment.currency !== "PHP" || payment.amountMinor !== amountMinor) return;
+      || !payment.checkoutUrl || payment.currency !== "PHP" || payment.amountMinor !== amountMinor) return;
     const confirmations = root.bdoPaymentConfirmations ?? {};
     const referenceIndex = root.bdoPaymentReferenceIndex ?? {};
     const prior = confirmations[paymentId];
