@@ -39,7 +39,15 @@ Non-cash collections use a generic payment-provider clearing account. No particu
 
 ## Integration boundary
 
-The adapter does not create payment sessions, verify external transactions, receive webhooks, execute payouts, or authorize administrators. A trusted Cloud Function must load and verify the payment, allocations, and (for cash) collection record from Realtime Database before calling the adapter and `postFinancialOperation`. Client-supplied payment or allocation amounts must never be trusted.
+The backend-only `postPaymentReceiptFromDatabase` service in `functions/src/finance/payment-repository.ts` loads the authoritative records from these Realtime Database paths:
+
+- `payments/{paymentId}`: the `Payment` record.
+- `paymentAllocations/{paymentId}/{allocationId}`: persisted allocation records keyed by allocation ID.
+- `cashCollections/{paymentId}`: the matching `CashCollection` record for cash payments.
+
+It verifies record IDs against their database paths, then passes the records to the payment adapter and idempotent ledger writer. Do not expose this service as a callable that accepts client-supplied payment objects.
+
+The service is intentionally not wired to a database trigger or callable yet: the repository does not currently contain a trusted payment verification/webhook flow or an agreed payment-write lifecycle. It must only be invoked after a trusted collection verifier has written `SUCCEEDED` (and, for cash, a matching `COLLECTED` record). It does not create payment sessions, verify external transactions, receive webhooks, execute payouts, or authorize administrators.
 
 This PR does not yet invoke the adapter from live order/trip lifecycle handlers or cash handover flows. Refund processing, payout execution, and admin-authorized reconciliation also remain separate integration work.
 
