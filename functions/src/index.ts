@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
 import { defineSecret } from "firebase-functions/params";
+import { assertPaymentMethodEnabled, assertPaymentServiceEnabled, getPaymentConfiguration, updateAdminPaymentConfiguration } from "./payments/payment-config.js";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import {
   calculateDeliveryOnlyBreakdown, calculateOrderBreakdown, calculateRideFare, calculateProviderFee,
@@ -26,10 +27,14 @@ function validatePoint(point: Point, field: string): void {
     throw new HttpsError("invalid-argument", `${field} coordinates are invalid.`);
   }
 }
-function paymentMethod(value: unknown): PaymentMethod {
-  if (value === undefined || value === "CASH") return "CASH";
-  if (value === "GCASH") return "GCASH";
-  throw new HttpsError("invalid-argument", "Payment method must be GCASH or CASH.");
+async function paymentMethod(value: unknown): Promise<PaymentMethod> {
+  const method: PaymentMethod = value === undefined || value === "CASH"
+    ? "CASH"
+    : value === "GCASH"
+      ? "GCASH"
+      : (() => { throw new HttpsError("invalid-argument", "Payment method must be GCASH or CASH."); })();
+  await assertPaymentMethodEnabled(method);
+  return method;
 }
 async function loadConfig(): Promise<PricingConfig> {
   const snapshot = await database.ref("pricing/config").get();
@@ -118,7 +123,8 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
     subtotalMinor += lineTotalMinor;
     pricedItems.push({ itemId: line.itemId, name: String(item.child("name").val() ?? ""), quantity: line.quantity, unitPriceMinor, lineTotalMinor });
   }
-  const method = paymentMethod(data.paymentMethod);
+  await assertPaymentServiceEnabled(kind);
+  const method = await paymentMethod(data.paymentMethod);
   const breakdown = calculateOrderBreakdown({ config, service: kind, subtotalMinor, route, paymentMethod: method, discount });
   return saveQuote(uid, kind, config, request, breakdown, { sourceId, items: pricedItems, route, paymentMethod: method });
 }
@@ -128,7 +134,8 @@ export const quoteRide = onCall({ secrets: [mapsApiKey], enforceAppCheck: true }
   const data = call.data as QuoteRequest & { rideType?: string };
   const [config, route] = await Promise.all([loadConfig(), routeMetrics(data)]);
   const fare = calculateRideFare(config.ride, route);
-  const method = paymentMethod(data.paymentMethod);
+  await assertPaymentServiceEnabled("RIDE");
+  const method = await paymentMethod(data.paymentMethod);
   const fee = calculateProviderFee(config, method, fare.fareMinor);
   const providerFeeMinor = fee.amount;
   const customerTotalMinor = fare.fareMinor + (fee.payer === "CUSTOMER" ? providerFeeMinor : 0);
@@ -151,7 +158,8 @@ export const quoteDelivery = onCall({ secrets: [mapsApiKey], enforceAppCheck: tr
   const uid = requireAuth(call.auth?.uid);
   const data = call.data as QuoteRequest;
   const [config, route] = await Promise.all([loadConfig(), routeMetrics(data)]);
-  const method = paymentMethod(data.paymentMethod);
+  await assertPaymentServiceEnabled("DELIVERY");
+  const method = await paymentMethod(data.paymentMethod);
   const breakdown = calculateDeliveryOnlyBreakdown({ config, route, paymentMethod: method });
   return saveQuote(uid, "DELIVERY", config, data, breakdown, { route, paymentMethod: method });
 });
@@ -178,6 +186,9 @@ export {
   getMyCashOutstanding,
   reconcileCashPayments,
 } from "./finance/cash-operations.js";
+
+// Phase 01 — server-owned BDO payment configuration and customer-safe payment options.
+export { getPaymentConfiguration, updateAdminPaymentConfiguration } from "./payments/payment-config.js";
 
 // BDO Checkout GCash verification bridge (admin-verified until BDO provides its merchant webhook contract).
 export { confirmBdoGcashPayment, attachBdoCheckoutLink } from "./payments/bdo-payment-operations.js";
