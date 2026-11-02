@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { SimulatedPaymentProvider, isSimulationRuntime } from "./provider.js";
-import { processSimulatedPaymentEvent, type SimulatedPaymentEvent } from "./webhooks.js";
+import { HmacPaymentSignatureVerifier, SimulatedPaymentProvider, isSimulationRuntime } from "./provider.js";
+import { processSignedPaymentWebhook, type SimulatedPaymentEvent } from "./webhooks.js";
 
 const db = getDatabase();
 const SESSION_TTL_MS = 10 * 60 * 1000;
+const webhookVerifier = new HmacPaymentSignatureVerifier(process.env.SIMULATED_WEBHOOK_SECRET ?? "local-emulator-only-secret");
 
 function requireUser(uid?: string): string {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in before starting checkout.");
@@ -93,5 +94,6 @@ export const simulateGcashPaymentResult = onCall({ enforceAppCheck: true }, asyn
     outcome, amountMinor: session.amountMinor, currency: "PHP",
     provider: "SIMULATED", simulationOnly: true, occurredAt: Date.now(),
   };
-  return processSimulatedPaymentEvent(db, event);
+  const rawBody = JSON.stringify(event);
+  return processSignedPaymentWebhook(db, rawBody, webhookVerifier.sign(rawBody), webhookVerifier);
 });
