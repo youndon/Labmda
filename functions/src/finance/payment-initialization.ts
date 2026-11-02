@@ -89,11 +89,11 @@ export function validateRideMatches(trip: Record<string, any>, quote: QuoteRecor
     throw new HttpsError("failed-precondition", "Ride fare does not match the server-generated quote.");
   }
 }
-function isApprovedCourier(root: RootRecord, uid: string): boolean {
+export function isApprovedCourier(root: RootRecord, uid: string): boolean {
   const service = root.users?.[uid]?.deliveryServices;
   return service?.id === uid && service?.status === "APPROVED";
 }
-function isApprovedDriver(root: RootRecord, uid: string): boolean {
+export function isApprovedDriver(root: RootRecord, uid: string): boolean {
   const service = root.users?.[uid]?.driverService;
   return service?.id === uid && service?.status === "APPROVED";
 }
