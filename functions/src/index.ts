@@ -187,3 +187,6 @@ export {
 
 // Phase 07 — administrator financial overview.
 export { getAdminFinancialOverview } from "./finance/admin-overview.js";
+
+// Phase 08 — administrator pricing and commission configuration.
+export { getAdminPricingConfig, updateAdminPricingConfig } from "./finance/admin-pricing.js";
