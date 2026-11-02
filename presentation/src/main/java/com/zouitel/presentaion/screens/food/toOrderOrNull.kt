@@ -49,6 +49,7 @@ internal fun DataSnapshot.toOrderOrNull(): Order? {
         createdAtTimestamp = runCatching { child("createdAtTimestamp").value<Long>() }.getOrDefault(0L),
         paymentMethod = str("paymentMethod"),
         paymentStatus = str("paymentStatus"),
+        checkoutUrl = str("checkoutUrl"),
         deliveryId = str("deliveryId"),
         deliveryName = str("deliveryName"),
         deliveryPhone = str("deliveryPhone")
