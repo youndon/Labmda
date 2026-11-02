@@ -103,15 +103,10 @@ class ShopOrdersScreenModel : ScreenModel {
         if (nextStatus == OrderStatus.DELIVERED) return
 
         screenModelScope.launch {
-            db.child("orders").child(order.id).child("status").setValue(nextStatus.name)
-
-            if (nextStatus == OrderStatus.OUT_FOR_DELIVERY) {
-                val deliveryRecord = order.copy(
-                    status = OrderStatus.OUT_FOR_DELIVERY,
-                    createdAtTimestamp = System.currentTimeMillis()
-                )
-                db.child("deliveries").child(order.id).setValue(deliveryRecord)
-            }
+            com.zouitel.presentaion.screens.trustedTransactionCall(
+                "transitionOrderStatus",
+                mapOf("orderId" to order.id, "nextStatus" to nextStatus.name)
+            )
         }
     }
 }
