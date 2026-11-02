@@ -82,6 +82,7 @@ class ShopOrdersScreenModel : ScreenModel {
                             totalPrice = totalPrice,
                             status = status,
                             paymentMethod = paymentMethod,
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
                             deliveryId = deliveryId,
                             deliveryName = deliveryName,
                             deliveryPhone = deliveryPhone,
