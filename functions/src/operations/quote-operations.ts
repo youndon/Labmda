@@ -53,6 +53,7 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
     const breakdown = quote.breakdown ?? {};
     const profile = await db().ref(`users/${uid}`).get();
     const orderId = randomUUID();
+    const paymentId = randomUUID();
     const now = Date.now();
     const method = quote.paymentMethod === "GCASH" ? "GCASH" : "CASH";
     const order = {
@@ -68,6 +69,9 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
       discount: pesos(breakdown.discountMinor ?? 0, "discount"),
       totalPrice: pesos(breakdown.customerTotalMinor, "customer total"),
       status: method === "GCASH" ? "PENDING_PAYMENT" : "PLACED",
+      paymentId,
+      paymentBreakdown: breakdown,
+      providerFeePayer: method === "GCASH" ? String((await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() ?? "PLATFORM") : "PLATFORM",
       paymentStatus: method === "GCASH" ? "PENDING" : "CASH_DUE",
       paymentMethod: method, quoteId,
       pickupLocation: String(request.pickupAddress ?? source.child("address").val() ?? ""),
@@ -85,6 +89,12 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
     };
     const updates: Record<string, unknown> = {};
     updates[`orders/${orderId}`] = order;
+    updates[`payments/${paymentId}`] = {
+      id: paymentId, transactionType: "ORDER", orderId, tripId: "", deliveryId: "",
+      payerId: uid, method, status: "PENDING", amountMinor: breakdown.customerTotalMinor,
+      currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
+    };
+    updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
     updates[`pricing/quotes/${quoteId}/status`] = "ORDER_CREATED";
     updates[`pricing/quotes/${quoteId}/orderId`] = orderId;
     updates[`pricing/quotes/${quoteId}/createdResourceAt`] = now;
@@ -106,6 +116,7 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
     const breakdown = quote.breakdown ?? {};
     const profile = await db().ref(`users/${uid}`).get();
     const tripId = randomUUID();
+    const paymentId = randomUUID();
     const now = Date.now();
     const trip = {
       id: tripId, passengerId: uid,
@@ -116,6 +127,9 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
       pickupLat: Number(request.pickup?.latitude ?? 0), pickupLng: Number(request.pickup?.longitude ?? 0),
       dropoffLat: Number(request.dropoff?.latitude ?? 0), dropoffLng: Number(request.dropoff?.longitude ?? 0),
       fare: pesos(breakdown.fareMinor, "ride fare"),
+      paymentId,
+      paymentBreakdown: breakdown,
+      providerFeePayer: quote.paymentMethod === "GCASH" ? String((await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() ?? "PLATFORM") : "PLATFORM",
       fareMinor: breakdown.fareMinor,
       customerTotalMinor: breakdown.customerTotalMinor,
       providerFeeMinor: breakdown.providerFeeMinor ?? 0,
@@ -132,6 +146,13 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
     };
     const updates: Record<string, unknown> = {};
     updates[`trips/${tripId}`] = trip;
+    updates[`payments/${paymentId}`] = {
+      id: paymentId, transactionType: "RIDE", orderId: "", tripId, deliveryId: "",
+      payerId: uid, method: quote.paymentMethod === "GCASH" ? "GCASH" : "CASH",
+      status: "PENDING", amountMinor: breakdown.customerTotalMinor,
+      currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
+    };
+    updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
     updates[`pricing/quotes/${quoteId}/status`] = "RIDE_CREATED";
     updates[`pricing/quotes/${quoteId}/tripId`] = tripId;
     updates[`pricing/quotes/${quoteId}/createdResourceAt`] = now;
