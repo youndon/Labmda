@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Database } from "firebase-admin/database";
+import type { PaymentSignatureVerifier } from "./provider.js";
 
 export interface SimulatedPaymentEvent {
   eventId: string;
@@ -11,23 +11,6 @@ export interface SimulatedPaymentEvent {
   provider: "SIMULATED";
   simulationOnly: true;
   occurredAt: number;
-}
-export interface PaymentWebhookVerifier {
-  verify(rawBody: string, signature: string): boolean;
-}
-export class SimulatedWebhookVerifier implements PaymentWebhookVerifier {
-  constructor(private readonly secret: string) {
-    if (!secret) throw new Error("A development webhook secret is required.");
-  }
-  sign(rawBody: string): string {
-    return createHmac("sha256", this.secret).update(rawBody).digest("hex");
-  }
-  verify(rawBody: string, signature: string): boolean {
-    if (!/^[a-f0-9]{64}$/i.test(signature)) return false;
-    const expected = Buffer.from(this.sign(rawBody), "hex");
-    const supplied = Buffer.from(signature, "hex");
-    return expected.length === supplied.length && timingSafeEqual(expected, supplied);
-  }
 }
 
 /**
@@ -82,7 +65,19 @@ export async function processSimulatedPaymentEvent(
   throw new Error("Webhook event did not match a pending simulated payment session.");
 }
 
-/** Generic verifier adapter. Real provider implementations must be added separately and default-deny. */
-export function verifyProviderWebhook(verifier: PaymentWebhookVerifier, rawBody: string, signature: string): boolean {
-  return verifier.verify(rawBody, signature);
+/** Signature validation happens before parsing or applying any webhook payload. */
+export async function processSignedPaymentWebhook(
+  database: Database,
+  rawBody: string,
+  signature: string,
+  verifier: PaymentSignatureVerifier,
+): Promise<{ duplicate: boolean; status: "SUCCEEDED" | "FAILED" | "EXPIRED" }> {
+  if (!verifier.verify(rawBody, signature)) throw new Error("Webhook signature verification failed.");
+  let event: SimulatedPaymentEvent;
+  try {
+    event = JSON.parse(rawBody) as SimulatedPaymentEvent;
+  } catch {
+    throw new Error("Webhook body is not valid JSON.");
+  }
+  return processSimulatedPaymentEvent(database, event);
 }
