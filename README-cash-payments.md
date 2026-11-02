@@ -71,3 +71,17 @@ The current Android order flows write order records directly. They must be migra
 - An over-remittance is rejected by the ledger.
 - Collector outstanding totals include both merchant and platform obligations.
 - Reconciliation rebuilds balances from immutable journal entries and reports projection discrepancies.
+
+
+## Trusted payment initialization
+
+`initializeOrderCashPayment` and `initializeRideCashPayment` are authenticated, App Check-protected callables. They accept only a quote ID and an existing order/trip ID; clients never submit a payment amount, merchant split, driver/courier earning or commission.
+
+- The quote must be server-created, owned by the caller, unexpired, unused, PHP-denominated and explicitly marked `CASH`.
+- The order/trip must belong to the caller and match the quote's source, item quantities, route and server-computed totals.
+- The current cash implementation requires an assigned courier for orders and an accepted/assigned driver for rides. It fails closed if assignment is missing or changed.
+- Payment, payment allocations, pending cash-collection evidence, transaction payment ID, quote consumption and per-order/per-trip uniqueness index are committed in one RTDB root transaction.
+- Retries for the same quote and transaction return the already-created payment ID. A second payment for the same order/trip is rejected.
+- The collector can confirm only the exact amount on the pending payment through `confirmCashCollection`. The existing cash collection transaction then marks payment succeeded and writes matching collection evidence before the ledger receipt is posted.
+
+This phase deliberately initializes CASH only. Production GCash checkout remains blocked until the Xendit account and integration are approved and a verified provider webhook can update the same canonical `payments/{paymentId}` record. The development simulated GCash flow remains isolated under `paymentIntents` and must not be treated as production revenue.
