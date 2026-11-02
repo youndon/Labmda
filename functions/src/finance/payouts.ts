@@ -226,7 +226,7 @@ export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call)
   return Object.values(payouts ?? {}).map((payout) => ({
     payoutId: payout.payoutId, amountMinor: payout.amountMinor, currency: payout.currency,
     method: payout.method, maskedAccountNumber: `••••••${String(payout.accountNumber ?? "").slice(-4)}`,
-    status: payout.status, transferReference: payout.transferReference ?? null, createdAt: payout.createdAt, updatedAt: payout.updatedAt,
+    status: payout.status, createdAt: payout.createdAt, updatedAt: payout.updatedAt,
     transferReference: payout.transferReference ?? null, adminNote: payout.adminNote ?? null,
   })).sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
 });
@@ -250,7 +250,7 @@ export const getPendingPayoutRequests = onCall({ enforceAppCheck: true }, async 
       payoutId: payout.payoutId, uid: payout.uid, providerKind: payout.providerKind,
       providerId: payout.providerId, amountMinor: payout.amountMinor, currency: payout.currency,
       method: payout.method, accountName: payout.accountName, accountNumber: payout.accountNumber,
-      status: payout.status, createdAt: payout.createdAt,
+      status: payout.status, transferReference: payout.transferReference ?? null, createdAt: payout.createdAt,
     })).sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
 });
 
