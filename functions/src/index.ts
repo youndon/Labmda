@@ -196,3 +196,16 @@ export { postSucceededPaymentToLedger } from "./finance/payment-ledger-trigger.j
 
 // Phase 09 — manual BDO settlement records and bank-statement reconciliation.
 export { createExpectedBdoSettlement, recordBdoBankTransfer, reconcileBdoSettlements } from "./finance/bdo-settlement.js";
+
+// Phase 10 — complete administrator financial administration.
+export {
+  getAdminPaymentMonitor,
+  getAdminFinancialBalances,
+  runAdminFinancialReconciliation,
+  resolveAdminFinancialDiscrepancy,
+  createAdminRefundCase,
+  reviewAdminRefundCase,
+  completeAdminRefundCase,
+  getAdminRefundCases,
+  getAdminAuditTrail,
+} from "./finance/admin-financial.js";
