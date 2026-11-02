@@ -26,10 +26,13 @@ class LambdaApplication : Application(), KoinStartup, SingletonImageLoader.Facto
 
     override fun onCreate() {
         super.onCreate()
+        // Create the Firebase app, then install App Check before any Firebase
+        // Auth, Database, Functions, or other application services are used.
+        Firebase.initialize(this)
+        AppCheckInitializer.install()
         KMPAuth.initialize {
             google("814762435029-63a565o3ub7d4ph32es0vugn5aoa79qs.apps.googleusercontent.com")
         }
-        Firebase.initialize(this)
     }
 
     // This configures the global ImageLoader and Caching behavior for Coil 3
@@ -37,19 +40,17 @@ class LambdaApplication : Application(), KoinStartup, SingletonImageLoader.Facto
         return ImageLoader.Builder(context)
             .memoryCache {
                 MemoryCache.Builder()
-                    // Use up to 25% of available app memory for image caching
                     .maxSizePercent(context, 0.25)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
-                    // Save cached images to internal disk storage
                     .directory(context.cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(1024 * 1024 * 100) // 100 MB max disk cache size
+                    .maxSizeBytes(1024 * 1024 * 100)
                     .build()
             }
             .crossfade(true)
-            .logger(DebugLogger()) // Optional: logs image loading status in Logcat
+            .logger(DebugLogger())
             .build()
     }
 
