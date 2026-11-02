@@ -72,6 +72,16 @@ class PanelScreen : Screen {
                 }
 
                 Button(
+                    onClick = { navigator?.push(AdminSettlementReconciliationScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Manual Payout Reconciliation")
+                }
+
+                Button(
                     onClick = { navigator?.push(DeliveryScreen()) },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)
