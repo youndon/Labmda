@@ -32,20 +32,18 @@ export const getAdminFinancialOverview = onCall({ enforceAppCheck: true }, async
   requireAdmin(call.auth.token as Record<string, unknown> | undefined);
 
   const database = getDatabase();
-  const [financeSnapshot, requested, approved, paying, paid] = await Promise.all([
-    database.ref("finance").get(),
+  const [accountsSnapshot, operationsSnapshot, requested, approved, paying, paid] = await Promise.all([
+    database.ref("finance/accounts").get(),
+    database.ref("finance/operations").orderByChild("createdAt").limitToLast(1000).get(),
     database.ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get(),
     database.ref("payoutRequests").orderByChild("status").equalTo("APPROVED").get(),
     database.ref("payoutRequests").orderByChild("status").equalTo("PAYING").get(),
     database.ref("payoutRequests").orderByChild("status").equalTo("PAID").get(),
   ]);
 
-  const finance = (financeSnapshot.val() ?? {}) as {
-    accounts?: Record<string, FinanceAccount>;
-    operations?: Record<string, FinanceOperation>;
-  };
-  const accounts = finance.accounts ?? {};
-  const operations = Object.values(finance.operations ?? {});
+  const accounts = (accountsSnapshot.val() ?? {}) as Record<string, FinanceAccount>;
+  // A bounded recent sample keeps dashboard reads independent of total journal size.
+  const operations = Object.values((operationsSnapshot.val() ?? {}) as Record<string, FinanceOperation>);
   const platformAccounts = Object.entries(accounts).filter(([id]) => id === "platform_revenue" || id.startsWith("wallet_platform_"));
   const platformAvailableMinor = platformAccounts.reduce((sum, [, account]) => sum + safeMinor(account.availableMinor), 0);
   const platformClearingMinor = platformAccounts.reduce((sum, [, account]) => sum + safeMinor(account.clearingMinor), 0);
@@ -139,6 +137,7 @@ export const getAdminFinancialOverview = onCall({ enforceAppCheck: true }, async
     cashOutstandingMinor,
     paymentVolumeMinor,
     paymentCount: paymentOperations.length,
+    paymentSampleLimit: 1000,
     payoutSummary,
     dailyPaymentVolume: daily,
     recentOperations,

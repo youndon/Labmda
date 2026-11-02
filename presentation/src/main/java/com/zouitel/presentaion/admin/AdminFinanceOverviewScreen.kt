@@ -93,6 +93,7 @@ data class AdminFinancialOverview(
     val cashOutstandingMinor: Long = 0,
     val paymentVolumeMinor: Long = 0,
     val paymentCount: Int = 0,
+    val paymentSampleLimit: Int = 1000,
     val payoutSummary: Map<String, AdminFinancePayoutAggregate> = emptyMap(),
     val dailyPaymentVolume: List<AdminFinanceDay> = emptyList(),
     val recentOperations: List<AdminFinanceOperation> = emptyList()
@@ -220,7 +221,7 @@ class AdminFinanceOverviewScreen : Screen {
                         }
                         item {
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                FinanceMetricCard("Payment volume", formatFinancePhp(data.paymentVolumeMinor), "${data.paymentCount} posted payments", Modifier.weight(1f))
+                                FinanceMetricCard("Recent payment volume", formatFinancePhp(data.paymentVolumeMinor), "${data.paymentCount} payments in latest ${data.paymentSampleLimit} ledger operations", Modifier.weight(1f))
                                 FinanceMetricCard("Cash outstanding", formatFinancePhp(data.cashOutstandingMinor), "Awaiting remittance / settlement", Modifier.weight(1f))
                             }
                         }
@@ -233,7 +234,7 @@ class AdminFinanceOverviewScreen : Screen {
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment volume", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("Last 7 days • PHP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Last 7 days • latest ${data.paymentSampleLimit} ledger operations only • PHP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 FinanceVolumeChart(data.dailyPaymentVolume)
                             }
                         }
