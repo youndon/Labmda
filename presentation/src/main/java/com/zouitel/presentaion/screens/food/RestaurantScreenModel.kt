@@ -2,12 +2,8 @@ package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
-import com.zouitel.presentaion.model.Order
-import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
-import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,7 +14,6 @@ class RestaurantScreenModel(
     private val repository: FoodRepository = FoodRepository()
 ) : ScreenModel {
 
-    private val db = Firebase.database.reference()
     private val auth = Firebase.auth
 
     private val _meals = MutableStateFlow<List<Meal>>(emptyList())
@@ -78,8 +73,7 @@ class RestaurantScreenModel(
         onSuccess: (String) -> Unit
     ) {
         if (_isSubmitting.value) return
-        val uid = auth.currentUser?.uid
-        if (uid == null) {
+        if (auth.currentUser?.uid == null) {
             _error.value = "Please sign in to place an order."
             return
         }
@@ -88,41 +82,29 @@ class RestaurantScreenModel(
         _isSubmitting.value = true
         screenModelScope.launch {
             try {
-                val orderRef = db.child("orders").push()
-                val orderId = orderRef.key ?: System.currentTimeMillis().toString()
-
-                val items = lines.map { meal ->
-                    CartItem(
-                        id = meal.id,
-                        name = meal.name,
-                        basePrice = meal.basePrice,
-                        quantity = _quantities.value[meal.id] ?: 1
+                val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
+                val quote = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "quoteFoodOrder",
+                    mapOf(
+                        "sourceId" to restaurant.id,
+                        "items" to lines.map { meal ->
+                            mapOf("itemId" to meal.id, "quantity" to (_quantities.value[meal.id] ?: 1))
+                        },
+                        "pickup" to mapOf("latitude" to restaurant.latitude, "longitude" to restaurant.longitude),
+                        "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
+                        "pickupAddress" to restaurant.address,
+                        "dropoffAddress" to dropoffAddress,
+                        "paymentMethod" to method
                     )
-                }
-                val subtotal = items.sumOf { it.totalPrice }
-                val fee = restaurant.deliveryFee
-
-                val order = Order(
-                    id = orderId,
-                    clientId = uid,
-                    orderType = OrderType.FOOD,
-                    sourceId = restaurant.id,
-                    sourceName = restaurant.name,
-                    items = items,
-                    subtotal = subtotal,
-                    deliveryFee = fee,
-                    totalPrice = subtotal + fee,
-                    pickupLocation = restaurant.address,
-                    pickupLat = restaurant.latitude,
-                    pickupLng = restaurant.longitude,
-                    dropoffLocation = dropoffAddress,
-                    dropoffLat = dropoffLat,
-                    dropoffLng = dropoffLng,
-                    createdAtTimestamp = System.currentTimeMillis(),
-                    paymentMethod = paymentMethod
                 )
-
-                orderRef.setValue(order)
+                val quoteId = quote["quoteId"] as? String
+                    ?: throw IllegalStateException("The server did not return an order quote.")
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createOrderFromQuote",
+                    mapOf("quoteId" to quoteId, "kind" to "FOOD")
+                )
+                val orderId = created["orderId"] as? String
+                    ?: throw IllegalStateException("The server did not return the new order ID.")
                 clearCart()
                 onSuccess(orderId)
             } catch (e: Exception) {

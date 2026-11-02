@@ -229,7 +229,7 @@ class FoodActivitiesScreen : Screen {
                         Text("Track Status")
                     }
 
-                    if (order.status == OrderStatus.PLACED) {
+                    if ((order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT) && order.paymentStatus != "PAID") {
                         OutlinedButton(
                             onClick = onCancelOrder,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
@@ -249,6 +249,7 @@ class FoodActivitiesScreen : Screen {
     @Composable
     private fun StatusChip(status: OrderStatus) {
         val (color, containerColor, text) = when (status) {
+            OrderStatus.PENDING_PAYMENT -> Triple(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer, "PAYMENT PENDING")
             OrderStatus.PLACED -> Triple(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer, "ORDER PLACED")
             OrderStatus.ACCEPTED -> Triple(MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.secondaryContainer, "CONFIRMED")
             OrderStatus.PREPARING -> Triple(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer, "IN KITCHEN")

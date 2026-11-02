@@ -30,11 +30,11 @@ class FoodActivitiesScreenModel : ScreenModel {
 
     private fun listenToUserOrders() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
+            val uid = currentUserId ?: run { _isLoading.value = false; return@launch }
+            db.child("orders").orderByChild("clientId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
                     .filter { it.orderType == OrderType.FOOD }
-                    .filter { currentUserId == null || it.clientId == currentUserId }
                     .sortedByDescending { it.createdAtTimestamp }
                 _isLoading.value = false
             }
@@ -43,7 +43,7 @@ class FoodActivitiesScreenModel : ScreenModel {
 
     fun cancelOrder(orderId: String) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            com.zouitel.presentaion.screens.trustedTransactionCall("cancelCustomerOrder", mapOf("orderId" to orderId))
         }
     }
 }

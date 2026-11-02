@@ -30,6 +30,8 @@ class PassengerScreenModel : ScreenModel {
     val passengerInfo: StateFlow<PassengerInfo> = _passengerInfo.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
+    private val _requestError = MutableStateFlow<String?>(null)
+    val requestError: StateFlow<String?> = _requestError.asStateFlow()
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
@@ -58,12 +60,11 @@ class PassengerScreenModel : ScreenModel {
         }
 
         screenModelScope.launch {
-            db.child("trips").valueEvents.collect { snapshot ->
+            db.child("trips").orderByChild("passengerId").equalTo(uid).valueEvents.collect { snapshot ->
                 val list = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
                         val passengerId = child.child("passengerId").value<String>()
-                        if (passengerId != uid) return@mapNotNull null
 
                         fun str(key: String) = runCatching { child.child(key).value<String>() }.getOrDefault("")
                         fun dbl(key: String) = runCatching { child.child(key).value<Double>() }.getOrDefault(0.0)
@@ -80,6 +81,8 @@ class PassengerScreenModel : ScreenModel {
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
+                            checkoutUrl = runCatching { child.child("checkoutUrl").value<String>() }.getOrDefault(""),
                             driverId = str("driverId"),
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),
@@ -100,24 +103,23 @@ class PassengerScreenModel : ScreenModel {
 
     private fun listenToOnlineDrivers() {
         screenModelScope.launch {
-            db.child("users").valueEvents.collect { snapshot ->
+            db.child("driverPresence").valueEvents.collect { snapshot ->
                 val drivers = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
-                        val isOnline = runCatching { child.child("isDriverOnline").value<Boolean>() }.getOrDefault(false)
+                        val isOnline = true
                         if (!isOnline) return@mapNotNull null
 
                         val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
-                        val phone = runCatching { child.child("phoneNumber").value<String>() }
-                            .getOrElse { runCatching { child.child("phone").value<String>() }.getOrDefault("") }
+                        val phone = ""
 
-                        val loc = child.child("currentLocation")
+                        val loc = child
                         val lat = runCatching { loc.child("latitude").value<Double>() }.getOrDefault(0.0)
                         val lng = runCatching { loc.child("longitude").value<Double>() }.getOrDefault(0.0)
                         val heading = runCatching { loc.child("heading").value<Float>() }.getOrDefault(0f)
 
                         val v = child.child("vehicleInfo")
-                        val typeStr = runCatching { v.child("type").value<String>() }.getOrDefault("CAR")
+                        val typeStr = runCatching { child.child("vehicleType").value<String>() }.getOrDefault("CAR")
                         val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
 
                         UserProfile(
@@ -149,37 +151,74 @@ class PassengerScreenModel : ScreenModel {
         fare: Double,
         passengerName: String,
         passengerPhone: String,
-        targetDriver: UserProfile? = null
+        targetDriver: UserProfile? = null,
+        paymentMethod: String = "CASH",
+        onSuccess: (String) -> Unit = {}
     ) {
-        val uid = currentUser?.uid ?: return
+        if (currentUser?.uid == null) return
         screenModelScope.launch {
-            val ref = db.child("trips").push()
-            val tripId = ref.key ?: System.currentTimeMillis().toString()
+            runCatching {
+                val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
+                val quote = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "quoteRide",
+                    mapOf(
+                        "pickup" to mapOf("latitude" to pickupLat, "longitude" to pickupLng),
+                        "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
+                        "pickupAddress" to pickupAddress,
+                        "dropoffAddress" to dropoffAddress,
+                        "paymentMethod" to method,
+                        "rideType" to "STANDARD"
+                    )
+                )
+                val quoteId = quote["quoteId"] as? String
+                    ?: error("The server did not return a ride fare quote.")
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createRideFromQuote",
+                    mapOf("quoteId" to quoteId)
+                )
+                created["tripId"] as? String
+                    ?: error("The server did not return the new trip ID.")
+            }.onSuccess(onSuccess).onFailure { error ->
+                _requestError.value = error.message ?: "Could not request this ride."
+            }
+        }
+    }
 
-//            val vehicleStr = targetDriver?.vehicleInfo?.let {
-//                "[${it.type?.name ?: requestedVehicleType.name}] ${it.color} ${it.make} ${it.model} (${it.licensePlate})"
-//            } ?: "[${requestedVehicleType.name}] Standard Request"
-
-            val trip = Trip(
-                id = tripId,
-                passengerId = uid,
-                passengerName = passengerName.ifBlank { "Passenger" },
-                passengerPhone = passengerPhone,
-                pickupLocation = pickupAddress,
-                dropoffLocation = dropoffAddress,
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                fare = fare,
-                driverId = targetDriver?.uid ?: "",
-                driverName = targetDriver?.fullName ?: "",
-                driverPhone = targetDriver?.phoneNumber ?: "",
-//                vehicleDetails = vehicleStr,
-                status = if (targetDriver != null) "ACCEPTED" else "REQUESTED",
-                createdAtTimestamp = System.currentTimeMillis()
-            )
-            ref.setValue(trip)
+    fun requestDelivery(
+        pickupAddress: String,
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffAddress: String,
+        dropoffLat: Double,
+        dropoffLng: Double,
+        paymentMethod: String = "CASH",
+        onSuccess: (String) -> Unit
+    ) {
+        if (currentUser?.uid == null) return
+        screenModelScope.launch {
+            runCatching {
+                val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
+                val quote = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "quoteDelivery",
+                    mapOf(
+                        "pickup" to mapOf("latitude" to pickupLat, "longitude" to pickupLng),
+                        "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
+                        "pickupAddress" to pickupAddress,
+                        "dropoffAddress" to dropoffAddress,
+                        "paymentMethod" to method
+                    )
+                )
+                val quoteId = quote["quoteId"] as? String
+                    ?: error("The server did not return a delivery quote.")
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createDeliveryFromQuote",
+                    mapOf("quoteId" to quoteId)
+                )
+                created["orderId"] as? String
+                    ?: error("The server did not return the new delivery booking ID.")
+            }.onSuccess(onSuccess).onFailure { error ->
+                _requestError.value = error.message ?: "Could not book this delivery."
+            }
         }
     }
 

@@ -64,6 +64,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         var paymentMethod by remember { mutableStateOf("Cash on Delivery") }
         var isSubmitting by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
+        val snackbarHostState = remember { SnackbarHostState() }
 
         val context = LocalContext.current
         val modelShopPoint by screenModel.shopLocation.collectAsState()
@@ -85,6 +86,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
             topBar = {
                 LargeTopAppBar(
@@ -353,7 +355,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                             dropoff = null
                                             deliveryAddress = ""
                                             navigator?.push(LiveOrderTrackingScreen(orderId))
-                                        }
+                                        },
+                                        onError = { message -> scope.launch { snackbarHostState.showSnackbar(message) }; isSubmitting = false }
                                     )
                                 }
                             },

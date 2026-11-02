@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -48,6 +49,7 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
+import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.Trip
 import com.zouitel.presentaion.model.UserProfile
 import com.zouitel.presentaion.model.VehicleType
@@ -60,7 +62,7 @@ private const val BASE_FARE = 2.0
 private const val PER_KM_FARE = 1.2
 private const val MIN_FARE = 4.0
 
-private val ACTIVE_STATUSES = setOf("REQUESTED", "ACCEPTED", "IN_PROGRESS")
+private val ACTIVE_STATUSES = setOf("PENDING_PAYMENT", "REQUESTED", "ACCEPTED", "IN_PROGRESS")
 
 class PassengerScreen : Screen {
 
@@ -77,16 +79,19 @@ class PassengerScreen : Screen {
         val onlineDrivers by screenModel.onlineDrivers.collectAsState()
         val passengerInfo by screenModel.passengerInfo.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val requestError by screenModel.requestError.collectAsState()
 
         val cameraPositionState = rememberCameraPositionState()
         val snackbarHostState = remember { SnackbarHostState() }
         val routeColor = MaterialTheme.colorScheme.primary
+        LaunchedEffect(requestError) { requestError?.let { snackbarHostState.showSnackbar(it) } }
 
         var pickup by remember { mutableStateOf<LatLng?>(null) }
         var destination by remember { mutableStateOf<LatLng?>(null) }
         var pickupAddress by remember { mutableStateOf("") }
         var destinationAddress by remember { mutableStateOf("") }
         var vehicleType by remember { mutableStateOf(VehicleType.CAR) }
+        var paymentMethod by remember { mutableStateOf("CASH") }
         var selectedDriver by remember { mutableStateOf<UserProfile?>(null) }
         var requestSheetDriver by remember { mutableStateOf<UserProfile?>(null) }
         var showHistory by remember { mutableStateOf(false) }
@@ -191,13 +196,36 @@ class PassengerScreen : Screen {
                 fare = fare,
                 passengerName = name,
                 passengerPhone = phone,
-                targetDriver = driver
+                targetDriver = driver,
+                paymentMethod = paymentMethod,
+                onSuccess = {
+                    destination = null
+                    destinationAddress = ""
+                    selectedDriver = null
+                    tappedDriverId = null
+                    scope.launch { snackbarHostState.showSnackbar(if (paymentMethod == "GCASH") "Ride created. GCash payment is pending BDO Checkout verification." else "Trip requested. Looking for a driver…") }
+                }
             )
-            destination = null
-            destinationAddress = ""
-            selectedDriver = null
-            tappedDriverId = null
-            scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
+        }
+
+        fun submitDelivery() {
+            val p = pickup
+            val d = destination
+            if (p == null || d == null) return
+            screenModel.requestDelivery(
+                pickupAddress = pickupAddress.ifBlank { "%.5f, %.5f".format(p.latitude, p.longitude) },
+                pickupLat = p.latitude,
+                pickupLng = p.longitude,
+                dropoffAddress = destinationAddress.ifBlank { "%.5f, %.5f".format(d.latitude, d.longitude) },
+                dropoffLat = d.latitude,
+                dropoffLng = d.longitude,
+                paymentMethod = paymentMethod
+            ) { orderId ->
+                destination = null
+                destinationAddress = ""
+                navigator?.push(LiveOrderTrackingScreen(orderId))
+                scope.launch { snackbarHostState.showSnackbar(if (paymentMethod == "GCASH") "Delivery created. GCash payment is pending BDO Checkout verification." else "Delivery booking $orderId created.") }
+            }
         }
 
         Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { paddingValues ->
@@ -335,6 +363,9 @@ class PassengerScreen : Screen {
                                     selectedDriver = selectedDriver,
                                     initialName = passengerInfo.name,
                                     initialPhone = passengerInfo.phone,
+                                    paymentMethod = paymentMethod,
+                                    onPaymentMethodChange = { paymentMethod = it },
+                                    onSubmitDelivery = { submitDelivery() },
                                     onVehicleTypeChange = {
                                         vehicleType = it
                                         selectedDriver = null
@@ -453,6 +484,9 @@ class PassengerScreen : Screen {
         selectedDriver: UserProfile?,
         initialName: String,
         initialPhone: String,
+        paymentMethod: String,
+        onPaymentMethodChange: (String) -> Unit,
+        onSubmitDelivery: () -> Unit,
         onVehicleTypeChange: (VehicleType) -> Unit,
         onSelectDriver: (UserProfile?) -> Unit,
         onClearDestination: () -> Unit,
@@ -551,13 +585,36 @@ class PassengerScreen : Screen {
                     )
                 }
 
-                Button(
-                    onClick = { onSubmit(name.trim(), phone.trim()) },
-                    enabled = name.isNotBlank() && distanceKm > 0.05,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    Text(if (selectedDriver != null) "Request ${selectedDriver.fullName}" else "Request Ride", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = paymentMethod == "CASH",
+                        onClick = { onPaymentMethodChange("CASH") },
+                        label = { Text("Cash") }
+                    )
+                    FilterChip(
+                        selected = paymentMethod == "GCASH",
+                        onClick = { onPaymentMethodChange("GCASH") },
+                        label = { Text("GCash") }
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onSubmit(name.trim(), phone.trim()) },
+                        enabled = name.isNotBlank() && distanceKm > 0.05,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).height(52.dp)
+                    ) {
+                        Text(if (selectedDriver != null) "Request Ride" else "Ride", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = onSubmitDelivery,
+                        enabled = distanceKm > 0.05,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).height(52.dp)
+                    ) {
+                        Text("Send Package", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -763,6 +820,7 @@ class PassengerScreen : Screen {
 
     @Composable
     private fun PassengerTripCard(trip: Trip, onCancel: () -> Unit) {
+        val uriHandler = LocalUriHandler.current
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -815,6 +873,15 @@ class PassengerScreen : Screen {
                     )
                 }
 
+                if (trip.paymentStatus != "PAID" && trip.checkoutUrl.isNotBlank()) {
+                    Button(onClick = { if (trip.checkoutUrl.startsWith("https://checkout.bdo.com.ph/")) uriHandler.openUri(trip.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Continue to BDO Checkout")
+                    }
+                    Text("Select GCash only. Other payment types are not supported in Labmda.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (trip.status == "PENDING_PAYMENT" && trip.checkoutUrl.isBlank()) {
+                    Text("Waiting for the BDO Checkout payment request link.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                }
+
                 if (trip.driverId.isNotBlank()) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Text("Driver: ${trip.driverName} (${trip.driverPhone})", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium))
@@ -827,7 +894,7 @@ class PassengerScreen : Screen {
                     }
                 }
 
-                if (trip.status == "REQUESTED" || trip.status == "ACCEPTED") {
+                if (trip.paymentStatus != "PAID" && (trip.status == "PENDING_PAYMENT" || trip.status == "REQUESTED" || trip.status == "ACCEPTED")) {
                     Spacer(Modifier.height(4.dp))
                     OutlinedButton(
                         onClick = onCancel,

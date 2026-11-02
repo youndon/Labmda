@@ -2,9 +2,6 @@ package com.zouitel.presentaion.screens.shops
 
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
-import com.zouitel.presentaion.model.CartItem
-import com.zouitel.presentaion.model.Order
-import com.zouitel.presentaion.model.OrderType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -91,45 +88,37 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         dropoffLat: Double,
         dropoffLng: Double,
         paymentMethod: String,
-        onSuccess: (String) -> Unit
+        onSuccess: (String) -> Unit,
+        onError: (String) -> Unit = {}
     ) {
-        val uid = auth.currentUser?.uid ?: "guest_client"
+        if (auth.currentUser?.uid == null || cartItems.isEmpty()) return
         screenModelScope.launch {
-            val orderRef = db.child("orders").push()
-            val orderId = orderRef.key ?: System.currentTimeMillis().toString()
-
-            val mappedItems = cartItems.map { shopItem ->
-                CartItem(
-                    id = shopItem.productId,
-                    name = shopItem.productName,
-                    basePrice = shopItem.price,
-                    quantity = shopItem.quantity,
-                    specialInstructions = shopItem.specialInstructions
+            runCatching {
+                val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
+                val quote = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "quoteShopOrder",
+                    mapOf(
+                        "sourceId" to shop.id,
+                        "items" to cartItems.map { item ->
+                            mapOf("itemId" to item.productId, "quantity" to item.quantity)
+                        },
+                        "pickup" to mapOf("latitude" to pickupLat, "longitude" to pickupLng),
+                        "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
+                        "pickupAddress" to shop.address,
+                        "dropoffAddress" to dropoffAddress,
+                        "paymentMethod" to method
+                    )
                 )
-            }
-
-            val universalOrder = Order(
-                id = orderId,
-                clientId = uid,
-                orderType = OrderType.RETAIL,
-                sourceId = shop.id,
-                sourceName = shop.name,
-                items = mappedItems,
-                subtotal = subtotal,
-                deliveryFee = courierFee,
-                totalPrice = totalPrice,
-                pickupLocation = shop.address,
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLocation = dropoffAddress,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                createdAtTimestamp = System.currentTimeMillis(),
-                paymentMethod = paymentMethod
-            )
-
-            orderRef.setValue(universalOrder)
-            onSuccess(orderId)
+                val quoteId = quote["quoteId"] as? String
+                    ?: error("The server did not return a shop order quote.")
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createOrderFromQuote",
+                    mapOf("quoteId" to quoteId, "kind" to "SHOP")
+                )
+                val orderId = created["orderId"] as? String
+                    ?: error("The server did not return the new shop order ID.")
+                onSuccess(orderId)
+            }.onFailure { error -> onError(error.message ?: "Could not place the shop order.") }
         }
     }
 }

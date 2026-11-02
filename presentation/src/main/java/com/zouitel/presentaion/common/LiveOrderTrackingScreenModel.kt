@@ -75,6 +75,8 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
                         dropoffLng = dbl("dropoffLng"),
                         createdAtTimestamp = runCatching { snapshot.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L),
                         paymentMethod = str("paymentMethod"),
+                        paymentStatus = str("paymentStatus"),
+                        checkoutUrl = str("checkoutUrl"),
                         deliveryId = str("deliveryId"),
                         deliveryName = str("deliveryName"),
                         deliveryPhone = str("deliveryPhone")
@@ -90,7 +92,7 @@ class LiveOrderTrackingScreenModel(val orderId: String) : ScreenModel {
 
     fun cancelOrder() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            com.zouitel.presentaion.screens.trustedTransactionCall("cancelCustomerOrder", mapOf("orderId" to orderId))
         }
     }
 }

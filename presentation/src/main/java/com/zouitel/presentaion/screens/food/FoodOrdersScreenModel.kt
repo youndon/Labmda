@@ -30,13 +30,13 @@ class FoodOrdersScreenModel : ScreenModel {
 
     private fun listenToIncomingOrders() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").valueEvents.collect { snapshot ->
+            val uid = currentUid ?: run { _isLoading.value = false; return@launch }
+            db.child("orders").orderByChild("sourceId").equalTo(uid).valueEvents.collect { snapshot ->
                 _orders.value = snapshot.children
                     .mapNotNull { it.toOrderOrNull() }
                     // Food orders only; retail shop orders live in the shop dashboard
                     .filter { it.orderType == OrderType.FOOD }
                     // A restaurant's id is its manager's uid, so show only this restaurant's orders
-                    .filter { currentUid == null || it.sourceId == currentUid }
                     .sortedByDescending { it.createdAtTimestamp }
                 _isLoading.value = false
             }

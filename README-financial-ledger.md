@@ -31,7 +31,7 @@
 
 ## Payment receipt adapter
 
-`functions/src/finance/payment-ledger.ts` maps a succeeded, server-loaded `Payment` and its persisted `PaymentAllocation` records into one balanced receipt operation. It validates transaction references, PHP currency, allocation identities and statuses, and ensures allocations do not exceed the payment amount. Pending allocations credit pending balances; ready allocations credit available balances. Any unallocated remainder is held in a payment-specific clearing account until it is allocated or reconciled.
+`functions/src/finance/payment-ledger.ts` maps a succeeded, server-loaded `Payment` and its persisted `PaymentAllocation` records into one balanced receipt operation. It validates transaction references, PHP currency, allocation identities and statuses, and ensures allocations do not exceed the payment amount. Pending allocations credit pending balances; ready allocations credit available balances. Successful GCash allocations are moved from pending to available only after the order is delivered or the ride is completed, using a stable per-allocation idempotency key. Cash payments use the separate cash collection/handover workflow and are not released into provider wallets a second time. Any unallocated remainder is held in a payment-specific clearing account until it is allocated or reconciled.
 
 For cash payments, the caller must also supply the persisted `CashCollection` record in `COLLECTED` status. The adapter checks that it matches the payment and records the platform allocation in the collector's `CASH_OWED` balance. A confirmed remittance can then move the owed amount into platform revenue. The ledger rejects a remittance that would make the collector's cash-owed balance negative.
 
@@ -49,19 +49,20 @@ It verifies record IDs against their database paths, then passes the records to 
 
 `postSucceededPaymentToLedger` is now a Realtime Database `onValueWritten` trigger on `/payments/{paymentId}/status`. It posts only on a transition into `SUCCEEDED`, reloads payment and allocation records from the database, and uses the journal idempotency key so retries and the cash callable can safely race. For cash, the trigger requires the matching `COLLECTED` evidence. `postPaymentReceiptFromDatabase` remains backend-only and is also called directly after cash collection for immediate feedback.
 
-`functions/src/finance/payment-allocations.ts` now provides tested, quote-backed allocation builders for orders and rides. It accounts for merchant-funded discounts by reducing merchant earnings, platform-funded discounts by reducing platform proceeds, customer-paid provider fees by allocating that fee to the platform, and driver/courier earnings. These builders are deliberately pure and backend-only: they must be called by the trusted order/trip payment creator after it has verified the actual merchant owner, assigned courier/driver, and transaction IDs. The repository still has no trusted order/trip payment-creation endpoint that can safely persist `payments/{paymentId}` and `paymentAllocations/{paymentId}` together. Until that lifecycle is added, the trigger can post only payments for which those authoritative records already exist. Refund processing, payout execution, and admin-authorized reconciliation remain separate integration work.
+`functions/src/finance/payment-allocations.ts` now provides tested, quote-backed allocation builders for orders and rides. It accounts for merchant-funded discounts by reducing merchant earnings, platform-funded discounts by reducing platform proceeds, customer-paid provider fees by allocating that fee to the platform, and driver/courier earnings. These builders are deliberately pure and backend-only: they must be called by the trusted order/trip payment creator after it has verified the actual merchant owner, assigned courier/driver, and transaction IDs. The trusted `createOrderFromQuote`, `createRideFromQuote`, and `createDeliveryFromQuote` callables now persist a payment record alongside each quote-created resource. Courier/driver assignment verifies the actual beneficiary and then persists the matching allocation set. The ledger trigger posts only after the payment reaches `SUCCEEDED`; if allocations are not yet available, trigger retries continue, and the assignment operation retries the idempotent posting once the allocations exist. Refund processing, payout execution, and admin-authorized reconciliation remain separate integration work.
 
 The `finance` root transaction is a correctness-first foundation and serializes financial writes. Before high-volume production, shard the journal/projections by account and add a durable outbox/settlement workflow while preserving the immutable operation contract.
 
 
 ## Financial Realtime Database security policy
 
-The repository includes `database.financial.rules.fragment.json` as a **financial-path rules fragment**, not as a complete application ruleset. It denies client writes to authoritative payment, allocation, settlement, wallet, legacy ledger, cash collection, payout, refund, journal, provider-event, handover, and reconciliation records. Read access is scoped to the payer, beneficiary, owner, requester, or cash collector represented by each record.
+The repository includes `database.financial.rules.fragment.json` and `database.order-ride.rules.fragment.json` as **rules fragments**, not as a complete application ruleset. Together they deny client writes to authoritative orders, trips, payments, allocations, settlements, wallets, cash collections, payouts, refunds, journal entries, provider events, and reconciliation records. Order/trip reads require participant-scoped queries; courier/driver dispatch queries require an approved online service profile. The driver map reads only the public `driverPresence` projection, not all user profiles.
 
 Important deployment constraint:
 
 - The current `firebase.json` configures Cloud Functions only; it does not deploy Realtime Database rules.
-- Do not rename this fragment to `database.rules.json`, attach it to `firebase.json`, or deploy it by itself. Realtime Database denies paths without an applicable grant, so doing so would also block the application's existing non-financial paths.
+- Do not rename either fragment to `database.rules.json`, attach them to `firebase.json`, or deploy them by themselves. Realtime Database denies paths without an applicable grant, so doing so would also block the application's existing non-financial paths.
+- When merging the order/ride fragment, remove any ancestor-level `.write` grant on `orders`, `trips`, or `users`; RTDB grants cascade and a broad parent write would override the protected child rules. Keep the user service status fields server-controlled.
 - Before deployment, merge these financial rules into the complete application ruleset, review all existing read/query patterns, add rules for the rest of the app's paths, and run Realtime Database Rules Emulator tests.
 - Firebase Admin SDK writes from trusted Cloud Functions bypass these client rules. That is the intended server-side write boundary; Cloud Functions must still authenticate and authorize every callable and verify provider evidence.
 - No client-visible rule grants access to the private `finance` journal. If the app needs wallet screens, expose a separately designed, user-scoped read model rather than opening the central journal.
@@ -123,13 +124,13 @@ Provider payouts remain manual until an approved transfer API is integrated. An 
 
 ### BDO settlement workflow
 
-1. When a Xendit/manual settlement is expected to reach the company's BDO account, an administrator calls `createExpectedBdoSettlement` with a stable settlement ID, transfer reference, amount in PHP centavos and source (`XENDIT` or `MANUAL`).
+1. When a BDO Checkout/manual settlement is expected to reach the company's BDO account, an administrator calls `createExpectedBdoSettlement` with a stable settlement ID, transfer reference, amount in PHP centavos and source (`BDO` or `MANUAL`).
 2. After the credit appears on the actual BDO statement, an administrator calls `recordBdoBankTransfer` with the exact reference, amount, direction `INBOUND`, and bank transaction timestamp.
 3. The function matches the statement line to the expected settlement only when both reference and amount match. An unmatched line remains visible for investigation; it is never silently forced to match.
 4. For an outbound provider payout, record the actual BDO debit as `OUTBOUND`. It matches only a payout already marked `PAID` with the same transfer reference and amount.
 5. `reconcileBdoSettlements` saves an auditable reconciliation snapshot listing unmatched bank transfers, expected settlements not yet received, and paid payouts without a matching BDO debit.
 
-The BDO workflow does not connect to BDO APIs or parse statement files automatically; an administrator records each actual statement line. Its `balanced` flag is true only when transfer references match expected settlements/paid payouts, no expected inbound settlement or paid payout remains unmatched, and the BDO statement closing balance equals the opening balance plus the period movements posted to `finance/accounts/bdo_bank` from the immutable journal. The statement period must cover all bank lines being reconciled, and every line must be recorded once. The current workflow does not yet automatically ingest BDO files or fetch balances from the bank.
+The BDO workflow does not connect to BDO APIs or parse statement files automatically; an administrator records each actual statement line. Customer GCash collection uses BDO Checkout as the processor; the payment method stored in Labmda remains `GCASH`, not `BDO`. The current interim flow uses BDO Checkout Payment Requests: an administrator creates a one-time payment request in the BDO portal, attaches its `checkout.bdo.com.ph` link through `attachBdoCheckoutLink`, and the customer opens it from order/ride tracking. The link is not treated as proof of payment. An administrator must verify the exact successful transaction in BDO and call `confirmBdoGcashPayment` with the reference and exact PHP-centavo amount before the payment is marked `SUCCEEDED`. It is not an automated webhook. BDO's public page confirms GCash acceptance and one-time payment links, but also describes multiple available payment options; confirm with the assigned BDO account officer whether other options can be disabled so the BDO page exposes only GCash. BDO states that Checkout sales are credited to the nominated BDO account in four banking days, so payment success and bank settlement remain separate reconciliation events. The fully automated Website Plug-in API/webhook integration still requires the merchant-specific technical contract from BDO. Its `balanced` flag is true only when transfer references match expected settlements/paid payouts, no expected inbound settlement or paid payout remains unmatched, and the BDO statement closing balance equals the opening balance plus the period movements posted to `finance/accounts/bdo_bank` from the immutable journal. The statement period must cover all bank lines being reconciled, and every line must be recorded once. The current workflow does not yet automatically ingest BDO files or fetch balances from the bank.
 
 ### BDO callable exports
 
@@ -137,7 +138,7 @@ The BDO workflow does not connect to BDO APIs or parse statement files automatic
 - `recordBdoBankTransfer`
 - `reconcileBdoSettlements`
 
-All callables require the authenticated admin custom claim and App Check. Statement records, expected settlements and reconciliation snapshots are server-written only. Manual reconciliation remains available while no approved BDO/Xendit automated settlement feed is configured.
+All callables require the authenticated admin custom claim and App Check. Statement records, expected settlements and reconciliation snapshots are server-written only. Manual reconciliation remains available while no approved BDO/BDO automated settlement feed is configured.
 
 
 ## Phase 11 — complete financial administration
@@ -157,7 +158,7 @@ Pricing changes, payout approval/rejection/paid confirmation, cash remittance/re
 
 ### Refund and provider boundary
 
-Labmda currently has no production Xendit refund API integration. The refund workflow is therefore a controlled manual-provider workflow: verify the actual refund in the provider/bank dashboard first, then record its reference in Labmda. The ledger reversal is idempotent and records the liability reversal against the original payment allocations. It does not initiate the external refund. Do not expose the development-only simulated GCash checkout/refund callables as production payment processing.
+Labmda currently has no production BDO Checkout refund API integration. The refund workflow is therefore a controlled manual-provider workflow: verify the actual refund in the provider/bank dashboard first, then record its reference in Labmda. The ledger reversal is idempotent and records the liability reversal against the original payment allocations. It does not initiate the external refund. Do not expose the development-only simulated GCash checkout/refund callables as production payment processing.
 
 ### Reconciliation boundary
 

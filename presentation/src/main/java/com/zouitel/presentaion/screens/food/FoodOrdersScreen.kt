@@ -191,6 +191,7 @@ class FoodOrdersScreen : Screen {
     @Composable
     private fun StatusChip(status: OrderStatus) {
         val (color, containerColor, text) = when (status) {
+            OrderStatus.PENDING_PAYMENT -> Triple(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer, "PAYMENT PENDING")
             OrderStatus.PLACED -> Triple(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer, "NEW ORDER")
             OrderStatus.ACCEPTED -> Triple(MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer, "ACCEPTED")
             OrderStatus.PREPARING -> Triple(MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.secondaryContainer, "PREPARING IN KITCHEN")
@@ -222,6 +223,9 @@ class FoodOrdersScreen : Screen {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             when (status) {
+                OrderStatus.PENDING_PAYMENT -> {
+                    Text("Waiting for customer payment confirmation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 OrderStatus.PLACED -> {
                     Button(
                         onClick = { onStatusChange(OrderStatus.ACCEPTED) },

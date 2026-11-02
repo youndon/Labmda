@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -61,7 +62,8 @@ import java.math.RoundingMode
 data class AdminPaymentRow(
     val paymentId: String = "", val payerId: String = "", val status: String = "",
     val method: String = "", val transactionType: String = "", val orderId: String = "",
-    val tripId: String = "", val amountMinor: Long = 0, val refundedAmountMinor: Long = 0,
+    val tripId: String = "", val amountMinor: Long = 0, val provider: String = "",
+    val checkoutUrl: String = "", val providerReference: String = "", val refundedAmountMinor: Long = 0,
     val refundableMinor: Long = 0, val currency: String = "PHP", val createdAt: Long = 0
 )
 
@@ -138,6 +140,20 @@ class AdminFinancialOperationsScreenModel : ScreenModel {
             }.onFailure { _message.value = it.message ?: "Unable to load financial administration." }
             _loading.value = false
         }
+    }
+
+    fun attachBdoCheckoutLink(paymentId: String, checkoutUrl: String, amountPesos: String) = action {
+        functions.httpsCallable("attachBdoCheckoutLink").invoke(
+            mapOf("paymentId" to paymentId, "checkoutUrl" to checkoutUrl, "amountMinor" to pesosToMinor(amountPesos))
+        )
+        "BDO Checkout payment request link attached."
+    }
+
+    fun confirmBdoGcashPayment(paymentId: String, transferReference: String, amountPesos: String) = action {
+        functions.httpsCallable("confirmBdoGcashPayment").invoke(
+            mapOf("paymentId" to paymentId, "transferReference" to transferReference, "amountMinor" to pesosToMinor(amountPesos), "verifiedMethod" to "GCASH")
+        )
+        "BDO GCash payment verified and recorded."
     }
 
     fun createRefund(paymentId: String, amountPesos: String, reason: String) = action {
@@ -233,6 +249,13 @@ class AdminFinancialOperationsScreen : Screen {
         var completionTarget by remember { mutableStateOf<AdminRefundCaseRow?>(null) }
         var providerReference by remember { mutableStateOf("") }
         var showAdjustment by remember { mutableStateOf(false) }
+        var checkoutTarget by remember { mutableStateOf<AdminPaymentRow?>(null) }
+        var checkoutUrl by remember { mutableStateOf("") }
+        var checkoutAmount by remember { mutableStateOf("") }
+        var bdoConfirmTarget by remember { mutableStateOf<AdminPaymentRow?>(null) }
+        var bdoReference by remember { mutableStateOf("") }
+        var bdoAmount by remember { mutableStateOf("") }
+        var bdoMethodVerified by remember { mutableStateOf(false) }
 
         Scaffold(topBar = {
             TopAppBar(
@@ -277,6 +300,29 @@ class AdminFinancialOperationsScreen : Screen {
                                 }
                                 Text(formatAdminMoney(payment.amountMinor), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                                 Text("Payment ${payment.paymentId}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (payment.method == "GCASH" && payment.provider == "BDO_CHECKOUT" && payment.status in setOf("PENDING", "PROCESSING")) {
+                                    Text("Processor: BDO Checkout • Customer method: GCash", style = MaterialTheme.typography.bodySmall)
+                                    if (payment.checkoutUrl.isBlank()) {
+                                        OutlinedButton(onClick = {
+                                            checkoutTarget = payment
+                                            checkoutUrl = ""
+                                            checkoutAmount = BigDecimal.valueOf(payment.amountMinor, 2).stripTrailingZeros().toPlainString()
+                                        }, enabled = !busy) { Text("Attach BDO payment request link") }
+                                    } else {
+                                        Text("BDO Checkout link attached", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                                        OutlinedButton(onClick = {
+                                            checkoutTarget = payment
+                                            checkoutUrl = ""
+                                            checkoutAmount = BigDecimal.valueOf(payment.amountMinor, 2).stripTrailingZeros().toPlainString()
+                                        }, enabled = !busy) { Text("Replace payment request link") }
+                                        OutlinedButton(onClick = {
+                                            bdoConfirmTarget = payment
+                                            bdoReference = ""
+                                            bdoAmount = BigDecimal.valueOf(payment.amountMinor, 2).stripTrailingZeros().toPlainString()
+                                            bdoMethodVerified = false
+                                        }, enabled = !busy) { Text("Verify paid transaction") }
+                                    }
+                                }
                                 Text("Refunded ${formatAdminMoney(payment.refundedAmountMinor)} • Remaining ${formatAdminMoney(payment.refundableMinor)}", style = MaterialTheme.typography.bodySmall)
                                 if (payment.refundableMinor > 0 && (payment.status == "SUCCEEDED" || payment.status == "PARTIALLY_REFUNDED")) {
                                     OutlinedButton(onClick = { refundTarget = payment; refundAmount = ""; refundReason = "" }, enabled = !busy) {
@@ -334,6 +380,46 @@ class AdminFinancialOperationsScreen : Screen {
                     item { Spacer(Modifier.height(18.dp)) }
                 }
             }
+        }
+
+        checkoutTarget?.let { payment ->
+            AlertDialog(
+                onDismissRequest = { checkoutTarget = null },
+                title = { Text("Attach BDO Checkout link") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Create a Payment Request in the BDO Checkout portal for exactly ${formatAdminMoney(payment.amountMinor)}. Copy the one-time link and paste it here.")
+                        OutlinedTextField(value = checkoutUrl, onValueChange = { checkoutUrl = it }, label = { Text("https://checkout.bdo.com.ph/…") }, singleLine = true)
+                        OutlinedTextField(value = checkoutAmount, onValueChange = { checkoutAmount = it }, label = { Text("Exact amount (PHP)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { model.attachBdoCheckoutLink(payment.paymentId, checkoutUrl, checkoutAmount); checkoutTarget = null }, enabled = !busy && checkoutUrl.isNotBlank() && checkoutAmount.isNotBlank()) { Text("Attach link") }
+                },
+                dismissButton = { TextButton(onClick = { checkoutTarget = null }) { Text("Cancel") } }
+            )
+        }
+
+        bdoConfirmTarget?.let { payment ->
+            AlertDialog(
+                onDismissRequest = { bdoConfirmTarget = null },
+                title = { Text("Verify BDO GCash payment") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Only confirm after BDO Checkout shows this exact payment as successful. Verify that the actual payment method was GCash. Do not rely on the customer's return to the app.")
+                        OutlinedTextField(value = bdoReference, onValueChange = { bdoReference = it }, label = { Text("BDO transaction reference") }, singleLine = true)
+                        OutlinedTextField(value = bdoAmount, onValueChange = { bdoAmount = it }, label = { Text("Confirmed amount (PHP)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = bdoMethodVerified, onCheckedChange = { bdoMethodVerified = it })
+                            Text("I verified the BDO transaction was paid using GCash.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { model.confirmBdoGcashPayment(payment.paymentId, bdoReference, bdoAmount); bdoConfirmTarget = null }, enabled = !busy && bdoReference.isNotBlank() && bdoAmount.isNotBlank() && bdoMethodVerified) { Text("Confirm paid") }
+                },
+                dismissButton = { TextButton(onClick = { bdoConfirmTarget = null }) { Text("Cancel") } }
+            )
         }
 
         refundTarget?.let { payment ->

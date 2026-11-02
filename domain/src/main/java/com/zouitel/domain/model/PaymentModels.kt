@@ -116,6 +116,10 @@ data class Payment(
     val deliveryId: String = "",
     val payerId: String = "",
     val method: PaymentMethod = PaymentMethod.CASH,
+    /** Processor label; this is not a customer-selectable payment method. */
+    val provider: String = "",
+    val providerReference: String = "",
+    val checkoutUrl: String = "",
     val status: PaymentStatus = PaymentStatus.PENDING,
     val amountMinor: Long = 0L,
     val currency: String = "PHP",

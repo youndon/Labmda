@@ -153,6 +153,18 @@
     "financialAdjustmentRequests": {
       ".read": false,
       ".write": false
+    },
+    "bdoPaymentConfirmations": {
+      ".read": false,
+      ".write": false
+    },
+    "bdoPaymentReferenceIndex": {
+      ".read": false,
+      ".write": false
+    },
+    "bdoCheckoutLinkIndex": {
+      ".read": false,
+      ".write": false
     }
   }
 }

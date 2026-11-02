@@ -156,6 +156,9 @@ export const quoteDelivery = onCall({ secrets: [mapsApiKey], enforceAppCheck: tr
   return saveQuote(uid, "DELIVERY", config, data, breakdown, { route, paymentMethod: method });
 });
 
+export { createOrderFromQuote, createRideFromQuote, createDeliveryFromQuote } from "./operations/quote-operations.js";
+export { syncPublicDriverPresence } from "./operations/driver-presence.js";
+
 export {
   transitionOrderStatus,
   claimOrderDelivery,
@@ -164,6 +167,7 @@ export {
   claimRide,
   transitionTripStatus,
   cancelPassengerTrip,
+  cancelCustomerOrder,
 } from "./operations/transaction-operations.js";
 
 // Phase 04 — authenticated cash collection, settlement, remittance and reconciliation.
@@ -175,7 +179,10 @@ export {
   reconcileCashPayments,
 } from "./finance/cash-operations.js";
 
-// Phase 05 — development-only simulated GCash checkout, webhook and refund lifecycle.
+// BDO Checkout GCash verification bridge (admin-verified until BDO provides its merchant webhook contract).
+export { confirmBdoGcashPayment, attachBdoCheckoutLink } from "./payments/bdo-payment-operations.js";
+
+// Development-only simulated GCash checkout, webhook and refund lifecycle.
 export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payments/payment-sessions.js";
 export { createSimulatedGcashRefund } from "./payments/refunds.js";
 export { expireSimulatedGcashSessions } from "./payments/expiration.js";

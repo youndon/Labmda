@@ -8,6 +8,7 @@ import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,11 +69,15 @@ class DriverDashboardScreenModel : ScreenModel {
         }
 
         screenModelScope.launch {
-            db.child("trips").valueEvents.collect { snapshot ->
+            val requestedTrips = db.child("trips").orderByChild("status").equalTo("REQUESTED").valueEvents
+            val assignedTrips = db.child("trips").orderByChild("driverId").equalTo(uid).valueEvents
+            combine(requestedTrips, assignedTrips) { requested, assigned ->
+                (requested.children + assigned.children).associateBy { it.key }.values.toList()
+            }.collect { children ->
                 val available = mutableListOf<Trip>()
                 val active = mutableListOf<Trip>()
 
-                snapshot.children.forEach { child ->
+                children.forEach { child ->
                     try {
                         val id = child.key ?: return@forEach
 
@@ -94,6 +99,7 @@ class DriverDashboardScreenModel : ScreenModel {
                             dropoffLat = dbl("dropoffLat"),
                             dropoffLng = dbl("dropoffLng"),
                             fare = child.child("fare").value<Double>(),
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault(""),
                             driverId = driverId,
                             driverName = str("driverName"),
                             driverPhone = str("driverPhone"),

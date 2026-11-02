@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -27,6 +28,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.current
+        val uriHandler = LocalUriHandler.current
         val screenModel = rememberScreenModel { LiveOrderTrackingScreenModel(orderId) }
         val order by screenModel.order.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
@@ -112,6 +114,14 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                     text = "Payment: ${currentOrder.paymentMethod.ifBlank { "Cash on Delivery" }}",
                                     style = MaterialTheme.typography.bodySmall
                                 )
+                                if (currentOrder.paymentStatus != "PAID" && currentOrder.checkoutUrl.isNotBlank()) {
+                                    Button(onClick = { if (currentOrder.checkoutUrl.startsWith("https://checkout.bdo.com.ph/")) uriHandler.openUri(currentOrder.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
+                                        Text("Continue to BDO Checkout")
+                                    }
+                                    Text("Select GCash only. Other payment types are not supported in Labmda.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                } else if (currentOrder.paymentMethod == "GCASH" && currentOrder.paymentStatus != "PAID") {
+                                    Text("Waiting for the BDO Checkout payment request link.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
+                                }
                             }
                         }
                     }
@@ -239,7 +249,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     }
 
                     // Allow Client Cancellation if Order is still in PLACED state
-                    if (currentOrder.status == OrderStatus.PLACED) {
+                    if (currentOrder.paymentStatus != "PAID" && (currentOrder.status == OrderStatus.PLACED || currentOrder.status == OrderStatus.PENDING_PAYMENT || (currentOrder.orderType == com.zouitel.presentaion.model.OrderType.DELIVERY && currentOrder.status == OrderStatus.OUT_FOR_DELIVERY && currentOrder.deliveryId.isBlank()))) {
                         item {
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
@@ -265,6 +275,11 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
             OrderStatus.OUT_FOR_DELIVERY to "Out for Delivery",
             OrderStatus.DELIVERED to "Delivered"
         )
+
+        if (currentStatus == OrderStatus.PENDING_PAYMENT) {
+            Text("Waiting for GCash payment confirmation before the merchant receives this order.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.tertiary)
+            return
+        }
 
         if (currentStatus == OrderStatus.CANCELLED) {
             Box(

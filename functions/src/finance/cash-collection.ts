@@ -74,11 +74,27 @@ export async function commitCashCollection(
       completedAt: now,
     };
 
-    return {
+    const nextRoot: Record<string, any> = {
       ...raw,
       payments: { ...(raw.payments ?? {}), [expectedPayment.id]: savedPayment },
       cashCollections: { ...(raw.cashCollections ?? {}), [expectedPayment.id]: savedCollection },
     };
+    if (current.transactionType === "ORDER") {
+      const order = raw.orders?.[current.orderId] as Record<string, any> | undefined;
+      if (!order || order.paymentId !== expectedPayment.id) return;
+      nextRoot.orders = {
+        ...raw.orders,
+        [current.orderId]: { ...order, paymentStatus: "PAID", updatedAtTimestamp: now },
+      };
+    } else {
+      const trip = raw.trips?.[current.tripId] as Record<string, any> | undefined;
+      if (!trip || trip.paymentId !== expectedPayment.id) return;
+      nextRoot.trips = {
+        ...raw.trips,
+        [current.tripId]: { ...trip, paymentStatus: "PAID", paymentState: "PAID", updatedAtTimestamp: now },
+      };
+    }
+    return nextRoot;
   }, undefined, false);
 
   const root = result.snapshot.val() as Record<string, any> | null;

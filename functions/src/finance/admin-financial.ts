@@ -11,6 +11,7 @@ type PaymentRecord = {
   id: string; payerId: string; status: string; method: string; transactionType: string;
   orderId?: string; tripId?: string; amountMinor: number; refundedAmountMinor?: number; refundReservedAmountMinor?: number;
   currency: string; createdAt: number; updatedAt?: number; completedAt?: number | null;
+  provider?: string; checkoutUrl?: string; providerReference?: string;
 };
 type RefundCase = {
   id: string; paymentId: string; payerId: string; amountMinor: number; currency: "PHP";
@@ -64,7 +65,7 @@ export const getAdminPaymentMonitor = onCall({ enforceAppCheck: true }, async (c
     .map((item) => ({
       paymentId: item.id, payerId: item.payerId, status: item.status, method: item.method,
       transactionType: item.transactionType, orderId: item.orderId ?? "", tripId: item.tripId ?? "",
-      amountMinor: item.amountMinor, refundedAmountMinor: item.refundedAmountMinor ?? 0,
+      amountMinor: item.amountMinor, provider: item.provider ?? "", checkoutUrl: item.checkoutUrl ?? "", providerReference: item.providerReference ?? "", refundedAmountMinor: item.refundedAmountMinor ?? 0,
       refundableMinor: Math.max(0, item.amountMinor - (item.refundedAmountMinor ?? 0)),
       currency: item.currency, createdAt: item.createdAt, updatedAt: item.updatedAt ?? item.createdAt,
     }));
@@ -237,7 +238,7 @@ export const reviewAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
 
 /**
  * Complete an approved refund after the actual transfer is confirmed in the
- * Xendit/bank dashboard. The immutable journal reverses the original payment
+ * BDO Checkout/bank records. The immutable journal reverses the original payment
  * allocations proportionally; no provider API call is made here.
  */
 export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (call) => {

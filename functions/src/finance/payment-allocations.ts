@@ -117,3 +117,45 @@ export function buildRidePaymentAllocations(input: RideAllocationInput): Payment
     updatedAt: input.createdAt,
   }));
 }
+
+
+export interface StandaloneDeliveryAllocationInput {
+  paymentId: string;
+  orderId: string;
+  courierId: string;
+  deliveryFeeMinor: number;
+  courierEarningsMinor: number;
+  platformCommissionMinor: number;
+  providerFeeMinor: number;
+  providerFeePayer: ProviderFeePayer;
+  customerTotalMinor: number;
+  createdAt: number;
+}
+
+/** Builds courier/platform splits for a standalone delivery with no merchant. */
+export function buildStandaloneDeliveryAllocations(input: StandaloneDeliveryAllocationInput): PaymentAllocation[] {
+  const values = [input.deliveryFeeMinor, input.courierEarningsMinor, input.platformCommissionMinor,
+    input.providerFeeMinor, input.customerTotalMinor];
+  if (!values.every((amount) => Number.isSafeInteger(amount) && amount >= 0)
+    || !input.paymentId || !input.orderId || !input.courierId
+    || !Number.isSafeInteger(input.createdAt) || input.createdAt <= 0) {
+    throw new Error("Standalone delivery allocation identity and amounts are invalid.");
+  }
+  const platformMinor = input.platformCommissionMinor
+    + (input.providerFeePayer === "CUSTOMER" ? input.providerFeeMinor : 0);
+  if (input.courierEarningsMinor + input.platformCommissionMinor !== input.deliveryFeeMinor
+    || input.courierEarningsMinor + platformMinor !== input.customerTotalMinor) {
+    throw new Error("Standalone delivery allocations do not reconcile to the quoted fee and customer total.");
+  }
+  return [
+    { beneficiaryId: input.courierId, beneficiaryType: "DELIVERY" as const, amountMinor: input.courierEarningsMinor },
+    { beneficiaryId: "platform", beneficiaryType: "PLATFORM" as const, amountMinor: platformMinor },
+  ].filter((row) => row.amountMinor > 0).map((row, index) => ({
+    id: `alloc_${input.paymentId}_${index + 1}`,
+    paymentId: input.paymentId, transactionType: "ORDER" as const,
+    orderId: input.orderId, tripId: "", deliveryId: input.courierId,
+    beneficiaryId: row.beneficiaryId, beneficiaryType: row.beneficiaryType,
+    amountMinor: row.amountMinor, currency: "PHP" as const, status: "PENDING" as const,
+    createdAt: input.createdAt, updatedAt: input.createdAt,
+  }));
+}

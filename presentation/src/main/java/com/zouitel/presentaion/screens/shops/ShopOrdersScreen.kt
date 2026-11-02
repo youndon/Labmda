@@ -141,6 +141,9 @@ class ShopOrdersScreen() : Screen {
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     when (order.status) {
+                        OrderStatus.PENDING_PAYMENT -> {
+                            Text("Waiting for customer payment confirmation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         OrderStatus.PLACED -> {
                             Button(
                                 onClick = { onStatusChange(OrderStatus.ACCEPTED) },
@@ -204,6 +207,7 @@ class ShopOrdersScreen() : Screen {
     @Composable
     private fun StatusChip(status: OrderStatus) {
         val (color, text) = when (status) {
+            OrderStatus.PENDING_PAYMENT -> MaterialTheme.colorScheme.tertiary to "PAYMENT PENDING"
             OrderStatus.PLACED -> MaterialTheme.colorScheme.error to "PLACED"
             OrderStatus.ACCEPTED -> MaterialTheme.colorScheme.tertiary to "ACCEPTED"
             OrderStatus.PREPARING -> MaterialTheme.colorScheme.secondary to "PACKAGING"
