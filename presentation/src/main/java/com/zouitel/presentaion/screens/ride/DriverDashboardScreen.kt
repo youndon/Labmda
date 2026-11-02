@@ -333,6 +333,21 @@ class DriverDashboardScreen : Screen {
         onUpdateStatus: (String) -> Unit,
         onConfirmCash: () -> Unit
     ) {
+        var showCashConfirmation by remember(trip.id) { mutableStateOf(false) }
+        if (showCashConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showCashConfirmation = false },
+                title = { Text("Confirm cash collection") },
+                text = { Text("Confirm that you physically received ₱${"%.2f".format(trip.fare)} from the passenger for this completed ride.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showCashConfirmation = false
+                        onConfirmCash()
+                    }) { Text("I received the cash") }
+                },
+                dismissButton = { TextButton(onClick = { showCashConfirmation = false }) { Text("Not yet") } }
+            )
+        }
         Card(
             onClick = onFocus,
             modifier = Modifier.fillMaxWidth(),
@@ -352,7 +367,7 @@ class DriverDashboardScreen : Screen {
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            "$${"%.2f".format(trip.fare)}",
+                            "₱${"%.2f".format(trip.fare)}",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -416,7 +431,7 @@ class DriverDashboardScreen : Screen {
                                     color = MaterialTheme.colorScheme.error
                                 )
                                 Button(
-                                    onClick = onConfirmCash,
+                                    onClick = { showCashConfirmation = true },
                                     modifier = Modifier.fillMaxWidth().height(48.dp),
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
