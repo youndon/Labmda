@@ -46,7 +46,9 @@ export const getAdminFinancialOverview = onCall({ enforceAppCheck: true }, async
   };
   const accounts = finance.accounts ?? {};
   const operations = Object.values(finance.operations ?? {});
-  const platform = accounts.platform_revenue ?? {};
+  const platformAccounts = Object.entries(accounts).filter(([id]) => id === "platform_revenue" || id.startsWith("wallet_platform_"));
+  const platformAvailableMinor = platformAccounts.reduce((sum, [, account]) => sum + safeMinor(account.availableMinor), 0);
+  const platformClearingMinor = platformAccounts.reduce((sum, [, account]) => sum + safeMinor(account.clearingMinor), 0);
   const providerAccounts = Object.entries(accounts).filter(([id]) =>
     id.startsWith("wallet_merchant_")
     || id.startsWith("wallet_driver_")
@@ -131,8 +133,8 @@ export const getAdminFinancialOverview = onCall({ enforceAppCheck: true }, async
   return {
     currency: "PHP",
     generatedAt: Date.now(),
-    platformRevenueAvailableMinor: safeMinor(platform.availableMinor),
-    platformRevenueClearingMinor: safeMinor(platform.clearingMinor),
+    platformRevenueAvailableMinor: platformAvailableMinor,
+    platformRevenueClearingMinor: platformClearingMinor,
     providerBalances,
     cashOutstandingMinor,
     paymentVolumeMinor,
