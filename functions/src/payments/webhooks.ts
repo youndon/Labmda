@@ -61,7 +61,7 @@ export async function processSimulatedPaymentEvent(
 
   const root = result.snapshot.val() as Record<string, any> | null;
   const stored = root?.paymentWebhookEvents?.[event.eventId];
-  if (stored) return { duplicate: !result.committed, status: stored.outcome as "SUCCEEDED" | "FAILED" | "EXPIRED" };
+  if (stored) {\n    if (stored.sessionId !== event.sessionId || stored.paymentId !== event.paymentId\n      || stored.outcome !== (stored.outcome === "EXPIRED" ? "EXPIRED" : event.outcome)\n      || stored.amountMinor !== undefined && stored.amountMinor !== event.amountMinor) {\n      throw new Error("Webhook event ID was reused with different payment data.");\n    }\n    return { duplicate: !result.committed, status: stored.outcome as "SUCCEEDED" | "FAILED" | "EXPIRED" };\n  }
   throw new Error("Webhook event did not match a pending simulated payment session.");
 }
 
