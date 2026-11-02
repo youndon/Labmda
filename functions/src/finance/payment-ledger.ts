@@ -28,7 +28,7 @@ export function createPaymentReceiptOperation(
     if (!cashCollection || cashCollection.status !== "COLLECTED") {
       throw new Error("Cash payments require a confirmed cash collection record.");
     }
-    if (cashCollection.paymentId !== payment.id || cashCollection.amountMinor !== payment.amountMinor
+    if (!cashCollection.id || cashCollection.paymentId !== payment.id || cashCollection.amountMinor !== payment.amountMinor
       || cashCollection.currency !== "PHP" || cashCollection.payerId !== payment.payerId
       || cashCollection.orderId !== payment.orderId || cashCollection.tripId !== payment.tripId
       || cashCollection.deliveryId !== payment.deliveryId || !cashCollection.collectorId
