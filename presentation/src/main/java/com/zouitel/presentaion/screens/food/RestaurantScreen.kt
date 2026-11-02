@@ -60,7 +60,8 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var deliveryAddress by remember { mutableStateOf("") }
         val paymentOptions = remember(restaurant) {
-            restaurant.paymentMethods.ifEmpty { listOf("Cash on Delivery") }
+            restaurant.paymentMethods.filter { it.contains("cash", ignoreCase = true) }
+                .ifEmpty { listOf("Cash on Delivery") }
         }
         var paymentMethod by remember { mutableStateOf(paymentOptions.first()) }
 
