@@ -25,6 +25,7 @@ const payment: Payment = {
   amountMinor: 12_500, currency: "PHP", refundedAmountMinor: 0,
   createdAt: 100, updatedAt: 100, completedAt: null,
 };
+const order = { id: "order_1", paymentId: "payment_1", paymentStatus: "CASH_DUE", updatedAtTimestamp: 100 };
 const collection: CashCollection = {
   id: "cash_payment_1", paymentId: "payment_1", orderId: "order_1", tripId: "",
   deliveryId: "courier_1", collectorId: "courier_1", payerId: "customer_1",
@@ -34,11 +35,12 @@ const collection: CashCollection = {
 
 describe("commitCashCollection", () => {
   it("writes collection evidence and payment success atomically", async () => {
-    const fake = fakeDatabase({ payments: { payment_1: payment } });
+    const fake = fakeDatabase({ payments: { payment_1: payment }, orders: { order_1: order } });
     const result = await commitCashCollection(fake.database, payment, collection);
     expect(result.duplicate).toBe(false);
     expect(fake.value().payments.payment_1.status).toBe("SUCCEEDED");
     expect(fake.value().cashCollections.payment_1.status).toBe("COLLECTED");
+    expect(fake.value().orders.order_1.paymentStatus).toBe("PAID");
   });
 
   it("treats an identical retry as a no-op", async () => {
