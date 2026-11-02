@@ -410,7 +410,6 @@ class PassengerScreen : Screen {
                         fare = fare,
                         initialName = passengerInfo.name,
                         initialPhone = passengerInfo.phone,
-                        paymentMethod = paymentMethod,
                         onRequest = { name, phone ->
                             val p = pickup
                             val d = destination
@@ -651,7 +650,6 @@ class PassengerScreen : Screen {
         fare: Double,
         initialName: String,
         initialPhone: String,
-        paymentMethod: String,
         onPickDestination: () -> Unit,
         onRequest: (String, String) -> Unit
     ) {
