@@ -11,7 +11,7 @@ import {
 const db = () => getDatabase();
 type PayoutMethod = "GCASH" | "BDO";
 type ProviderKind = "MERCHANT" | "DRIVER" | "DELIVERY";
-type PayoutStatus = "REQUESTED" | "APPROVED" | "REJECTED" | "PAID";
+type PayoutStatus = "REQUESTED" | "APPROVED" | "REJECTING" | "PAYING" | "REJECTED" | "PAID";
 
 function uidFrom(call: { auth?: { uid?: string } | null }): string {
   const uid = call.auth?.uid;
@@ -265,14 +265,22 @@ export const rejectPayoutRequest = onCall({ enforceAppCheck: true }, async (call
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
   if (payout.status !== "REQUESTED" && payout.status !== "APPROVED") throw new HttpsError("failed-precondition", "This payout cannot be rejected.");
-  await postFinancialOperation(db(), payoutRelease({
-    payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
-    providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
-  }));
-  await updatePayoutStatus(payoutId, ["REQUESTED", "APPROVED"], "REJECTED", {
-    rejectedAt: Date.now(), rejectedBy: call.auth!.uid,
-    adminNote: String((call.data as { note?: unknown }).note ?? "").slice(0, 500),
+  await updatePayoutStatus(payoutId, ["REQUESTED", "APPROVED"], "REJECTING", {
+    rejectedBy: call.auth!.uid,
   });
+  try {
+    await postFinancialOperation(db(), payoutRelease({
+      payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
+      providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
+    }));
+    await updatePayoutStatus(payoutId, ["REJECTING"], "REJECTED", {
+      rejectedAt: Date.now(), rejectedBy: call.auth!.uid,
+      adminNote: String((call.data as { note?: unknown }).note ?? "").slice(0, 500),
+    });
+  } catch (error) {
+    await updatePayoutStatus(payoutId, ["REJECTING"], payout.status as PayoutStatus, {});
+    throw error;
+  }
   return { payoutId, status: "REJECTED" };
 });
 
@@ -286,13 +294,21 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payout request was not found.");
   const payout = snapshot.val() as Record<string, unknown>;
   if (payout.status !== "APPROVED") throw new HttpsError("failed-precondition", "Approve the payout before recording a transfer.");
-  await postFinancialOperation(db(), payoutPaid({
-    payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
-    providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
-  }));
-  await updatePayoutStatus(payoutId, ["APPROVED"], "PAID", {
-    paidAt: Date.now(), paidBy: call.auth!.uid, transferReference,
-    adminNote: String(data.note ?? "").slice(0, 500),
+  await updatePayoutStatus(payoutId, ["APPROVED"], "PAYING", {
+    paidBy: call.auth!.uid, transferReference,
   });
+  try {
+    await postFinancialOperation(db(), payoutPaid({
+      payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
+      providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Date.now(),
+    }));
+    await updatePayoutStatus(payoutId, ["PAYING"], "PAID", {
+      paidAt: Date.now(), paidBy: call.auth!.uid, transferReference,
+      adminNote: String(data.note ?? "").slice(0, 500),
+    });
+  } catch (error) {
+    await updatePayoutStatus(payoutId, ["PAYING"], "APPROVED", {});
+    throw error;
+  }
   return { payoutId, status: "PAID", transferReference };
 });
