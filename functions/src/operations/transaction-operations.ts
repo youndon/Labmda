@@ -141,9 +141,11 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
   }, undefined, false);
   if (!result.committed) {
     const latest = result.snapshot.val() as Record<string, any> | null;
-    if (latest?.deliveryId === uid) return { orderId, deliveryId: uid, duplicate: true };
-    fail("This delivery has already been claimed or is not ready for pickup.");
+    if (latest?.deliveryId !== uid) fail("This delivery has already been claimed or is not ready for pickup.");
+    await ensureOrderAllocations(orderId, uid);
+    return { orderId, deliveryId: uid, duplicate: true };
   }
+  await ensureOrderAllocations(orderId, uid);
   return { orderId, deliveryId: uid, duplicate: false };
 });
 
