@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -819,6 +820,7 @@ class PassengerScreen : Screen {
 
     @Composable
     private fun PassengerTripCard(trip: Trip, onCancel: () -> Unit) {
+        val uriHandler = LocalUriHandler.current
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -869,6 +871,14 @@ class PassengerScreen : Screen {
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+
+                if (trip.paymentStatus != "PAID" && trip.checkoutUrl.isNotBlank()) {
+                    Button(onClick = { uriHandler.openUri(trip.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Pay with GCash · BDO Checkout")
+                    }
+                } else if (trip.status == "PENDING_PAYMENT" && trip.checkoutUrl.isBlank()) {
+                    Text("Waiting for the BDO Checkout payment request link.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }
 
                 if (trip.driverId.isNotBlank()) {
