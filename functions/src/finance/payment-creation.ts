@@ -7,6 +7,9 @@ type QuoteRecord = {
   currency: "PHP"; expiresAt: number; status: "QUOTED" | "CONSUMING" | "CONSUMED";
   paymentMethod?: string; sourceId?: string; breakdown: Record<string, unknown>;
   paymentId?: string; transactionId?: string;
+  request: { pickup: { latitude: number; longitude: number }; dropoff: { latitude: number; longitude: number } };
+  route?: { distanceMeters: number; durationSeconds: number };
+  items?: Array<{ itemId: string; name: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }>;
 };
 type TransactionRecord = Record<string, unknown> & { clientId?: string; passengerId?: string; sourceId?: string; deliveryId?: string; driverId?: string };
 
@@ -206,8 +209,48 @@ export const createCashPaymentFromQuote = onCall({ enforceAppCheck: true }, asyn
     [`pricing/quotes/${quoteId}/transactionId`]: transactionId,
   };
   for (const item of allocations) updates[`paymentAllocations/${paymentId}/${item.id}`] = item;
-  if (isTrip) updates[`trips/${transactionId}/paymentId`] = paymentId;
-  else updates[`orders/${transactionId}/paymentId`] = paymentId;
+  if (isTrip) {
+    const fareMinor = quote.kind === "RIDE"
+      ? minor(quote.breakdown.fareMinor, "ride fare")
+      : minor(quote.breakdown.deliveryFeeMinor, "delivery fee");
+    updates[`trips/${transactionId}/paymentId`] = paymentId;
+    updates[`trips/${transactionId}/fare`] = fareMinor / 100;
+    updates[`trips/${transactionId}/fareAmount`] = fareMinor / 100;
+    updates[`trips/${transactionId}/paymentMethod`] = "CASH";
+    updates[`trips/${transactionId}/pricingQuoteId`] = quoteId;
+    updates[`trips/${transactionId}/pricingVersion`] = (quote as QuoteRecord & { pricingVersion?: number }).pricingVersion ?? null;
+    updates[`trips/${transactionId}/pickupLat`] = quote.request.pickup.latitude;
+    updates[`trips/${transactionId}/pickupLng`] = quote.request.pickup.longitude;
+    updates[`trips/${transactionId}/dropoffLat`] = quote.request.dropoff.latitude;
+    updates[`trips/${transactionId}/dropoffLng`] = quote.request.dropoff.longitude;
+    if (quote.route) {
+      updates[`trips/${transactionId}/routeDistanceMeters`] = quote.route.distanceMeters;
+      updates[`trips/${transactionId}/routeDurationSeconds`] = quote.route.durationSeconds;
+    }
+  } else {
+    const subtotalMinor = minor(quote.breakdown.subtotalMinor, "order subtotal", true);
+    const deliveryFeeMinor = minor(quote.breakdown.deliveryFeeMinor, "delivery fee", true);
+    const pricedItems = quote.items ?? [];
+    if (pricedItems.length === 0) throw new HttpsError("failed-precondition", "The quote does not contain server-priced order items.");
+    updates[`orders/${transactionId}/paymentId`] = paymentId;
+    updates[`orders/${transactionId}/items`] = pricedItems.map((item) => ({
+      id: item.itemId, name: item.name, basePrice: item.unitPriceMinor / 100, quantity: item.quantity,
+    }));
+    updates[`orders/${transactionId}/subtotal`] = subtotalMinor / 100;
+    updates[`orders/${transactionId}/deliveryFee`] = deliveryFeeMinor / 100;
+    updates[`orders/${transactionId}/totalPrice`] = payment.amountMinor / 100;
+    updates[`orders/${transactionId}/paymentMethod`] = "CASH";
+    updates[`orders/${transactionId}/pricingQuoteId`] = quoteId;
+    updates[`orders/${transactionId}/pricingVersion`] = (quote as QuoteRecord & { pricingVersion?: number }).pricingVersion ?? null;
+    updates[`orders/${transactionId}/pickupLat`] = quote.request.pickup.latitude;
+    updates[`orders/${transactionId}/pickupLng`] = quote.request.pickup.longitude;
+    updates[`orders/${transactionId}/dropoffLat`] = quote.request.dropoff.latitude;
+    updates[`orders/${transactionId}/dropoffLng`] = quote.request.dropoff.longitude;
+    if (quote.route) {
+      updates[`orders/${transactionId}/routeDistanceMeters`] = quote.route.distanceMeters;
+      updates[`orders/${transactionId}/routeDurationSeconds`] = quote.route.durationSeconds;
+    }
+  }
   await db().ref().update(updates);
   return { paymentId, amountMinor: payment.amountMinor, currency: "PHP", status: "PENDING", duplicate: false };
 });
