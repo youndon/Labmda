@@ -49,7 +49,8 @@
       ".write": false,
       ".indexOn": [
         "uid",
-        "status"
+        "status",
+        "transferReference"
       ]
     },
     "payouts": {
@@ -108,6 +109,21 @@
         ".read": false,
         ".write": false
       }
+    },
+    "expectedBdoSettlements": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": [
+        "transferReference"
+      ]
+    },
+    "bdoBankTransfers": {
+      ".read": false,
+      ".write": false
+    },
+    "bdoReconciliations": {
+      ".read": false,
+      ".write": false
     }
   }
 }

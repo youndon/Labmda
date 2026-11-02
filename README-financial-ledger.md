@@ -47,9 +47,9 @@ The backend-only `postPaymentReceiptFromDatabase` service in `functions/src/fina
 
 It verifies record IDs against their database paths, then passes the records to the payment adapter and idempotent ledger writer. Do not expose this service as a callable that accepts client-supplied payment objects.
 
-The service is intentionally not wired to a database trigger or callable yet: the repository does not currently contain a trusted payment verification/webhook flow or an agreed payment-write lifecycle. It must only be invoked after a trusted collection verifier has written `SUCCEEDED` (and, for cash, a matching `COLLECTED` record). It does not create payment sessions, verify external transactions, receive webhooks, execute payouts, or authorize administrators.
+`postSucceededPaymentToLedger` is now a Realtime Database `onValueWritten` trigger on `/payments/{paymentId}/status`. It posts only on a transition into `SUCCEEDED`, reloads payment and allocation records from the database, and uses the journal idempotency key so retries and the cash callable can safely race. For cash, the trigger requires the matching `COLLECTED` evidence. `postPaymentReceiptFromDatabase` remains backend-only and is also called directly after cash collection for immediate feedback.
 
-This PR does not yet invoke the adapter from live order/trip lifecycle handlers or cash handover flows. Refund processing, payout execution, and admin-authorized reconciliation also remain separate integration work.
+`functions/src/finance/payment-allocations.ts` now provides tested, quote-backed allocation builders for orders and rides. It accounts for merchant-funded discounts by reducing merchant earnings, platform-funded discounts by reducing platform proceeds, customer-paid provider fees by allocating that fee to the platform, and driver/courier earnings. These builders are deliberately pure and backend-only: they must be called by the trusted order/trip payment creator after it has verified the actual merchant owner, assigned courier/driver, and transaction IDs. The repository still has no trusted order/trip payment-creation endpoint that can safely persist `payments/{paymentId}` and `paymentAllocations/{paymentId}` together. Until that lifecycle is added, the trigger can post only payments for which those authoritative records already exist. Refund processing, payout execution, and admin-authorized reconciliation remain separate integration work.
 
 The `finance` root transaction is a correctness-first foundation and serializes financial writes. Before high-volume production, shard the journal/projections by account and add a durable outbox/settlement workflow while preserving the immutable operation contract.
 
@@ -115,3 +115,26 @@ The payout state is locked while rejection or paid confirmation is being posted 
 ### Important operational boundary
 
 This phase does not connect to a BDO API, GCash disbursement API, or customer payment gateway. Admins manually send provider payouts through the selected GCash or BDO channel and record the actual transfer reference in Labmda. The app must not mark a payout as paid before the real transfer has been completed. The admin custom claim can be provisioned from a trusted environment with `cd functions && npm run set-admin-claim -- <firebase-auth-uid>` using Application Default Credentials; never expose this operation as a client callable. Before production, merge the financial rules fragment into the complete deployed RTDB ruleset, add rules for every existing app path, run RTDB Rules Emulator tests, configure Android App Check, and verify the callable functions with App Check enforcement and the expected `admin` custom claim.
+
+
+## Phase 10 — BDO company settlement and bank reconciliation
+
+Provider payouts remain manual until an approved transfer API is integrated. An administrator approves or rejects each provider request; an approved payout is manually sent through GCash or BDO, then recorded with the actual transfer reference through `markPayoutAsPaid`. That callable moves the reserved amount out of the provider clearing balance only after the admin supplies the transfer reference. The BDO statement workflow below is a second check against the actual bank record; it does not initiate transfers.
+
+### BDO settlement workflow
+
+1. When a Xendit/manual settlement is expected to reach the company's BDO account, an administrator calls `createExpectedBdoSettlement` with a stable settlement ID, transfer reference, amount in PHP centavos and source (`XENDIT` or `MANUAL`).
+2. After the credit appears on the actual BDO statement, an administrator calls `recordBdoBankTransfer` with the exact reference, amount, direction `INBOUND`, and bank transaction timestamp.
+3. The function matches the statement line to the expected settlement only when both reference and amount match. An unmatched line remains visible for investigation; it is never silently forced to match.
+4. For an outbound provider payout, record the actual BDO debit as `OUTBOUND`. It matches only a payout already marked `PAID` with the same transfer reference and amount.
+5. `reconcileBdoSettlements` saves an auditable reconciliation snapshot listing unmatched bank transfers, expected settlements not yet received, and paid payouts without a matching BDO debit.
+
+The BDO workflow does not connect to BDO APIs or parse statement files automatically; an administrator records each actual statement line. Its `balanced` flag is true only when transfer references match expected settlements/paid payouts, no expected inbound settlement or paid payout remains unmatched, and the BDO statement closing balance equals the opening balance plus the period movements posted to `finance/accounts/bdo_bank` from the immutable journal. The statement period must cover all bank lines being reconciled, and every line must be recorded once. The current workflow does not yet automatically ingest BDO files or fetch balances from the bank.
+
+### BDO callable exports
+
+- `createExpectedBdoSettlement`
+- `recordBdoBankTransfer`
+- `reconcileBdoSettlements`
+
+All callables require the authenticated admin custom claim and App Check. Statement records, expected settlements and reconciliation snapshots are server-written only. Manual reconciliation remains available while no approved BDO/Xendit automated settlement feed is configured.
