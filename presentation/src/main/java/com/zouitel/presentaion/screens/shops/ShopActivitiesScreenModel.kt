@@ -30,17 +30,14 @@ class ShopActivitiesScreenModel : ScreenModel {
 
     private fun listenToUserShopActivities() {
         screenModelScope.launch {
-            db.child("orders").valueEvents.collect { snapshot ->
+            val uid = currentUserId ?: run { _isLoading.value = false; return@launch }
+            db.child("orders").orderByChild("clientId").equalTo(uid).valueEvents.collect { snapshot ->
                 val fetchedOrders = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
 
                         val userId: String = runCatching { child.child("clientId").value<String>() }.getOrDefault("")
 
-                        // If user is authenticated, filter by their clientId (allow guest if currentUserId is null)
-                        if (currentUserId != null && userId.isNotBlank() && userId != currentUserId) {
-                            return@mapNotNull null
-                        }
 
                         val shopId = runCatching { child.child("shopId").value<String>() }
                             .getOrElse { runCatching { child.child("sourceId").value<String>() }.getOrDefault("") }
@@ -101,7 +98,7 @@ class ShopActivitiesScreenModel : ScreenModel {
 
     fun cancelShopOrder(orderId: String) {
         screenModelScope.launch {
-            db.child("orders").child(orderId).child("status").setValue(OrderStatus.CANCELLED.name)
+            com.zouitel.presentaion.screens.trustedTransactionCall("cancelCustomerOrder", mapOf("orderId" to orderId))
         }
     }
 }
