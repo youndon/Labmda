@@ -62,6 +62,7 @@ data class Order(
     val createdAtTimestamp: Long = 0L,
     val paymentMethod: String = "",
     val paymentStatus: String = "",
+    val checkoutUrl: String = "",
     val deliveryId: String = "",
     val deliveryName: String = "",
     val deliveryPhone: String = ""
