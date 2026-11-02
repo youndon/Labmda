@@ -877,7 +877,7 @@ class PassengerScreen : Screen {
                     Button(onClick = { if (trip.checkoutUrl.startsWith("https://checkout.bdo.com.ph/")) uriHandler.openUri(trip.checkoutUrl) }, modifier = Modifier.fillMaxWidth()) {
                         Text("Continue to BDO Checkout")
                     }
-                    Text("Select GCash on the BDO payment page.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Select GCash only. Other payment types are not supported in Labmda.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else if (trip.status == "PENDING_PAYMENT" && trip.checkoutUrl.isBlank()) {
                     Text("Waiting for the BDO Checkout payment request link.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }
