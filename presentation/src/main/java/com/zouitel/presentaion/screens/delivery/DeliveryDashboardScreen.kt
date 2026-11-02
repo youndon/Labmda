@@ -328,6 +328,21 @@ class DeliveryDashboardScreen : Screen {
         onMarkDelivered: () -> Unit,
         onConfirmCash: () -> Unit
     ) {
+        var showCashConfirmation by remember(order.id) { mutableStateOf(false) }
+        if (showCashConfirmation) {
+            AlertDialog(
+                onDismissRequest = { showCashConfirmation = false },
+                title = { Text("Confirm cash collection") },
+                text = { Text("Confirm that you physically received ₱${"%.2f".format(order.totalPrice)} from the customer for this delivered order.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showCashConfirmation = false
+                        onConfirmCash()
+                    }) { Text("I received the cash") }
+                },
+                dismissButton = { TextButton(onClick = { showCashConfirmation = false }) { Text("Not yet") } }
+            )
+        }
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
@@ -460,7 +475,7 @@ class DeliveryDashboardScreen : Screen {
                 ) {
                     Text("Total to collect:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(order.totalPrice)}",
+                        "₱${"%.2f".format(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -528,7 +543,7 @@ class DeliveryDashboardScreen : Screen {
                         color = MaterialTheme.colorScheme.error
                     )
                     Button(
-                        onClick = onConfirmCash,
+                        onClick = { showCashConfirmation = true },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp)
                     ) {
