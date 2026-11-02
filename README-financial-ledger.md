@@ -37,6 +37,10 @@ For cash payments, the caller must also supply the persisted `CashCollection` re
 
 Non-cash collections use a generic payment-provider clearing account. No particular bank or payment gateway is assumed.
 
+### Phase 07 — earnings-ledger relationship hardening
+
+The receipt adapter additionally enforces beneficiary-to-transaction relationships before creating journal postings: merchant earnings are order-only, driver earnings are ride-only, and courier earnings must match the order's assigned `deliveryId`. For cash orders, the persisted collector must be that assigned courier; for cash rides, driver earnings must belong to the collector. This prevents a structurally balanced but misdirected allocation from crediting an unrelated provider wallet. These checks do not alter the existing account model, payout lifecycle, provider integration, or manual settlement process.
+
 ## Integration boundary
 
 The backend-only `postPaymentReceiptFromDatabase` service in `functions/src/finance/payment-repository.ts` loads the authoritative records from these Realtime Database paths:
