@@ -32,6 +32,16 @@ class PanelScreen : Screen {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Button(
+                    onClick = { navigator?.push(AdminFinanceOverviewScreen()) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp)
+                ) {
+                    Icon(Icons.Default.AccountBalanceWallet, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Financial Management")
+                }
+
+                Button(
                     onClick = { navigator?.push(AdminPayoutScreen()) },
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(16.dp)

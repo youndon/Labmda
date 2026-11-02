@@ -184,3 +184,6 @@ export {
   rejectPayoutRequest,
   markPayoutAsPaid,
 } from "./finance/payouts.js";
+
+// Phase 07 — administrator financial overview.
+export { getAdminFinancialOverview } from "./finance/admin-overview.js";
