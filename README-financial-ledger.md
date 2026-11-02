@@ -115,3 +115,26 @@ The payout state is locked while rejection or paid confirmation is being posted 
 ### Important operational boundary
 
 This phase does not connect to a BDO API, GCash disbursement API, or customer payment gateway. Admins manually send provider payouts through the selected GCash or BDO channel and record the actual transfer reference in Labmda. The app must not mark a payout as paid before the real transfer has been completed. The admin custom claim can be provisioned from a trusted environment with `cd functions && npm run set-admin-claim -- <firebase-auth-uid>` using Application Default Credentials; never expose this operation as a client callable. Before production, merge the financial rules fragment into the complete deployed RTDB ruleset, add rules for every existing app path, run RTDB Rules Emulator tests, configure Android App Check, and verify the callable functions with App Check enforcement and the expected `admin` custom claim.
+
+
+## Phase 10 — BDO company settlement and bank reconciliation
+
+Provider payouts remain manual until an approved transfer API is integrated. An administrator approves or rejects each provider request; an approved payout is manually sent through GCash or BDO, then recorded with the actual transfer reference through `markPayoutAsPaid`. That callable moves the reserved amount out of the provider clearing balance only after the admin supplies the transfer reference. The BDO statement workflow below is a second check against the actual bank record; it does not initiate transfers.
+
+### BDO settlement workflow
+
+1. When a Xendit/manual settlement is expected to reach the company's BDO account, an administrator calls `createExpectedBdoSettlement` with a stable settlement ID, transfer reference, amount in PHP centavos and source (`XENDIT` or `MANUAL`).
+2. After the credit appears on the actual BDO statement, an administrator calls `recordBdoBankTransfer` with the exact reference, amount, direction `INBOUND`, and bank transaction timestamp.
+3. The function matches the statement line to the expected settlement only when both reference and amount match. An unmatched line remains visible for investigation; it is never silently forced to match.
+4. For an outbound provider payout, record the actual BDO debit as `OUTBOUND`. It matches only a payout already marked `PAID` with the same transfer reference and amount.
+5. `reconcileBdoSettlements` saves an auditable reconciliation snapshot listing unmatched bank transfers, expected settlements not yet received, and paid payouts without a matching BDO debit.
+
+The BDO workflow records statement evidence and reconciles it against expected settlement/payout records. It does not connect to BDO APIs, parse bank statements automatically, or create an accounting journal movement from a bank statement line. Importing statement files and reconciling the bank's closing balance against the accounting cash/bank control account remain future integration work; do not treat the current report's `balanced` flag as proof that the BDO statement closing balance equals the general ledger.
+
+### BDO callable exports
+
+- `createExpectedBdoSettlement`
+- `recordBdoBankTransfer`
+- `reconcileBdoSettlements`
+
+All callables require the authenticated admin custom claim and App Check. Statement records, expected settlements and reconciliation snapshots are server-written only. Manual reconciliation remains available while no approved BDO/Xendit automated settlement feed is configured.
