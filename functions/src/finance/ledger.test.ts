@@ -6,7 +6,7 @@ import {
   validateFinancialOperation,
 } from "./ledger.js";
 import { createCashRemittanceOperation, createPaymentReceiptOperation } from "./payment-ledger.js";
-import type { Payment, PaymentAllocation } from "../models/payment.js";
+import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 
 describe("financial ledger invariants", () => {
   const base = {
@@ -109,12 +109,18 @@ describe("financial ledger invariants", () => {
       { id: "ride_driver", paymentId: payment.id, transactionType: "RIDE", orderId: "", tripId: "trip_1", deliveryId: "", beneficiaryId: "driver_1", beneficiaryType: "DRIVER", amountMinor: 400, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
       { id: "ride_platform", paymentId: payment.id, transactionType: "RIDE", orderId: "", tripId: "trip_1", deliveryId: "", beneficiaryId: "platform", beneficiaryType: "PLATFORM", amountMinor: 100, currency: "PHP", status: "PENDING", createdAt: payment.createdAt, updatedAt: payment.updatedAt },
     ];
-    const operation = createPaymentReceiptOperation(payment, allocations, { cashCollectorId: "driver_1" });
+    const cashCollection: CashCollection = {
+      id: "cash_collection_ride_1", paymentId: payment.id, orderId: "", tripId: "trip_1",
+      deliveryId: "", collectorId: "driver_1", payerId: payment.payerId, amountMinor: 500,
+      currency: "PHP", status: "COLLECTED", collectedAt: payment.updatedAt,
+      createdAt: payment.createdAt, notes: "",
+    };
+    const operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
     expect(operation.postings[0]).toMatchObject({ accountId: "cash_collection_clearing", partyType: "CASH", deltaMinor: -500 });
     expect(operation.postings[1]).toMatchObject({ accountId: "wallet_driver_driver_1", bucket: "PENDING", deltaMinor: 400 });
     expect(operation.postings[2]).toMatchObject({ accountId: "cash_owed_driver_1", bucket: "CASH_OWED", partyType: "CASH", partyId: "driver_1", deltaMinor: 100 });
     expect(() => validateFinancialOperation(operation)).not.toThrow();
-    expect(() => createPaymentReceiptOperation(payment, allocations)).toThrow(/collector ID/i);
+    expect(() => createPaymentReceiptOperation(payment, allocations)).toThrow(/confirmed cash collection/i);
 
     const remittance = createCashRemittanceOperation({
       cashCollectionId: "cash_collection_1",
@@ -139,11 +145,11 @@ describe("financial ledger invariants", () => {
     const allocation: PaymentAllocation = {
       id: "allocation_bad", paymentId: payment.id, transactionType: "ORDER", orderId: "order_bad",
       tripId: "", deliveryId: "", beneficiaryId: "merchant_1", beneficiaryType: "MERCHANT",
-      amountMinor: 99, currency: "PHP", status: "PENDING",
+      amountMinor: 101, currency: "PHP", status: "PENDING",
       createdAt: payment.createdAt, updatedAt: payment.updatedAt,
     };
     expect(() => createPaymentReceiptOperation(payment, [allocation])).toThrow(/succeeded/i);
-    expect(() => createPaymentReceiptOperation({ ...payment, status: "SUCCEEDED" }, [allocation])).toThrow(/exactly equal/i);
+    expect(() => createPaymentReceiptOperation({ ...payment, status: "SUCCEEDED" }, [allocation])).toThrow(/cannot exceed/i);
   });
 
   it("rejects a cash remittance larger than the collector's recorded cash owed", async () => {
@@ -167,4 +173,28 @@ describe("financial ledger invariants", () => {
     } as unknown as Database;
     await expect(postFinancialOperation(database, remittance)).rejects.toThrow(/exceeds the collector cash-owed balance/i);
   });
+  it("keeps unallocated payment remainder in a clearing account", () => {
+    const payment: Payment = {
+      id: "payment_remainder", transactionType: "ORDER", orderId: "order_remainder", tripId: "",
+      deliveryId: "", payerId: "customer_1", method: "GCASH",
+      status: "SUCCEEDED", amountMinor: 1_000, currency: "PHP", refundedAmountMinor: 0,
+      createdAt: 1_798_000_000_000, updatedAt: 1_798_000_000_100,
+      completedAt: 1_798_000_000_100,
+    };
+    const allocation: PaymentAllocation = {
+      id: "allocation_remainder", paymentId: payment.id, transactionType: "ORDER",
+      orderId: "order_remainder", tripId: "", deliveryId: "", beneficiaryId: "merchant_1",
+      beneficiaryType: "MERCHANT", amountMinor: 900, currency: "PHP", status: "PENDING",
+      createdAt: payment.createdAt, updatedAt: payment.updatedAt,
+    };
+    const operation = createPaymentReceiptOperation(payment, [allocation]);
+    expect(operation.postings.at(-1)).toMatchObject({
+      accountId: "unallocated_payment_payment_remainder",
+      bucket: "CLEARING",
+      deltaMinor: 100,
+      partyType: "PLATFORM",
+    });
+    expect(operation.postings.reduce((sum, posting) => sum + posting.deltaMinor, 0)).toBe(0);
+  });
+
 });
