@@ -194,12 +194,13 @@ export const getMyEarningsAnalytics = onCall({ enforceAppCheck: true }, async (c
     throw new HttpsError("invalid-argument", "Choose WEEK or MONTH for the analytics period.");
   }
   const days = period === "WEEK" ? 7 : 30;
-  const today = new Date();
-  const end = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const manilaOffsetMs = 8 * 60 * 60 * 1000;
+  const manilaToday = new Date(Date.now() + manilaOffsetMs);
+  const end = Date.UTC(manilaToday.getUTCFullYear(), manilaToday.getUTCMonth(), manilaToday.getUTCDate()) - manilaOffsetMs;
   const start = end - (days - 1) * 24 * 60 * 60 * 1000;
   const buckets = new Map<string, EarningsAnalyticsDay>();
   for (let index = 0; index < days; index += 1) {
-    const date = new Date(start + index * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const date = new Date(start + index * 24 * 60 * 60 * 1000 + manilaOffsetMs).toISOString().slice(0, 10);
     buckets.set(date, { date, earnedMinor: 0, payoutMinor: 0 });
   }
   const [accounts, activity] = await Promise.all([
@@ -210,7 +211,7 @@ export const getMyEarningsAnalytics = onCall({ enforceAppCheck: true }, async (c
   const earningEvents = new Set(["MERCHANT_EARNING", "DRIVER_EARNING", "COURIER_EARNING"]);
   Object.values((activity.val() ?? {}) as Record<string, FinancialOperation>).forEach((operation) => {
     if (!Number.isFinite(operation.createdAt)) return;
-    const date = new Date(operation.createdAt).toISOString().slice(0, 10);
+    const date = new Date(operation.createdAt + manilaOffsetMs).toISOString().slice(0, 10);
     const bucket = buckets.get(date);
     if (!bucket || !Array.isArray(operation.postings)) return;
     operation.postings.forEach((posting) => {
@@ -228,8 +229,8 @@ export const getMyEarningsAnalytics = onCall({ enforceAppCheck: true }, async (c
   return {
     currency: "PHP",
     period,
-    startDate: new Date(start).toISOString().slice(0, 10),
-    endDate: new Date(end).toISOString().slice(0, 10),
+    startDate: new Date(start + manilaOffsetMs).toISOString().slice(0, 10),
+    endDate: new Date(end + manilaOffsetMs).toISOString().slice(0, 10),
     days: Array.from(buckets.values()),
     totals: Array.from(buckets.values()).reduce((totals, day) => ({
       earnedMinor: totals.earnedMinor + day.earnedMinor,
