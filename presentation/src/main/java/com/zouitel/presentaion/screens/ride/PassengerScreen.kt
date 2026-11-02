@@ -195,13 +195,15 @@ class PassengerScreen : Screen {
                 passengerName = name,
                 passengerPhone = phone,
                 targetDriver = driver,
-                paymentMethod = paymentMethod
+                paymentMethod = paymentMethod,
+                onSuccess = {
+                    destination = null
+                    destinationAddress = ""
+                    selectedDriver = null
+                    tappedDriverId = null
+                    scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
+                }
             )
-            destination = null
-            destinationAddress = ""
-            selectedDriver = null
-            tappedDriverId = null
-            scope.launch { snackbarHostState.showSnackbar("Trip requested. Looking for a driver…") }
         }
 
         fun submitDelivery() {
