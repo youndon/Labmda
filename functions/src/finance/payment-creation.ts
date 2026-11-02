@@ -1,12 +1,12 @@
 import { getDatabase, type DataSnapshot } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { randomUUID } from "node:crypto";
-import type { Payment, PaymentAllocation, PaymentBeneficiaryType, PaymentTransactionType } from "../models/payment.js";
+import type { Payment, PaymentAllocation, PaymentBeneficiaryType } from "../models/payment.js";
 
 type QuoteRecord = {
   quoteId: string; uid: string; kind: "FOOD" | "SHOP" | "DELIVERY" | "RIDE";
   currency: "PHP"; expiresAt: number; status: "QUOTED" | "CONSUMING" | "CONSUMED";
   paymentMethod?: string; sourceId?: string; breakdown: Record<string, unknown>;
+  paymentId?: string; transactionId?: string;
 };
 type TransactionRecord = Record<string, unknown> & { clientId?: string; passengerId?: string; sourceId?: string; deliveryId?: string; driverId?: string };
 
