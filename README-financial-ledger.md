@@ -138,3 +138,27 @@ The BDO workflow does not connect to BDO APIs or parse statement files automatic
 - `reconcileBdoSettlements`
 
 All callables require the authenticated admin custom claim and App Check. Statement records, expected settlements and reconciliation snapshots are server-written only. Manual reconciliation remains available while no approved BDO/Xendit automated settlement feed is configured.
+
+
+## Phase 11 — complete financial administration
+
+All monetary values remain integer PHP centavos. The following callable functions are administrator-only and enforce App Check:
+
+- `getAdminPaymentMonitor` returns a bounded newest-first payment sample, status, transaction references, charged amount and remaining refundable amount. It does not return provider credentials or payout account numbers.
+- `getAdminFinancialBalances` returns itemized available, pending, cash-owed and clearing balances for merchant, driver, courier, platform and other ledger accounts.
+- `getAdminFinancialOverview` remains the compact dashboard summary; use the itemized balance and payment-monitor callables for drill-down screens.
+- `getAdminPricingConfig` and `updateAdminPricingConfig` manage ride, delivery, food/shop commission and GCash provider-fee configuration. Updates are version-checked and stored in configuration history.
+- `createAdminRefundCase`, `reviewAdminRefundCase`, `getAdminRefundCases` and `completeAdminRefundCase` provide the refund review queue. A refund is completed only after an administrator has actually executed and verified the refund in the provider/bank channel and supplies its transfer reference. Completion atomically updates the payment's refunded amount/status and posts an idempotent proportional reversal of the original payment journal. The reversal uses largest-remainder centavo allocation so partial refunds remain balanced.
+- `runAdminFinancialReconciliation` rebuilds account projections from immutable journal entries, saves a durable report and lists account/bucket discrepancies.
+- `resolveAdminFinancialDiscrepancy` posts a balanced two-sided adjustment between specified ledger accounts/buckets. It requires a unique reference ID and an explanatory note; it never edits or deletes historical journal entries.
+- `getAdminAuditTrail` returns the latest 200 administrative audit events.
+
+Pricing changes, payout approval/rejection/paid confirmation, cash remittance/reconciliation, BDO settlement/reconciliation, refund decisions/completions, discrepancy adjustments and financial reconciliation runs write append-only records to `adminAuditLogs`. The audit trail stores actor UID, action, target, timestamp, and relevant before/after details. Financial admin records and audit logs must remain server-only in the complete deployed RTDB ruleset.
+
+### Refund and provider boundary
+
+Labmda currently has no production Xendit refund API integration. The refund workflow is therefore a controlled manual-provider workflow: verify the actual refund in the provider/bank dashboard first, then record its reference in Labmda. The ledger reversal is idempotent and records the liability reversal against the original payment allocations. It does not initiate the external refund. Do not expose the development-only simulated GCash checkout/refund callables as production payment processing.
+
+### Reconciliation boundary
+
+The ledger reconciliation compares immutable journal entries with cached account-balance projections. Cash and BDO statement reconciliation remain separate reports because they also need physical collection/remittance or bank-statement evidence. A balanced ledger projection alone does not prove that the external provider or bank settled funds. Resolve every reported discrepancy with source evidence and a documented balanced adjustment; never directly edit finance account balances.
