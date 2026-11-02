@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { recordAdminFinancialAudit } from "./admin-financial.js";
 import { createFinancialTransfer, postFinancialOperation } from "./ledger.js";
 
 const db = () => getDatabase();
@@ -45,6 +46,7 @@ export const createExpectedBdoSettlement = onCall({ enforceAppCheck: true }, asy
   if (!saved || saved.transferReference !== transferReference || saved.amountMinor !== amountMinor || saved.source !== source) {
     throw new HttpsError("already-exists", "Settlement ID is already registered with different details.");
   }
+  if (result.committed) await recordAdminFinancialAudit({ uid, action: "BDO_EXPECTED_SETTLEMENT_CREATED", targetType: "BDO_SETTLEMENT", targetId: id, after: saved });
   return { settlementId: id, status: saved.status, duplicate: !result.committed };
 });
 
@@ -109,6 +111,7 @@ export const recordBdoBankTransfer = onCall({ enforceAppCheck: true }, async (ca
       : { accountId: `bdo_external_outbound_${id}`, bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "bdo_external" },
   });
   const ledger = await postFinancialOperation(db(), movement);
+  if (result.committed) await recordAdminFinancialAudit({ uid, action: "BDO_BANK_TRANSFER_RECORDED", targetType: "BDO_TRANSFER", targetId: id, after: saved });
   return { transferId: id, status: saved.status, matchedType: saved.matchedType, matchedId: saved.matchedId, ledgerOperationId: ledger.operationId, duplicate: !result.committed };
 });
 
@@ -155,5 +158,6 @@ export const reconcileBdoSettlements = onCall({ enforceAppCheck: true }, async (
     unreconciledPayouts: unreconciled.map((item) => ({ payoutId: item.payoutId, amountMinor: item.amountMinor, transferReference: item.transferReference ?? null })),
   };
   await db().ref(`bdoReconciliations/${report.id}`).set(report);
+  await recordAdminFinancialAudit({ uid, action: "BDO_RECONCILIATION_RUN", targetType: "BDO_RECONCILIATION", targetId: report.id, after: report });
   return report;
 });

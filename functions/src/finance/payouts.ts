@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolvePayoutTransferReference, PayoutTransferReferenceError } from "./payout-transfer-reference.js";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { recordAdminFinancialAudit } from "./admin-financial.js";
 import {
   createFinancialTransfer,
   postFinancialOperation,
@@ -337,6 +338,7 @@ export const approvePayoutRequest = onCall({ enforceAppCheck: true }, async (cal
   requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const payoutId = String((call.data as { payoutId?: unknown }).payoutId ?? "");
   const payout = await updatePayoutStatus(payoutId, ["REQUESTED"], "APPROVED", { approvedAt: Date.now(), approvedBy: call.auth!.uid });
+  await recordAdminFinancialAudit({ uid: call.auth!.uid, action: "PAYOUT_APPROVED", targetType: "PAYOUT", targetId: payoutId, after: payout });
   return { payoutId, status: payout.status };
 });
 
@@ -356,10 +358,11 @@ export const rejectPayoutRequest = onCall({ enforceAppCheck: true }, async (call
     payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
     providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Number(payout.createdAt),
   }));
-  await updatePayoutStatus(payoutId, ["REJECTING"], "REJECTED", {
+  const rejected = await updatePayoutStatus(payoutId, ["REJECTING"], "REJECTED", {
     rejectedAt: Date.now(), rejectedBy: call.auth!.uid,
     adminNote: String((call.data as { note?: unknown }).note ?? "").slice(0, 500),
   });
+  await recordAdminFinancialAudit({ uid: call.auth!.uid, action: "PAYOUT_REJECTED", targetType: "PAYOUT", targetId: payoutId, before: payout, after: rejected });
   return { payoutId, status: "REJECTED" };
 });
 
@@ -395,9 +398,10 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
     payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
     providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Number(payout.createdAt),
   }));
-  await updatePayoutStatus(payoutId, ["PAYING"], "PAID", {
+  const paid = await updatePayoutStatus(payoutId, ["PAYING"], "PAID", {
     paidAt: Date.now(), paidBy: call.auth!.uid, transferReference: confirmedReference,
     adminNote: String(data.note ?? "").slice(0, 500),
   });
+  await recordAdminFinancialAudit({ uid: call.auth!.uid, action: "PAYOUT_MARKED_PAID", targetType: "PAYOUT", targetId: payoutId, before: payout, after: paid, note: confirmedReference });
   return { payoutId, status: "PAID", transferReference };
 });

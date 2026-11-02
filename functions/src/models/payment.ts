@@ -37,6 +37,8 @@ export interface Payment {
   amountMinor: number;
   currency: "PHP";
   refundedAmountMinor: number;
+  /** Amount reserved by pending/approved admin refund cases, in PHP centavos. */
+  refundReservedAmountMinor?: number;
   createdAt: number;
   updatedAt: number;
   completedAt: number | null;
