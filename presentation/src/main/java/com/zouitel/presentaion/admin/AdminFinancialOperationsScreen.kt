@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -150,7 +151,7 @@ class AdminFinancialOperationsScreenModel : ScreenModel {
 
     fun confirmBdoGcashPayment(paymentId: String, transferReference: String, amountPesos: String) = action {
         functions.httpsCallable("confirmBdoGcashPayment").invoke(
-            mapOf("paymentId" to paymentId, "transferReference" to transferReference, "amountMinor" to pesosToMinor(amountPesos))
+            mapOf("paymentId" to paymentId, "transferReference" to transferReference, "amountMinor" to pesosToMinor(amountPesos), "verifiedMethod" to "GCASH")
         )
         "BDO GCash payment verified and recorded."
     }
@@ -254,6 +255,7 @@ class AdminFinancialOperationsScreen : Screen {
         var bdoConfirmTarget by remember { mutableStateOf<AdminPaymentRow?>(null) }
         var bdoReference by remember { mutableStateOf("") }
         var bdoAmount by remember { mutableStateOf("") }
+        var bdoMethodVerified by remember { mutableStateOf(false) }
 
         Scaffold(topBar = {
             TopAppBar(
