@@ -138,7 +138,7 @@ class ProviderEarningsScreenModel : ScreenModel {
         }
     }
 
-    fun requestPayout(amountText: String) {
+    fun requestPayout(amountText: String, accountId: String) {
         val amountMinor = parsePesosToMinor(amountText)
         if (amountMinor == null || amountMinor < 10_000L) {
             _message.value = "Enter at least ₱100.00."
@@ -149,7 +149,7 @@ class ProviderEarningsScreenModel : ScreenModel {
             _isSubmitting.value = true
             _message.value = null
             runCatching {
-                functions.httpsCallable("requestMyPayout").invoke(mapOf("amountMinor" to amountMinor))
+                functions.httpsCallable("requestMyPayout").invoke(mapOf("amountMinor" to amountMinor, "accountId" to accountId))
                 _message.value = "Payout request submitted for admin review."
                 refresh()
             }.onFailure { error ->
