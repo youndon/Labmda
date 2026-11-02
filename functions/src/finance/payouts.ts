@@ -177,9 +177,9 @@ export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
     totals: balances.reduce((sum, item) => ({
       availableMinor: sum.availableMinor + item.availableMinor,
       pendingMinor: sum.pendingMinor + item.pendingMinor,
+      cashOwedMinor: sum.cashOwedMinor,
       clearingMinor: sum.clearingMinor + item.clearingMinor,
-    }), { availableMinor: 0, pendingMinor: 0, clearingMinor: 0 }),
-    cashOwedMinor,
+    }), { availableMinor: 0, pendingMinor: 0, cashOwedMinor, clearingMinor: 0 }),
     accounts: balances, transactions: history,
   };
 });
