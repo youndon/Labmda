@@ -88,14 +88,13 @@ export const updateAdminPricingConfig = onCall({ enforceAppCheck: true }, async 
   if (!call.auth?.uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
   requireAdmin(call.auth.token as Record<string, unknown>);
   const ref = getDatabase().ref("pricing/config");
-  let saved: PricingConfig | null = null;
   const result = await ref.transaction((current) => {
     const previousVersion = Number.isSafeInteger(current?.version) && current.version > 0 ? current.version : 0;
-    if (previousVersion >= 2_000_000_000) throw new Error("Pricing configuration version limit reached.");
-    saved = validateConfig(call.data?.config, previousVersion + 1);
-    return saved;
+    if (previousVersion >= 2_000_000_000) throw new HttpsError("out-of-range", "Pricing configuration version limit reached.");
+    return validateConfig(call.data?.config, previousVersion + 1);
   }, undefined, false);
-  if (!result.committed || !saved) throw new HttpsError("aborted", "Pricing configuration was not saved. Please retry.");
+  if (!result.committed) throw new HttpsError("aborted", "Pricing configuration was not saved. Please retry.");
+  const saved = result.snapshot.val() as PricingConfig;
   await getDatabase().ref(`pricing/configHistory/${saved.version}`).set({
     ...saved,
     updatedAt: Date.now(),
