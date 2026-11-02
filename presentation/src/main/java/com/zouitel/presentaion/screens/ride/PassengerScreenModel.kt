@@ -150,7 +150,8 @@ class PassengerScreenModel : ScreenModel {
         passengerName: String,
         passengerPhone: String,
         targetDriver: UserProfile? = null,
-        paymentMethod: String = "CASH"
+        paymentMethod: String = "CASH",
+        onSuccess: (String) -> Unit = {}
     ) {
         if (currentUser?.uid == null) return
         screenModelScope.launch {
@@ -175,7 +176,7 @@ class PassengerScreenModel : ScreenModel {
                 )
                 created["tripId"] as? String
                     ?: error("The server did not return the new trip ID.")
-            }.onFailure { error ->
+            }.onSuccess(onSuccess).onFailure { error ->
                 _requestError.value = error.message ?: "Could not request this ride."
             }
         }
