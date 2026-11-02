@@ -34,11 +34,14 @@ export const createExpectedBdoSettlement = onCall({ enforceAppCheck: true }, asy
   const source = data.source === undefined ? "XENDIT" : data.source;
   if (source !== "XENDIT" && source !== "MANUAL") throw new HttpsError("invalid-argument", "Source must be XENDIT or MANUAL.");
   const record: Expected = { id, transferReference, amountMinor, source, status: "EXPECTED", createdAt: Date.now(), createdBy: uid };
-  const result = await db().ref(`expectedBdoSettlements/${id}`).transaction((prior) => {
-    if (prior) return prior.transferReference === transferReference && prior.amountMinor === amountMinor && prior.source === source ? prior : undefined;
-    return record;
+  const result = await db().ref("expectedBdoSettlements").transaction((raw: Record<string, Expected> | null) => {
+    const current = raw ?? {};
+    const prior = current[id];
+    if (prior) return prior.transferReference === transferReference && prior.amountMinor === amountMinor && prior.source === source ? current : undefined;
+    if (Object.values(current).some((item) => item.transferReference === transferReference)) return;
+    return { ...current, [id]: record };
   }, undefined, false);
-  const saved = result.snapshot.val() as Expected | null;
+  const saved = result.snapshot.child(id).val() as Expected | null;
   if (!saved || saved.transferReference !== transferReference || saved.amountMinor !== amountMinor || saved.source !== source) {
     throw new HttpsError("already-exists", "Settlement ID is already registered with different details.");
   }
