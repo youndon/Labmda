@@ -44,7 +44,7 @@ describe("commitCashCollection", () => {
   });
 
   it("treats an identical retry as a no-op", async () => {
-    const fake = fakeDatabase({ payments: { payment_1: payment } });
+    const fake = fakeDatabase({ payments: { payment_1: payment }, orders: { order_1: order } });
     await commitCashCollection(fake.database, payment, collection);
     const retry = await commitCashCollection(fake.database, payment, collection);
     expect(retry.duplicate).toBe(true);
