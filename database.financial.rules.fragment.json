@@ -153,6 +153,14 @@
     "financialAdjustmentRequests": {
       ".read": false,
       ".write": false
+    },
+    "paymentByOrder": {
+      ".read": false,
+      ".write": false
+    },
+    "paymentByTrip": {
+      ".read": false,
+      ".write": false
     }
   }
 }
