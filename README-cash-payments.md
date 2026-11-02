@@ -17,13 +17,13 @@ A cash payment must have a server-created `payments/{paymentId}` record and comp
 
 Exports from `functions/src/finance/cash-operations.ts`:
 
-- `confirmCashCollection({ paymentId, notes? })`: only the assigned courier/driver can attest collection. The amount is loaded from the payment record. The function persists `cashCollections/{paymentId}`, transitions the payment from `PENDING` to `SUCCEEDED`, and posts the payment receipt idempotently.
+- `confirmCashCollection({ paymentId, notes? })`: only the assigned courier/driver can attest collection. The amount is loaded from the payment record. `payments/{paymentId}` and `cashCollections/{paymentId}` are committed together in one RTDB transaction; the collector assignment is checked again inside that transaction. The payment receipt is then posted through the idempotent financial journal.
 - `confirmMerchantCashSettlement({ paymentId })`: the merchant beneficiary confirms that it physically received its allocated cash. The journal transfers the merchant amount from the collector's merchant-specific `CASH_OWED` account into the merchant's available wallet.
 - `confirmCashRemittance({ remittanceId, collectorId, amountMinor })`: an administrator confirms that the platform commission was physically remitted. The ledger rejects amounts larger than the collector's platform cash-owed balance.
 - `getMyCashOutstanding()`: a signed-in collector can read their platform and merchant cash obligations. It does not expose other collectors' balances.
 - `reconcileCashPayments()`: administrator-only ledger reconciliation; persists an audit snapshot under `cashReconciliations/{id}`.
 
-## Cash accounting
+## Provider-independent payment state machine\n\n`functions/src/finance/payment-state.ts` defines normalized transitions for pending, processing, succeeded, failed, cancelled and expired payments, plus refund states. Provider-specific callbacks must be verified and normalized before using this state machine. Same-state retries are no-ops; failed, cancelled and expired payments cannot be reopened. Cash collection uses the direct `PENDING -> SUCCEEDED` transition.\n\n## Cash accounting
 
 At collection, the receipt operation balances the full customer payment against its allocations:
 

@@ -4,7 +4,7 @@ export const PAYMENT_METHODS = ["GCASH", "CASH"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const PAYMENT_STATUSES = [
-  "PENDING", "PROCESSING", "SUCCEEDED", "FAILED", "CANCELLED",
+  "PENDING", "PROCESSING", "SUCCEEDED", "FAILED", "CANCELLED", "EXPIRED",
   "PARTIALLY_REFUNDED", "REFUNDED",
 ] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
