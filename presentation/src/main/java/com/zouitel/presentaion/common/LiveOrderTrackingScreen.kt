@@ -239,7 +239,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     }
 
                     // Allow Client Cancellation if Order is still in PLACED state
-                    if (currentOrder.status == OrderStatus.PLACED) {
+                    if (currentOrder.status == OrderStatus.PLACED || currentOrder.status == OrderStatus.PENDING_PAYMENT) {
                         item {
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
