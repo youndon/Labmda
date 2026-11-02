@@ -159,6 +159,7 @@ class ShopActivitiesScreen : Screen {
     @Composable
     private fun StatusChip(status: OrderStatus) {
         val (color, text) = when (status) {
+            OrderStatus.PENDING_PAYMENT -> MaterialTheme.colorScheme.tertiary to "PAYMENT PENDING"
             OrderStatus.PLACED -> MaterialTheme.colorScheme.tertiary to "ORDER PLACED"
             OrderStatus.ACCEPTED -> MaterialTheme.colorScheme.secondary to "CONFIRMED BY STORE"
             OrderStatus.PREPARING -> MaterialTheme.colorScheme.primary to "IN PACKAGING"
