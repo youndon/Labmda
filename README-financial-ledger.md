@@ -56,12 +56,13 @@ The `finance` root transaction is a correctness-first foundation and serializes 
 
 ## Financial Realtime Database security policy
 
-The repository includes `database.financial.rules.fragment.json` as a **financial-path rules fragment**, not as a complete application ruleset. It denies client writes to authoritative payment, allocation, settlement, wallet, legacy ledger, cash collection, payout, refund, journal, provider-event, handover, and reconciliation records. Read access is scoped to the payer, beneficiary, owner, requester, or cash collector represented by each record.
+The repository includes `database.financial.rules.fragment.json` and `database.order-ride.rules.fragment.json` as **rules fragments**, not as a complete application ruleset. Together they deny client writes to authoritative orders, trips, payments, allocations, settlements, wallets, cash collections, payouts, refunds, journal entries, provider events, and reconciliation records. Order/trip reads require participant-scoped queries; courier/driver dispatch queries require an approved online service profile. The driver map reads only the public `driverPresence` projection, not all user profiles.
 
 Important deployment constraint:
 
 - The current `firebase.json` configures Cloud Functions only; it does not deploy Realtime Database rules.
-- Do not rename this fragment to `database.rules.json`, attach it to `firebase.json`, or deploy it by itself. Realtime Database denies paths without an applicable grant, so doing so would also block the application's existing non-financial paths.
+- Do not rename either fragment to `database.rules.json`, attach them to `firebase.json`, or deploy them by themselves. Realtime Database denies paths without an applicable grant, so doing so would also block the application's existing non-financial paths.
+- When merging the order/ride fragment, remove any ancestor-level `.write` grant on `orders`, `trips`, or `users`; RTDB grants cascade and a broad parent write would override the protected child rules. Keep the user service status fields server-controlled.
 - Before deployment, merge these financial rules into the complete application ruleset, review all existing read/query patterns, add rules for the rest of the app's paths, and run Realtime Database Rules Emulator tests.
 - Firebase Admin SDK writes from trusted Cloud Functions bypass these client rules. That is the intended server-side write boundary; Cloud Functions must still authenticate and authorize every callable and verify provider evidence.
 - No client-visible rule grants access to the private `finance` journal. If the app needs wallet screens, expose a separately designed, user-scoped read model rather than opening the central journal.
