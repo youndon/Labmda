@@ -1,6 +1,6 @@
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { buildOrderPaymentAllocations, buildRidePaymentAllocations } from "../finance/payment-allocations.js";
+import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations } from "../finance/payment-allocations.js";
 import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js";
 
 const db = () => getDatabase();
@@ -37,7 +37,17 @@ async function ensureOrderAllocations(orderId: string, courierId: string): Promi
   const existing = await db().ref("paymentAllocations/" + paymentId).get();
   if (!existing.exists()) {
     const breakdown = order.paymentBreakdown as Record<string, number>;
-    const allocations = buildOrderPaymentAllocations({ paymentId, orderId, merchantOwnerId: readString(order.merchantOwnerId), courierId, breakdown: breakdown as any, providerFeePayer: order.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM", createdAt: Date.now() });
+    const allocations = order.orderType === "DELIVERY"
+      ? buildStandaloneDeliveryAllocations({
+          paymentId, orderId, courierId,
+          deliveryFeeMinor: breakdown.deliveryFeeMinor,
+          courierEarningsMinor: breakdown.courierEarningsMinor,
+          platformCommissionMinor: breakdown.platformCommissionMinor,
+          providerFeeMinor: breakdown.providerFeeMinor,
+          providerFeePayer: order.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM",
+          customerTotalMinor: breakdown.customerTotalMinor, createdAt: Date.now(),
+        })
+      : buildOrderPaymentAllocations({ paymentId, orderId, merchantOwnerId: readString(order.merchantOwnerId), courierId, breakdown: breakdown as any, providerFeePayer: order.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM", createdAt: Date.now() });
     const rows: Record<string, unknown> = {};
     for (const allocation of allocations) rows[allocation.id] = allocation;
     const updates: Record<string, unknown> = {};
