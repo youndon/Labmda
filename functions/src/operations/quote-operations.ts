@@ -46,7 +46,9 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
     const root = kind === "FOOD" ? "restaurants" : "shops";
     const source = await db().ref(`${root}/${sourceId}`).get();
     if (!source.exists()) throw new HttpsError("not-found", "The selected merchant no longer exists.");
-    const ownerUid = String(source.child("ownerUid").val() ?? source.child("managerId").val() ?? sourceId);
+    const ownerUid = String(source.child("ownerUid").val() ?? "").trim()
+      || String(source.child("managerId").val() ?? "").trim()
+      || sourceId;
     const request = quote.request ?? {};
     const items = Array.isArray(quote.items) ? quote.items : [];
     if (!items.length) throw new HttpsError("failed-precondition", "The quote contains no order items.");
