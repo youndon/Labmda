@@ -3,6 +3,7 @@ package com.zouitel.presentaion.payment
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.functions.functions
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -32,9 +33,20 @@ data class CashQuoteRequest(
 @Serializable
 data class CashQuoteResponse(
     val quoteId: String,
+    val uid: String = "",
+    val kind: String = "",
+    val pricingVersion: Int = 0,
     val currency: String = "PHP",
+    val request: JsonObject = JsonObject(emptyMap()),
+    val breakdown: JsonObject,
+    val sourceId: String? = null,
+    val items: JsonArray? = null,
+    val route: JsonObject? = null,
+    val paymentMethod: String? = null,
+    val rideType: String? = null,
+    val createdAt: Long = 0L,
     val expiresAt: Long,
-    val breakdown: JsonObject
+    val status: String = ""
 ) {
     fun amountMinor(field: String): Long =
         breakdown[field]?.jsonPrimitive?.longOrNull
