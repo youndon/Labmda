@@ -30,6 +30,8 @@ class PassengerScreenModel : ScreenModel {
     val passengerInfo: StateFlow<PassengerInfo> = _passengerInfo.asStateFlow()
 
     private val _isLoading = MutableStateFlow(true)
+    private val _requestError = MutableStateFlow<String?>(null)
+    val requestError: StateFlow<String?> = _requestError.asStateFlow()
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
@@ -149,37 +151,35 @@ class PassengerScreenModel : ScreenModel {
         fare: Double,
         passengerName: String,
         passengerPhone: String,
-        targetDriver: UserProfile? = null
+        targetDriver: UserProfile? = null,
+        paymentMethod: String = "CASH"
     ) {
-        val uid = currentUser?.uid ?: return
+        if (currentUser?.uid == null) return
         screenModelScope.launch {
-            val ref = db.child("trips").push()
-            val tripId = ref.key ?: System.currentTimeMillis().toString()
-
-//            val vehicleStr = targetDriver?.vehicleInfo?.let {
-//                "[${it.type?.name ?: requestedVehicleType.name}] ${it.color} ${it.make} ${it.model} (${it.licensePlate})"
-//            } ?: "[${requestedVehicleType.name}] Standard Request"
-
-            val trip = Trip(
-                id = tripId,
-                passengerId = uid,
-                passengerName = passengerName.ifBlank { "Passenger" },
-                passengerPhone = passengerPhone,
-                pickupLocation = pickupAddress,
-                dropoffLocation = dropoffAddress,
-                pickupLat = pickupLat,
-                pickupLng = pickupLng,
-                dropoffLat = dropoffLat,
-                dropoffLng = dropoffLng,
-                fare = fare,
-                driverId = targetDriver?.uid ?: "",
-                driverName = targetDriver?.fullName ?: "",
-                driverPhone = targetDriver?.phoneNumber ?: "",
-//                vehicleDetails = vehicleStr,
-                status = if (targetDriver != null) "ACCEPTED" else "REQUESTED",
-                createdAtTimestamp = System.currentTimeMillis()
-            )
-            ref.setValue(trip)
+            runCatching {
+                val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
+                val quote = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "quoteRide",
+                    mapOf(
+                        "pickup" to mapOf("latitude" to pickupLat, "longitude" to pickupLng),
+                        "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
+                        "pickupAddress" to pickupAddress,
+                        "dropoffAddress" to dropoffAddress,
+                        "paymentMethod" to method,
+                        "rideType" to "STANDARD"
+                    )
+                )
+                val quoteId = quote["quoteId"] as? String
+                    ?: error("The server did not return a ride fare quote.")
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createRideFromQuote",
+                    mapOf("quoteId" to quoteId)
+                )
+                created["tripId"] as? String
+                    ?: error("The server did not return the new trip ID.")
+            }.onFailure { error ->
+                _requestError.value = error.message ?: "Could not request this ride."
+            }
         }
     }
 
