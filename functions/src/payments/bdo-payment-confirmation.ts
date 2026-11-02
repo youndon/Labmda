@@ -41,8 +41,11 @@ export async function confirmBdoGcashPaymentRecord(
     const referenceIndex = root.bdoPaymentReferenceIndex ?? {};
     const prior = confirmations[paymentId];
     if (prior) {
-      if (prior.transferReference !== transferReference || prior.amountMinor !== amountMinor
-        || prior.currency !== "PHP" || prior.status !== "VERIFIED") return;
+      const alreadyConfirmed = prior.transferReference === transferReference
+        && prior.amountMinor === amountMinor && prior.currency === "PHP"
+        && prior.status === "VERIFIED" && payment.providerReference === transferReference
+        && ["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status);
+      if (!alreadyConfirmed || referenceIndex[transferReference] !== paymentId) return;
       return;
     }
 
