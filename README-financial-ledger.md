@@ -30,6 +30,12 @@
 - `CASH_COLLECTION`: move cash from the collector's cash-in-hand obligation to the platform clearing/revenue destination.
 - `PAYOUT` and `REFUND`: record actual settlement/refund movements, not merely requested states.
 
+## Payment receipt adapter
+
+`functions/src/finance/payment-ledger.ts` converts a succeeded, server-loaded `Payment` and its persisted `PaymentAllocation` records into one balanced receipt operation. It verifies transaction references, currency, allocation IDs and statuses, and requires allocations to sum exactly to the payment amount. Pending allocations credit pending balances; ready allocations credit available balances. Cash and non-cash collections use separate generic clearing accounts. The adapter does not call a bank, payment gateway, webhook, or payout service.
+
+The caller must load payment and allocation records from Realtime Database inside a trusted Cloud Function, verify the authoritative success or cash-collection state, then pass those records to this adapter and `postFinancialOperation`. Client-supplied payment or allocation amounts must never be trusted.
+
 ## Integration boundary
 
 This module provides the validated journal, atomic balance projection, idempotency, and reconciliation primitives. It deliberately does not invent order/trip field names or trust client-supplied financial amounts. Payment webhooks, order/trip completion handlers, cash handover confirmation, payout execution, and admin authorization must call this module from trusted Cloud Functions after loading authoritative server-side records.
