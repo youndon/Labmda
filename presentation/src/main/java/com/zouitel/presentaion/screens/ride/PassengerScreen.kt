@@ -60,7 +60,7 @@ private const val BASE_FARE = 2.0
 private const val PER_KM_FARE = 1.2
 private const val MIN_FARE = 4.0
 
-private val ACTIVE_STATUSES = setOf("REQUESTED", "ACCEPTED", "IN_PROGRESS")
+private val ACTIVE_STATUSES = setOf("PENDING_PAYMENT", "REQUESTED", "ACCEPTED", "IN_PROGRESS")
 
 class PassengerScreen : Screen {
 
@@ -881,7 +881,7 @@ class PassengerScreen : Screen {
                     }
                 }
 
-                if (trip.status == "REQUESTED" || trip.status == "ACCEPTED") {
+                if (trip.status == "PENDING_PAYMENT" || trip.status == "REQUESTED" || trip.status == "ACCEPTED") {
                     Spacer(Modifier.height(4.dp))
                     OutlinedButton(
                         onClick = onCancel,
