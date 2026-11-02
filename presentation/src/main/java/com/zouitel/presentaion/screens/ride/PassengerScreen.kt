@@ -77,10 +77,12 @@ class PassengerScreen : Screen {
         val onlineDrivers by screenModel.onlineDrivers.collectAsState()
         val passengerInfo by screenModel.passengerInfo.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val requestError by screenModel.requestError.collectAsState()
 
         val cameraPositionState = rememberCameraPositionState()
         val snackbarHostState = remember { SnackbarHostState() }
         val routeColor = MaterialTheme.colorScheme.primary
+        LaunchedEffect(requestError) { requestError?.let { snackbarHostState.showSnackbar(it) } }
 
         var pickup by remember { mutableStateOf<LatLng?>(null) }
         var destination by remember { mutableStateOf<LatLng?>(null) }
