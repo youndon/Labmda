@@ -165,6 +165,10 @@
     "bdoCheckoutLinkIndex": {
       ".read": false,
       ".write": false
+    },
+    "paymentConfig": {
+      ".read": false,
+      ".write": false
     }
   }
 }
