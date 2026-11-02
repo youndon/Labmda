@@ -165,3 +165,8 @@ export {
   getMyCashOutstanding,
   reconcileCashPayments,
 } from "./finance/cash-operations.js";
+
+// Phase 05 — development-only simulated GCash checkout, webhook and refund lifecycle.
+export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payments/payment-sessions.js";
+export { createSimulatedGcashRefund } from "./payments/refunds.js";
+export { expireSimulatedGcashSessions } from "./payments/expiration.js";
