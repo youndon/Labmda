@@ -70,7 +70,6 @@ async function bindCashCollector(payment: Payment, collectorId: string): Promise
   if (!allocationSnapshot.exists()) throw new HttpsError("failed-precondition", "Payment allocations are missing.");
   const allocations = allocationSnapshot.val() as Record<string, PaymentAllocation>;
   const updates: Record<string, unknown> = {};
-  let collectorAllocationFound = false;
   for (const [allocationId, item] of Object.entries(allocations)) {
     if (!item || item.paymentId !== bound.id) throw new HttpsError("failed-precondition", "A payment allocation is invalid.");
     const expectedType = bound.transactionType === "ORDER" ? "DELIVERY"
@@ -81,10 +80,8 @@ async function bindCashCollector(payment: Payment, collectorId: string): Promise
       }
       updates[`paymentAllocations/${bound.id}/${allocationId}/beneficiaryId`] = collectorId;
       updates[`paymentAllocations/${bound.id}/${allocationId}/deliveryId`] = bound.deliveryId;
-      collectorAllocationFound = true;
     }
   }
-  if (!collectorAllocationFound) throw new HttpsError("failed-precondition", "No earning allocation exists for the assigned collector.");
   await database.ref().update(updates);
   return bound;
 }
