@@ -14,14 +14,14 @@ describe("PHP pricing engine", () => {
     expect(decimalPesosToMinor("123.45", "price")).toBe(12345);
     expect(decimalPesosToMinor(12.5, "price")).toBe(1250);
   });
-  it("calculates delivery with per-kilometre rounding up", () => {
+  it("calculates delivery proportionally to the travelled distance", () => {
     expect(calculateDeliveryFee(config.delivery, { distanceMeters: 1100, durationSeconds: 600 })).toEqual({
-      feeMinor: 5000, platformCommissionMinor: 500, courierEarningsMinor: 4500,
+      feeMinor: 4100, platformCommissionMinor: 410, courierEarningsMinor: 3690,
     });
   });
   it("calculates ride fare and driver earnings", () => {
     expect(calculateRideFare(config.ride, { distanceMeters: 2100, durationSeconds: 601 })).toEqual({
-      fareMinor: 10800, platformCommissionMinor: 1620, driverEarningsMinor: 9180,
+      fareMinor: 9720, platformCommissionMinor: 1458, driverEarningsMinor: 8262,
     });
   });
   it("separates merchant-funded discount, platform commission and courier earnings", () => {
