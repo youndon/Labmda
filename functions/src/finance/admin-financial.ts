@@ -11,7 +11,7 @@ type PaymentRecord = {
   id: string; payerId: string; status: string; method: string; transactionType: string;
   orderId?: string; tripId?: string; amountMinor: number; refundedAmountMinor?: number; refundReservedAmountMinor?: number;
   currency: string; createdAt: number; updatedAt?: number; completedAt?: number | null;
-  provider?: string; checkoutUrl?: string; providerReference?: string;
+  provider?: string; checkoutUrl?: string; providerReference?: string; refundProcessingId?: string | null;
 };
 type RefundCase = {
   id: string; paymentId: string; payerId: string; amountMinor: number; currency: "PHP";
