@@ -10,11 +10,11 @@ describe("financial ledger invariants", () => {
     eventType: "CUSTOMER_PAYMENT" as const,
     referenceType: "PAYMENT" as const,
     referenceId: "payment_123",
-    idempotencyKey: "xendit:payment_123:succeeded",
+    idempotencyKey: "provider:payment_123:succeeded",
     createdAt: 1_798_000_000_000,
-    description: "Customer GCash payment received",
+    description: "Customer online payment received",
     amountMinor: 12_345,
-    source: { accountId: "clearing_xendit", bucket: "CLEARING" as const, deltaMinor: 0, partyType: "XENDIT" as const, partyId: "xendit" },
+    source: { accountId: "clearing_payment_provider", bucket: "CLEARING" as const, deltaMinor: 0, partyType: "PAYMENT_PROVIDER" as const, partyId: "payment_provider" },
     destination: { accountId: "platform_receivable", bucket: "PENDING" as const, deltaMinor: 0, partyType: "PLATFORM" as const, partyId: "platform" },
   };
 
