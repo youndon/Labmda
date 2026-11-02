@@ -8,7 +8,21 @@ import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.functions.FirebaseFunctions
 import dev.gitlive.firebase.functions.functions
 import dev.gitlive.firebase.functions.httpsCallable
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
+
+@Serializable
+private data class CreateGcashSessionRequest(val quoteId: String)
+
+@Serializable
+private data class SimulateGcashResultRequest(val sessionId: String, val outcome: String)
+
+@Serializable
+private data class CreateSimulatedRefundRequest(
+    val sessionId: String,
+    val reason: String,
+    val amountMinor: Long? = null
+)
 
 @Serializable
 data class SimulatedGcashSessionResponse(
@@ -58,16 +72,16 @@ class FirebaseSimulatedPaymentCheckoutRepository(
 
     suspend fun createGcashSession(quoteId: String): PaymentCheckoutState {
         require(quoteId.isNotBlank()) { "Quote ID is required." }
-        var state = PaymentCheckoutReducer.reduce(
+        val creating = PaymentCheckoutReducer.reduce(
             PaymentCheckoutState(),
             PaymentCheckoutEvent.Start
         )
         return try {
             val result = functions.httpsCallable("createSimulatedGcashSession")(
-                mapOf("quoteId" to quoteId)
+                CreateGcashSessionRequest(quoteId)
             ).data<SimulatedGcashSessionResponse>()
-            state = PaymentCheckoutReducer.reduce(
-                state,
+            PaymentCheckoutReducer.reduce(
+                creating,
                 PaymentCheckoutEvent.SessionCreated(
                     sessionId = result.sessionId,
                     paymentId = result.paymentId,
@@ -76,10 +90,11 @@ class FirebaseSimulatedPaymentCheckoutRepository(
                     simulationOnly = result.simulationOnly
                 )
             )
-            state
-        } catch (error: Throwable) {
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
             PaymentCheckoutReducer.reduce(
-                state,
+                creating,
                 PaymentCheckoutEvent.Failed(error.message ?: "Could not create the simulated checkout.")
             )
         }
@@ -94,9 +109,9 @@ class FirebaseSimulatedPaymentCheckoutRepository(
         }
         return try {
             val result = functions.httpsCallable("simulateGcashPaymentResult")(
-                mapOf(
-                    "sessionId" to state.sessionId,
-                    "outcome" to if (success) "SUCCEEDED" else "FAILED"
+                SimulateGcashResultRequest(
+                    sessionId = state.sessionId,
+                    outcome = if (success) "SUCCEEDED" else "FAILED"
                 )
             ).data<SimulatedGcashResultResponse>()
             when (result.status) {
@@ -108,7 +123,9 @@ class FirebaseSimulatedPaymentCheckoutRepository(
                     PaymentCheckoutEvent.Failed("Unexpected simulated payment status: ${result.status}")
                 )
             }
-        } catch (error: Throwable) {
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
             PaymentCheckoutReducer.reduce(
                 state,
                 PaymentCheckoutEvent.Failed(error.message ?: "Could not complete the simulated checkout.")
@@ -125,12 +142,8 @@ class FirebaseSimulatedPaymentCheckoutRepository(
             "Only a simulated successful checkout can be refunded in development."
         }
         require(reason.isNotBlank()) { "A refund reason is required." }
-        val request = buildMap<String, Any> {
-            put("sessionId", state.sessionId)
-            put("reason", reason)
-            amountMinor?.let { put("amountMinor", it) }
-        }
-        return functions.httpsCallable("createSimulatedGcashRefund")(request)
-            .data<SimulatedGcashRefundResponse>()
+        return functions.httpsCallable("createSimulatedGcashRefund")(
+            CreateSimulatedRefundRequest(state.sessionId, reason, amountMinor)
+        ).data<SimulatedGcashRefundResponse>()
     }
 }
