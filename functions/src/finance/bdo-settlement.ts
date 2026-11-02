@@ -71,7 +71,7 @@ export const recordBdoBankTransfer = onCall({ enforceAppCheck: true }, async (ca
   if (!saved || saved.direction !== direction || saved.amountMinor !== amountMinor) {
     throw new HttpsError("already-exists", "Transfer reference was already recorded with different details.");
   }
-  if (!result.committed && saved.status === "UNMATCHED") {
+  if (saved.status === "UNMATCHED") {
     if (direction === "INBOUND") {
       const matches = await db().ref("expectedBdoSettlements").orderByChild("transferReference").equalTo(transferReference).get();
       const candidate = Object.values((matches.val() ?? {}) as Record<string, Expected>)[0];
