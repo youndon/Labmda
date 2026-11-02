@@ -123,7 +123,7 @@ Provider payouts remain manual until an approved transfer API is integrated. An 
 
 ### BDO settlement workflow
 
-1. When a Xendit/manual settlement is expected to reach the company's BDO account, an administrator calls `createExpectedBdoSettlement` with a stable settlement ID, transfer reference, amount in PHP centavos and source (`XENDIT` or `MANUAL`).
+1. When a BDO Checkout/manual settlement is expected to reach the company's BDO account, an administrator calls `createExpectedBdoSettlement` with a stable settlement ID, transfer reference, amount in PHP centavos and source (`BDO` or `MANUAL`).
 2. After the credit appears on the actual BDO statement, an administrator calls `recordBdoBankTransfer` with the exact reference, amount, direction `INBOUND`, and bank transaction timestamp.
 3. The function matches the statement line to the expected settlement only when both reference and amount match. An unmatched line remains visible for investigation; it is never silently forced to match.
 4. For an outbound provider payout, record the actual BDO debit as `OUTBOUND`. It matches only a payout already marked `PAID` with the same transfer reference and amount.
@@ -137,7 +137,7 @@ The BDO workflow does not connect to BDO APIs or parse statement files automatic
 - `recordBdoBankTransfer`
 - `reconcileBdoSettlements`
 
-All callables require the authenticated admin custom claim and App Check. Statement records, expected settlements and reconciliation snapshots are server-written only. Manual reconciliation remains available while no approved BDO/Xendit automated settlement feed is configured.
+All callables require the authenticated admin custom claim and App Check. Statement records, expected settlements and reconciliation snapshots are server-written only. Manual reconciliation remains available while no approved BDO/BDO automated settlement feed is configured.
 
 
 ## Phase 11 — complete financial administration
@@ -157,7 +157,7 @@ Pricing changes, payout approval/rejection/paid confirmation, cash remittance/re
 
 ### Refund and provider boundary
 
-Labmda currently has no production Xendit refund API integration. The refund workflow is therefore a controlled manual-provider workflow: verify the actual refund in the provider/bank dashboard first, then record its reference in Labmda. The ledger reversal is idempotent and records the liability reversal against the original payment allocations. It does not initiate the external refund. Do not expose the development-only simulated GCash checkout/refund callables as production payment processing.
+Labmda currently has no production BDO Checkout refund API integration. The refund workflow is therefore a controlled manual-provider workflow: verify the actual refund in the provider/bank dashboard first, then record its reference in Labmda. The ledger reversal is idempotent and records the liability reversal against the original payment allocations. It does not initiate the external refund. Do not expose the development-only simulated GCash checkout/refund callables as production payment processing.
 
 ### Reconciliation boundary
 
