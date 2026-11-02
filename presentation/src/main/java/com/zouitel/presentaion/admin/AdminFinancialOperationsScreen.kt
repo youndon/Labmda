@@ -89,6 +89,9 @@ data class AdminRefundCaseRow(
 data class AdminRefundCasesResponse(val cases: List<AdminRefundCaseRow> = emptyList())
 
 @Serializable
+data class AdminReconciliationResult(val balanced: Boolean = false)
+
+@Serializable
 data class AdminAuditRow(
     val id: String = "", val actorUid: String = "", val action: String = "",
     val targetType: String = "", val targetId: String = "", val note: String = "", val createdAt: Long = 0
@@ -160,8 +163,8 @@ class AdminFinancialOperationsScreenModel : ScreenModel {
     }
 
     fun reconcile() = action {
-        val result = functions.httpsCallable("runAdminFinancialReconciliation").invoke().data<Map<String, Any?>>()
-        val balanced = result["balanced"] as? Boolean ?: false
+        val result = functions.httpsCallable("runAdminFinancialReconciliation").invoke().data<AdminReconciliationResult>()
+        val balanced = result.balanced
         _reconciliation.value = if (balanced) "Ledger reconciliation is balanced." else "Discrepancies found. Review the report before making adjustments."
         "Financial reconciliation saved."
     }
