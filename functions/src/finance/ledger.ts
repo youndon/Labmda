@@ -146,6 +146,9 @@ export async function postFinancialOperation(
       const updated = previous[field] + posting.deltaMinor;
       if (!Number.isSafeInteger(updated)) throw new Error("Account balance exceeds the safe integer range.");
       if (posting.bucket === "CASH_OWED" && updated < 0) throw new Error("Cash remittance exceeds the collector cash-owed balance.");
+      if (operation.eventType === "PAYOUT" && posting.bucket === "AVAILABLE" && updated < 0) {
+        throw new Error("Payout exceeds the provider available balance.");
+      }
       nextAccounts[posting.accountId] = { ...previous, [field]: updated, updatedAt: operation.createdAt };
     });
 
