@@ -44,10 +44,26 @@ export async function commitCashCollection(
 
     // Re-check the assignment inside the transaction so a reassignment racing
     // the collector request cannot authorize the previous driver/courier.
+    const order = current.transactionType === "ORDER"
+      ? raw.orders?.[current.orderId] as Record<string, any> | undefined
+      : undefined;
+    const trip = current.transactionType === "RIDE"
+      ? raw.trips?.[current.tripId] as Record<string, any> | undefined
+      : undefined;
     const assigned = current.transactionType === "ORDER"
       ? current.deliveryId === collection.collectorId
-      : raw.trips?.[current.tripId]?.driverId === collection.collectorId;
+        && order?.deliveryId === collection.collectorId
+      : trip?.driverId === collection.collectorId;
     if (!assigned) return;
+
+    // Cash is collected at the physical handoff/completion point, not while
+    // an order is still being prepared or a ride is still in progress.
+    // Check this inside the same root transaction as the payment write so a
+    // stale client cannot confirm cash against an earlier service state.
+    const completed = current.transactionType === "ORDER"
+      ? order?.paymentId === expectedPayment.id && order.status === "DELIVERED"
+      : trip?.paymentId === expectedPayment.id && trip.status === "COMPLETED";
+    if (!completed) return;
 
     const prior = raw.cashCollections?.[expectedPayment.id] as CashCollection | undefined;
     if (prior && (!sameCollectionIdentity(prior, collection)
