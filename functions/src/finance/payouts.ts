@@ -46,7 +46,7 @@ async function ownsMerchant(uid: string): Promise<boolean> {
   return snapshots.some((snapshot) => {
     let owned = false;
     snapshot.forEach((child) => {
-      if (child.child("ownerUid").val() === uid) owned = true;
+      if (child.key === uid || child.child("ownerUid").val() === uid) owned = true;
     });
     return owned;
   });
