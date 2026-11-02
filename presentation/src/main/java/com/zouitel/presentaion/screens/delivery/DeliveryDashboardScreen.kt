@@ -309,7 +309,8 @@ class DeliveryDashboardScreen : Screen {
                                 onMarkDelivered = {
                                     screenModel.markCourierOrderDelivered(selectedOrder)
                                     selectedOrderId = null
-                                }
+                                },
+                                onConfirmCash = { screenModel.confirmCashReceived(selectedOrder) }
                             )
                         }
                     }
