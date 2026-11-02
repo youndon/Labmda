@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
 import { defineSecret } from "firebase-functions/params";
-import { assertPaymentMethodEnabled, assertPaymentServiceEnabled, getPaymentConfiguration, updateAdminPaymentConfiguration } from "./payments/payment-config.js";
+import { assertPaymentMethodEnabled, assertPaymentServiceEnabled } from "./payments/payment-config.js";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import {
   calculateDeliveryOnlyBreakdown, calculateOrderBreakdown, calculateRideFare, calculateProviderFee,
