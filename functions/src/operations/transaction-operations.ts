@@ -248,3 +248,26 @@ export const cancelPassengerTrip = onCall({ enforceAppCheck: true }, async (call
   if (!result.committed) fail("Only the passenger can cancel before the ride starts.");
   return { tripId, status: "CANCELLED" };
 });
+
+
+/** Customer may cancel only their own order before merchant preparation or paid fulfilment. */
+export const cancelCustomerOrder = onCall({ enforceAppCheck: true }, async (call) => {
+  const uid = requireUid(call.auth?.uid);
+  const orderId = requireId(call.data?.orderId, "Order ID");
+  const result = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const order = root.orders?.[orderId] as Record<string, any> | undefined;
+    if (!order || order.clientId !== uid
+      || !["PENDING_PAYMENT", "PLACED"].includes(readString(order.status))) return;
+    const paymentId = readString(order.paymentId);
+    const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
+    if (payment && payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
+    const now = Date.now();
+    const nextOrder = { ...order, status: "CANCELLED", paymentStatus: payment ? "CANCELLED" : order.paymentStatus, updatedAtTimestamp: now, cancelledAt: now };
+    const nextRoot: Record<string, any> = { ...root, orders: { ...root.orders, [orderId]: nextOrder } };
+    if (payment) nextRoot.payments = { ...root.payments, [paymentId]: { ...payment, status: "CANCELLED", updatedAt: now, completedAt: now } };
+    return nextRoot;
+  }, undefined, false);
+  if (!result.committed) fail("Only the customer can cancel an unpaid order before preparation.");
+  return { orderId, status: "CANCELLED" };
+});
