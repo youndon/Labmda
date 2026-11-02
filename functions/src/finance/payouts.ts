@@ -69,8 +69,8 @@ async function providerAccounts(uid: string): Promise<Array<{
   return accounts;
 }
 function amount(value: unknown): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 10_000) {
-    throw new HttpsError("invalid-argument", "The minimum payout request is PHP 100.00.");
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    throw new HttpsError("invalid-argument", "Payout amount must be a positive PHP-centavo integer.");
   }
   return value as number;
 }
