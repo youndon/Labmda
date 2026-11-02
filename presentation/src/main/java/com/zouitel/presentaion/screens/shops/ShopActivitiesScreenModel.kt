@@ -83,7 +83,8 @@ class ShopActivitiesScreenModel : ScreenModel {
                             totalPrice = totalPrice,
                             status = status,
                             createdAtTimestamp = createdAtTimestamp,
-                            paymentMethod = paymentMethod
+                            paymentMethod = paymentMethod,
+                            paymentStatus = runCatching { child.child("paymentStatus").value<String>() }.getOrDefault("")
                         )
                     } catch (e: Exception) {
                         null
