@@ -62,9 +62,8 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
     if (prior.paymentId !== paymentId || prior.collectorId !== uid || prior.amountMinor !== payment.amountMinor) {
       throw new HttpsError("already-exists", "A conflicting cash collection record already exists.");
     }
-    if (prior.status === "COLLECTED") {
-      const posted = await postPaymentReceiptFromDatabase(database, paymentId);
-      return { paymentId, status: "COLLECTED", ...posted };
+    if (prior.status !== "COLLECTED" && prior.status !== "PENDING") {
+      throw new HttpsError("failed-precondition", "Cash collection is not in a confirmable state.");
     }
   }
 
@@ -89,7 +88,7 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
   if (!updated || updated.status !== "SUCCEEDED") {
     throw new HttpsError("failed-precondition", "Payment could not be confirmed. The cash evidence was retained for safe retry.");
   }
-  const posted = await postPaymentReceiptFromDatabase(database, paymentId);
+  const posted = await postPaymentReceiptFromDatabase(db(), paymentId);
   return { paymentId, status: "COLLECTED", ...posted };
 });
 
@@ -121,7 +120,7 @@ export const confirmMerchantCashSettlement = onCall({ enforceAppCheck: true }, a
     source: { accountId: `cash_owed_${collection.collectorId}_merchant_${merchantId}`, bucket: "CASH_OWED", deltaMinor: 0, partyType: "CASH", partyId: collection.collectorId },
     destination: { accountId: `wallet_merchant_${merchantId}`, bucket: "AVAILABLE", deltaMinor: 0, partyType: "MERCHANT", partyId: merchantId },
   });
-  const posted = await postFinancialOperation(database, operation);
+  const posted = await postFinancialOperation(db(), operation);
   await db().ref(`cashHandovers/${handoverId}`).set({
     id: handoverId, paymentId, merchantId, collectorId: collection.collectorId,
     amountMinor: allocation.amountMinor, currency: "PHP", status: "CONFIRMED",
@@ -151,7 +150,7 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
     source: { accountId: `cash_owed_${collectorId}`, bucket: "CASH_OWED", deltaMinor: 0, partyType: "CASH", partyId: collectorId },
     destination: { accountId: "platform_revenue", bucket: "AVAILABLE", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
   });
-  const posted = await postFinancialOperation(database, operation);
+  const posted = await postFinancialOperation(db(), operation);
   await db().ref(`cashRemittances/${remittanceId}`).set({
     id: remittanceId, collectorId, amountMinor, currency: "PHP", status: "CONFIRMED",
     confirmedBy: call.auth!.uid, confirmedAt: Date.now(), ledgerOperationId: posted.operationId,
@@ -175,7 +174,7 @@ export const getMyCashOutstanding = onCall({ enforceAppCheck: true }, async (cal
 export const reconcileCashPayments = onCall({ enforceAppCheck: true }, async (call) => {
   requireUid(call.auth?.uid);
   requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
-  const result = await reconcileFinancialLedger(database);
+  const result = await reconcileFinancialLedger(db());
   const reconciliationId = randomUUID();
   const snapshot = {
     id: reconciliationId, type: "CASH_LEDGER", currency: "PHP",
