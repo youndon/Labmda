@@ -60,9 +60,9 @@ Before enabling cash in production, the trusted order/trip backend must:
 
 Food, shop, ride and standalone delivery creation now consume one-time server quotes and persist the payment record from the trusted Cloud Functions. The Android food, shop and passenger ride paths call these trusted endpoints; standalone delivery is created through the same quote flow. The courier/driver assignment operations create the quote-derived allocations once the actual beneficiary is known.
 
-The GCash processor is BDO Checkout, not a customer-facing "BDO" payment method. The payment method remains `GCASH`; `CASH` remains the alternative. Until BDO supplies the merchant-specific API/webhook contract, `confirmBdoGcashPayment` is a manual admin verification bridge: an administrator must verify the successful transaction in the BDO merchant portal and provide its exact reference and amount. It must not be called merely because the customer returned from checkout.
+The GCash processor is BDO Checkout, not a customer-facing "BDO" payment method. The payment method remains `GCASH`; `CASH` remains the alternative. The interim flow uses BDO Checkout Payment Requests: an administrator creates a one-time request in the BDO portal, attaches the `checkout.bdo.com.ph` URL through `attachBdoCheckoutLink`, and the customer opens it from order or ride tracking. The admin financial screen provides both link attachment and payment verification. `confirmBdoGcashPayment` is a manual verification bridge: an administrator must verify the successful transaction in BDO and provide its exact reference and amount. It must not be called merely because the customer returned from checkout. Automated Website Plug-in API/webhook integration still requires BDO's merchant-specific technical documentation.
 
-The financial rules fragment still needs to be merged into the complete application ruleset and tested before deployment. Do not deploy the fragment alone.
+The financial and order/ride rules fragments still need to be merged into the complete application ruleset and tested before deployment. Do not deploy either fragment alone.
 
 ## Operational acceptance checks
 
