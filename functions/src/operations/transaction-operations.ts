@@ -163,12 +163,32 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
 export const releaseOrderDelivery = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
   const orderId = requireId(call.data?.orderId, "Order ID");
-  const ref = db().ref(`orders/${orderId}`);
-  const result = await ref.transaction((current: Record<string, any> | null) => {
-    if (!current || current.status !== "OUT_FOR_DELIVERY" || current.deliveryId !== uid) return;
-    return { ...current, deliveryId: "", deliveryName: "", deliveryPhone: "", assignedAt: null };
+  const result = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const order = root.orders?.[orderId] as Record<string, any> | undefined;
+    if (!order || order.status !== "OUT_FOR_DELIVERY" || order.deliveryId !== uid) return;
+    const paymentId = readString(order.paymentId);
+    const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
+    // Once a non-cash payment has succeeded, its courier allocation is part of
+    // the payment audit trail and cannot be reassigned through this operation.
+    if (payment && payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
+    const nextRoot: Record<string, any> = {
+      ...root,
+      orders: { ...root.orders, [orderId]: { ...order, deliveryId: "", deliveryName: "", deliveryPhone: "", assignedAt: null } },
+    };
+    if (payment) {
+      nextRoot.payments = { ...root.payments, [paymentId]: { ...payment, deliveryId: "", updatedAt: Date.now() } };
+      if (root.paymentAllocations?.[paymentId]) {
+        const allocations = root.paymentAllocations[paymentId] as Record<string, any>;
+        if (Object.values(allocations).some((allocation: any) => allocation.status !== "PENDING")) return;
+        const nextAllocations = { ...root.paymentAllocations };
+        delete nextAllocations[paymentId];
+        nextRoot.paymentAllocations = nextAllocations;
+      }
+    }
+    return nextRoot;
   }, undefined, false);
-  if (!result.committed) fail("Only the assigned courier can release an active delivery.");
+  if (!result.committed) fail("Only the assigned courier can release an unpaid active delivery.");
   return { orderId, released: true };
 });
 
