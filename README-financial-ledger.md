@@ -4,10 +4,10 @@
 
 - The immutable journal under `finance/entries` is the source of truth. Wallet balances under `finance/accounts` are cached projections only.
 - All values are integer PHP centavos. Never use floating-point values for ledger arithmetic.
-- Each operation must balance to zero across all postings. Negative deltas debit the source; positive deltas credit the destination.
+- Every operation must balance to zero across all postings. Negative deltas debit the source; positive deltas credit the destination.
 - Every posting names an account, balance bucket, party type, and party ID. Every operation names its event type, business reference, and stable idempotency key.
 - Operation, entries, idempotency index, and account projections are committed in one Realtime Database transaction.
-- Reusing an idempotency key with the same operation is safe; reusing it with different data is rejected.
+- Reusing an idempotency key with the same operation is safe; conflicting reuse is rejected.
 - Ledger entries are append-only by API contract. Corrections must be new compensating operations, never edits/deletes.
 - Reconciliation rebuilds each account bucket from journal entries and compares it with the cached projection.
 
@@ -17,35 +17,30 @@
 | --- | --- |
 | `PENDING` | Earned/received funds not yet eligible for withdrawal or settlement |
 | `AVAILABLE` | Funds eligible for payout |
-| `CASH_OWED` | Cash collected by a provider that must be remitted to the platform |
-| `CLEARING` | External payment processor, cash-in-transit, or other settlement clearing account |
+| `CASH_OWED` | Platform amount collected in cash by a provider and still owed to the platform |
+| `CLEARING` | External payment collections, cash-in-transit, or unallocated payment amounts |
 
-## Required financial events
+## Financial events
 
-- `CUSTOMER_PAYMENT`: record the external payment-provider collection or cash collection against a clearing account.
-- `MERCHANT_EARNING`: credit the merchant's pending or available account.
-- `DRIVER_EARNING`: credit the driver's pending or available account.
-- `COURIER_EARNING`: credit the courier's pending or available account.
-- `PLATFORM_REVENUE`: credit the platform revenue account after commissions/discount funding/provider fees are reconciled.
-- `CASH_COLLECTION`: move cash from the collector's cash-in-hand obligation to the platform clearing/revenue destination.
+- `CUSTOMER_PAYMENT`: record a succeeded customer payment and allocate its amount to beneficiary balances or clearing.
+- `MERCHANT_EARNING`, `DRIVER_EARNING`, and `COURIER_EARNING`: record beneficiary earnings.
+- `PLATFORM_REVENUE`: record platform revenue after commissions, discount funding, and provider fees are reconciled.
+- `CASH_COLLECTION`: record a confirmed remittance from a collector's cash-owed balance to platform revenue.
 - `PAYOUT` and `REFUND`: record actual settlement/refund movements, not merely requested states.
+- `ADJUSTMENT`: record an authorized compensating adjustment; never edit or delete old entries.
 
 ## Payment receipt adapter
 
-`functions/src/finance/payment-ledger.ts` converts a succeeded, server-loaded `Payment` and its persisted `PaymentAllocation` records into one balanced receipt operation. It verifies transaction references, currency, allocation IDs and statuses, and requires allocations to sum exactly to the payment amount. Pending allocations credit pending balances; ready allocations credit available balances. Cash and non-cash collections use separate generic clearing accounts. The adapter does not call a bank, payment gateway, webhook, or payout service.
+`functions/src/finance/payment-ledger.ts` maps a succeeded, server-loaded `Payment` and its persisted `PaymentAllocation` records into one balanced receipt operation. It validates transaction references, PHP currency, allocation identities and statuses, and ensures allocations do not exceed the payment amount. Pending allocations credit pending balances; ready allocations credit available balances. Any unallocated remainder is held in a payment-specific clearing account until it is allocated or reconciled.
 
-The caller must load payment and allocation records from Realtime Database inside a trusted Cloud Function, verify the authoritative success or cash-collection state, then pass those records to this adapter and `postFinancialOperation`. Client-supplied payment or allocation amounts must never be trusted.
+For cash payments, the caller must also supply the persisted `CashCollection` record in `COLLECTED` status. The adapter checks that it matches the payment and records the platform allocation in the collector's `CASH_OWED` balance. A confirmed remittance can then move the owed amount into platform revenue. The ledger rejects a remittance that would make the collector's cash-owed balance negative.
 
-## Payment receipt adapter
-
-`functions/src/finance/payment-ledger.ts` maps a succeeded, server-loaded `Payment` and its persisted `PaymentAllocation` records into one balanced receipt operation. It checks transaction references, PHP currency, allocation identities and statuses, and requires allocation totals to equal the payment amount. Pending allocations credit pending balances; ready allocations credit available balances.
-
-For cash payments, the trusted caller must also supply the verified cash collector ID. The platform allocation is recorded in that collector's `CASH_OWED` balance. A confirmed remittance can then move the owed amount into platform revenue. The ledger rejects a remittance that would make the collector's cash-owed balance negative. Non-cash collections use a generic payment-provider clearing account; no particular bank or gateway is assumed.
-
-The adapter does not create payment sessions, verify external transactions, receive webhooks, or execute payouts. A trusted Cloud Function must load and verify the persisted payment, allocations, and (for cash) collection record before calling the adapter and `postFinancialOperation`. Never use client-supplied amounts as ledger inputs.
+Non-cash collections use a generic payment-provider clearing account. No particular bank or payment gateway is assumed.
 
 ## Integration boundary
 
-This module provides the validated journal, atomic balance projection, idempotency, and reconciliation primitives. It deliberately does not invent order/trip field names or trust client-supplied financial amounts. Payment webhooks, order/trip completion handlers, cash handover confirmation, payout execution, and admin authorization must call this module from trusted Cloud Functions after loading authoritative server-side records.
+The adapter does not create payment sessions, verify external transactions, receive webhooks, execute payouts, or authorize administrators. A trusted Cloud Function must load and verify the payment, allocations, and (for cash) collection record from Realtime Database before calling the adapter and `postFinancialOperation`. Client-supplied payment or allocation amounts must never be trusted.
+
+This PR does not yet invoke the adapter from live order/trip lifecycle handlers or cash handover flows. Refund processing, payout execution, and admin-authorized reconciliation also remain separate integration work.
 
 The `finance` root transaction is a correctness-first foundation and serializes financial writes. Before high-volume production, shard the journal/projections by account and add a durable outbox/settlement workflow while preserving the immutable operation contract.
