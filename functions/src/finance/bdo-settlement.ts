@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { createFinancialTransfer, postFinancialOperation } from "./ledger.js";
 
 const db = () => getDatabase();
 type Direction = "INBOUND" | "OUTBOUND";
@@ -93,14 +94,36 @@ export const recordBdoBankTransfer = onCall({ enforceAppCheck: true }, async (ca
     }
   }
   saved = (await db().ref(`bdoBankTransfers/${id}`).get()).val() as Transfer;
-  return { transferId: id, status: saved.status, matchedType: saved.matchedType, matchedId: saved.matchedId, duplicate: !result.committed };
+  const movement = createFinancialTransfer({
+    operationId: `bdo_bank_transfer_${id}`, eventType: "ADJUSTMENT", referenceType: "MANUAL", referenceId: id,
+    idempotencyKey: `bdo_bank_transfer_${id}`, createdAt: transactionAt,
+    description: `BDO statement ${direction.toLowerCase()} transfer ${transferReference}`, amountMinor,
+    source: direction === "INBOUND"
+      ? { accountId: `bdo_external_inbound_${id}`, bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "bdo_external" }
+      : { accountId: "bdo_bank", bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "bdo" },
+    destination: direction === "INBOUND"
+      ? { accountId: "bdo_bank", bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "bdo" }
+      : { accountId: `bdo_external_outbound_${id}`, bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "bdo_external" },
+  });
+  const ledger = await postFinancialOperation(db(), movement);
+  return { transferId: id, status: saved.status, matchedType: saved.matchedType, matchedId: saved.matchedId, ledgerOperationId: ledger.operationId, duplicate: !result.committed };
 });
 
 /** Durable audit report of unmatched BDO statement lines, settlements and payouts. */
 export const reconcileBdoSettlements = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = admin(call);
-  const [bankSnapshot, expectedSnapshot, payoutsSnapshot] = await Promise.all([
-    db().ref("bdoBankTransfers").get(), db().ref("expectedBdoSettlements").get(), db().ref("payoutRequests").get(),
+  const input = call.data as { openingBalanceMinor?: unknown; closingBalanceMinor?: unknown; periodStartAt?: unknown; periodEndAt?: unknown };
+  const opening = input.openingBalanceMinor;
+  const closing = input.closingBalanceMinor;
+  const start = input.periodStartAt;
+  const end = input.periodEndAt;
+  if (!Number.isSafeInteger(opening) || (opening as number) < 0 || !Number.isSafeInteger(closing) || (closing as number) < 0
+    || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || (start as number) <= 0 || (end as number) <= (start as number)) {
+    throw new HttpsError("invalid-argument", "Provide non-negative PHP-centavo opening/closing balances and a valid statement period.");
+  }
+  const [bankSnapshot, expectedSnapshot, payoutsSnapshot, financeSnapshot] = await Promise.all([
+    db().ref("bdoBankTransfers").get(), db().ref("expectedBdoSettlements").get(),
+    db().ref("payoutRequests").get(), db().ref("finance/entries").get(),
   ]);
   const bank = Object.values((bankSnapshot.val() ?? {}) as Record<string, Transfer>);
   const expected = Object.values((expectedSnapshot.val() ?? {}) as Record<string, Expected>);
@@ -111,12 +134,20 @@ export const reconcileBdoSettlements = onCall({ enforceAppCheck: true }, async (
   const unreconciled = paid.filter((item) => !item.bdoReconciledAt);
   const inboundMinor = bank.filter((item) => item.direction === "INBOUND").reduce((sum, item) => sum + item.amountMinor, 0);
   const outboundMinor = bank.filter((item) => item.direction === "OUTBOUND").reduce((sum, item) => sum + item.amountMinor, 0);
+  const entries = Object.values((financeSnapshot.val() ?? {}) as Record<string, { accountId?: string; bucket?: string; deltaMinor?: number; createdAt?: number }>);
+  const ledgerMovementMinor = entries.filter((entry) => entry.accountId === "bdo_bank" && entry.bucket === "CLEARING"
+    && Number.isSafeInteger(entry.deltaMinor) && Number.isSafeInteger(entry.createdAt)
+    && entry.createdAt! >= (start as number) && entry.createdAt! <= (end as number))
+    .reduce((sum, entry) => sum + Number(entry.deltaMinor), 0);
+  const expectedClosingBalanceMinor = (opening as number) + ledgerMovementMinor;
+  const bankBalanceDifferenceMinor = (closing as number) - expectedClosingBalanceMinor;
   const report = {
     id: randomUUID(), bank: "BDO", currency: "PHP", createdAt: Date.now(), createdBy: uid,
+    statement: { periodStartAt: start, periodEndAt: end, openingBalanceMinor: opening, closingBalanceMinor: closing, ledgerMovementMinor, expectedClosingBalanceMinor, bankBalanceDifferenceMinor },
     totals: { inboundMinor, outboundMinor, netMovementMinor: inboundMinor - outboundMinor },
     counts: { bankTransfers: bank.length, matched: bank.length - unmatched.length, unmatched: unmatched.length,
       expectedSettlements: expected.length, unsettledSettlements: unsettled.length, paidPayouts: paid.length, unreconciledPayouts: unreconciled.length },
-    balanced: unmatched.length === 0 && unsettled.length === 0 && unreconciled.length === 0,
+    balanced: unmatched.length === 0 && unsettled.length === 0 && unreconciled.length === 0 && bankBalanceDifferenceMinor === 0,
     unmatchedBankTransfers: unmatched, unsettledExpectedSettlements: unsettled,
     unreconciledPayouts: unreconciled.map((item) => ({ payoutId: item.payoutId, amountMinor: item.amountMinor, transferReference: item.transferReference ?? null })),
   };
