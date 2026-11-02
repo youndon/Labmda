@@ -163,3 +163,60 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
     throw error;
   }
 });
+
+
+/** Creates a standalone courier booking from a server-generated delivery quote. */
+export const createDeliveryFromQuote = onCall({ enforceAppCheck: true }, async (call) => {
+  const uid = uidOrThrow(call.auth?.uid);
+  const quoteId = requiredText(call.data?.quoteId, "Quote ID");
+  const { ref, quote } = await claimQuote(quoteId, uid, "DELIVERY");
+  try {
+    const request = quote.request ?? {};
+    const breakdown = quote.breakdown ?? {};
+    const profile = await db().ref(`users/${uid}`).get();
+    const orderId = randomUUID();
+    const paymentId = randomUUID();
+    const now = Date.now();
+    const method = quote.paymentMethod === "GCASH" ? "GCASH" : "CASH";
+    const providerFeePayer = method === "GCASH"
+      ? String((await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() ?? "PLATFORM")
+      : "PLATFORM";
+    const order = {
+      id: orderId, clientId: uid, orderType: "DELIVERY", sourceId: "", sourceName: "Standalone Delivery",
+      merchantOwnerId: "", items: [], subtotal: 0,
+      deliveryFee: pesos(breakdown.deliveryFeeMinor, "delivery fee"),
+      discount: 0, totalPrice: pesos(breakdown.customerTotalMinor, "customer total"),
+      status: method === "GCASH" ? "PENDING_PAYMENT" : "OUT_FOR_DELIVERY",
+      paymentId, paymentBreakdown: breakdown, providerFeePayer,
+      paymentStatus: method === "GCASH" ? "PENDING" : "CASH_DUE",
+      paymentMethod: method, quoteId,
+      pickupLocation: String(request.pickupAddress ?? ""),
+      pickupLat: Number(request.pickup?.latitude ?? 0), pickupLng: Number(request.pickup?.longitude ?? 0),
+      dropoffLocation: String(request.dropoffAddress ?? ""),
+      dropoffLat: Number(request.dropoff?.latitude ?? 0), dropoffLng: Number(request.dropoff?.longitude ?? 0),
+      deliveryType: "COURIER",
+      createdAtTimestamp: now, updatedAtTimestamp: now,
+      deliveryId: "", deliveryName: "", deliveryPhone: "",
+      customerName: String(profile.child("fullName").val() ?? profile.child("name").val() ?? ""),
+      customerPhone: String(profile.child("phoneNumber").val() ?? profile.child("phone").val() ?? ""),
+      pricingVersion: quote.pricingVersion, currency: "PHP", amountMinor: breakdown.customerTotalMinor,
+    };
+    const updates: Record<string, unknown> = {};
+    updates[`orders/${orderId}`] = order;
+    updates[`payments/${paymentId}`] = {
+      id: paymentId, transactionType: "ORDER", orderId, tripId: "", deliveryId: "",
+      payerId: uid, method, status: "PENDING", amountMinor: breakdown.customerTotalMinor,
+      currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
+      provider: method === "GCASH" ? "BDO_CHECKOUT" : "CASH",
+    };
+    updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
+    updates[`pricing/quotes/${quoteId}/status`] = "DELIVERY_CREATED";
+    updates[`pricing/quotes/${quoteId}/orderId`] = orderId;
+    updates[`pricing/quotes/${quoteId}/createdResourceAt`] = now;
+    await db().ref().update(updates);
+    return { orderId, status: order.status, paymentStatus: order.paymentStatus, totalMinor: breakdown.customerTotalMinor };
+  } catch (error) {
+    await restoreQuote(ref, quote);
+    throw error;
+  }
+});
