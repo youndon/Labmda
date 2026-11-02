@@ -67,3 +67,51 @@ Important deployment constraint:
 - No client-visible rule grants access to the private `finance` journal. If the app needs wallet screens, expose a separately designed, user-scoped read model rather than opening the central journal.
 
 This fragment intentionally does not grant an admin bypass: the repository does not yet establish a trusted admin custom-claims contract. Admin review and reconciliation endpoints must be added only after that authorization contract is defined.
+
+
+## Phase 06 — provider earnings and manual payouts
+
+Provider balances continue to come from the immutable `finance/entries` journal and the cached `finance/accounts` projection. All payout amounts are integer PHP centavos.
+
+### Provider identity and wallet accounts
+
+- Merchant wallets use `wallet_merchant_{merchantId}`. The signed-in user is associated with merchant IDs by matching `ownerUid` on `shops` and `restaurants`.
+- Driver wallets use `wallet_driver_{uid}`.
+- Delivery courier wallets use `wallet_delivery_{uid}`.
+- The earnings callable aggregates only wallet accounts belonging to the authenticated user. It does not expose the private journal or another provider's balances.
+
+### Payout destination
+
+Each provider can save one payout destination:
+- `GCASH`: Philippine mobile number and account-holder name.
+- `BDO`: BDO account number and account-holder name.
+
+Sensitive destination data is stored under `payoutProfiles/{uid}` and copied into a payout request so a later profile edit does not change the destination for an already requested payout. Both `payoutProfiles` and `payoutRequests` are server-only in the financial rules fragment. Provider screens should use callable functions rather than direct RTDB reads.
+
+### Payout lifecycle
+
+1. `saveMyPayoutProfile` validates and stores the provider's GCash or BDO destination.
+2. `getMyEarnings` returns the provider's available, pending, cash-owed and clearing balances plus the latest 100 matching ledger operations.
+3. `requestMyPayout` requires a configured destination and a minimum request of PHP 100.00. It reserves funds by moving the amount from the provider wallet's `AVAILABLE` bucket to its `CLEARING` bucket.
+4. `getPendingPayoutRequests` is administrator-only. `approvePayoutRequest` moves a request to approved.
+5. The administrator sends the money outside Labmda using GCash or BDO, then calls `markPayoutAsPaid` with the actual transfer reference. This moves the reserved amount out of the provider wallet's clearing balance and records an external payout-clearing posting.
+6. `rejectPayoutRequest` releases the reserved amount back to `AVAILABLE`.
+7. `getMyPayoutHistory` returns the provider's own payout records with account numbers masked.
+
+The payout state is locked while rejection or paid confirmation is being posted to the ledger, preventing two administrators from completing competing state transitions. The ledger rejects a payout reservation that would make the provider's available balance negative. Ledger operations use stable payout-specific idempotency keys.
+
+### Callable exports
+
+- `saveMyPayoutProfile`
+- `getMyPayoutProfile`
+- `getMyEarnings`
+- `requestMyPayout`
+- `getMyPayoutHistory`
+- `getPendingPayoutRequests`
+- `approvePayoutRequest`
+- `rejectPayoutRequest`
+- `markPayoutAsPaid`
+
+### Important operational boundary
+
+This phase does not connect to a BDO API, GCash disbursement API, payment gateway, or Xendit. Admins manually send the transfer and record its reference in Labmda. The app must not mark a payout as paid before the real transfer has been completed. Before production, merge the financial rules fragment into the deployed RTDB ruleset and verify that the callable functions are deployed with App Check enforcement and the expected `admin` custom claim.
