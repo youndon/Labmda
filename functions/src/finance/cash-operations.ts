@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { getDatabase, type Database } from "firebase-admin/database";
+import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
 import { createFinancialTransfer, postFinancialOperation, reconcileFinancialLedger } from "./ledger.js";
 
-const database = getDatabase();
+const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
 
 function requireUid(uid?: string): string {
@@ -24,7 +24,7 @@ function requireMinor(value: unknown): number {
   return value as number;
 }
 async function loadPayment(paymentId: string): Promise<Payment> {
-  const snapshot = await database.ref(`payments/${paymentId}`).get();
+  const snapshot = await db().ref(`payments/${paymentId}`).get();
   if (!snapshot.exists()) throw new HttpsError("not-found", "Payment was not found.");
   const payment = snapshot.val() as Payment;
   if (payment.id !== paymentId || payment.currency !== "PHP") throw new HttpsError("failed-precondition", "Payment record is invalid.");
@@ -36,7 +36,7 @@ async function assignedCollector(payment: Payment): Promise<string> {
     if (!payment.deliveryId) throw new HttpsError("failed-precondition", "Assign a courier before cash collection.");
     return payment.deliveryId;
   }
-  const trip = await database.ref(`trips/${payment.tripId}`).get();
+  const trip = await db().ref(`trips/${payment.tripId}`).get();
   const driverId = trip.child("driverId").val();
   if (typeof driverId !== "string" || !driverId) throw new HttpsError("failed-precondition", "Assign a driver before cash collection.");
   return driverId;
@@ -54,7 +54,7 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
   if (collectorId !== uid) throw new HttpsError("permission-denied", "Only the assigned driver or courier can confirm collection.");
   if (!Number.isSafeInteger(payment.amountMinor) || payment.amountMinor <= 0) throw new HttpsError("failed-precondition", "Payment amount is invalid.");
 
-  const collectionRef = database.ref(`cashCollections/${paymentId}`);
+  const collectionRef = db().ref(`cashCollections/${paymentId}`);
   const now = Date.now();
   const existing = await collectionRef.get();
   if (existing.exists()) {
@@ -77,7 +77,7 @@ export const confirmCashCollection = onCall({ enforceAppCheck: true }, async (ca
   };
   await collectionRef.set(collection);
 
-  const paymentRef = database.ref(`payments/${paymentId}`);
+  const paymentRef = db().ref(`payments/${paymentId}`);
   const result = await paymentRef.transaction((current: Payment | null) => {
     if (!current) return;
     if (current.id !== paymentId || current.method !== "CASH" || current.amountMinor !== payment.amountMinor) return;
@@ -99,10 +99,10 @@ export const confirmMerchantCashSettlement = onCall({ enforceAppCheck: true }, a
   const paymentId = requireId(call.data?.paymentId, "Payment ID");
   const payment = await loadPayment(paymentId);
   if (payment.status !== "SUCCEEDED") throw new HttpsError("failed-precondition", "Cash must be collected before merchant settlement.");
-  const collectionSnapshot = await database.ref(`cashCollections/${paymentId}`).get();
+  const collectionSnapshot = await db().ref(`cashCollections/${paymentId}`).get();
   if (!collectionSnapshot.exists()) throw new HttpsError("failed-precondition", "Cash collection evidence is missing.");
   const collection = collectionSnapshot.val() as CashCollection;
-  const allocationsSnapshot = await database.ref(`paymentAllocations/${paymentId}`).get();
+  const allocationsSnapshot = await db().ref(`paymentAllocations/${paymentId}`).get();
   const raw = allocationsSnapshot.val() as Record<string, PaymentAllocation> | null;
   const allocation = Object.values(raw ?? {}).find((item) => item.beneficiaryType === "MERCHANT" && item.beneficiaryId === merchantId);
   if (!allocation) throw new HttpsError("permission-denied", "This payment has no earnings allocation for your merchant account.");
@@ -110,7 +110,7 @@ export const confirmMerchantCashSettlement = onCall({ enforceAppCheck: true }, a
     throw new HttpsError("failed-precondition", "Merchant allocation does not match the payment.");
   }
   const handoverId = `merchant_${paymentId}_${merchantId}`;
-  const existing = await database.ref(`cashHandovers/${handoverId}`).get();
+  const existing = await db().ref(`cashHandovers/${handoverId}`).get();
   if (existing.exists() && (existing.child("status").val() === "CONFIRMED")) return { handoverId, duplicate: true };
 
   const operation = createFinancialTransfer({
@@ -122,7 +122,7 @@ export const confirmMerchantCashSettlement = onCall({ enforceAppCheck: true }, a
     destination: { accountId: `wallet_merchant_${merchantId}`, bucket: "AVAILABLE", deltaMinor: 0, partyType: "MERCHANT", partyId: merchantId },
   });
   const posted = await postFinancialOperation(database, operation);
-  await database.ref(`cashHandovers/${handoverId}`).set({
+  await db().ref(`cashHandovers/${handoverId}`).set({
     id: handoverId, paymentId, merchantId, collectorId: collection.collectorId,
     amountMinor: allocation.amountMinor, currency: "PHP", status: "CONFIRMED",
     confirmedAt: Date.now(), ledgerOperationId: posted.operationId,
@@ -137,7 +137,7 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
   const remittanceId = requireId(call.data?.remittanceId, "Remittance ID");
   const collectorId = requireId(call.data?.collectorId, "Collector ID");
   const amountMinor = requireMinor(call.data?.amountMinor);
-  const existing = await database.ref(`cashRemittances/${remittanceId}`).get();
+  const existing = await db().ref(`cashRemittances/${remittanceId}`).get();
   if (existing.exists()) {
     const prior = existing.val() as { collectorId: string; amountMinor: number };
     if (prior.collectorId !== collectorId || prior.amountMinor !== amountMinor) throw new HttpsError("already-exists", "Remittance ID was reused with different details.");
@@ -152,7 +152,7 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
     destination: { accountId: "platform_revenue", bucket: "AVAILABLE", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
   });
   const posted = await postFinancialOperation(database, operation);
-  await database.ref(`cashRemittances/${remittanceId}`).set({
+  await db().ref(`cashRemittances/${remittanceId}`).set({
     id: remittanceId, collectorId, amountMinor, currency: "PHP", status: "CONFIRMED",
     confirmedBy: call.auth!.uid, confirmedAt: Date.now(), ledgerOperationId: posted.operationId,
   });
@@ -162,7 +162,7 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
 /** Collector-only view of outstanding platform and merchant cash obligations. */
 export const getMyCashOutstanding = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
-  const snapshot = await database.ref("finance/accounts").get();
+  const snapshot = await db().ref("finance/accounts").get();
   const accounts = (snapshot.val() ?? {}) as Record<string, { cashOwedMinor?: number }>;
   const prefix = `cash_owed_${uid}`;
   const breakdown = Object.entries(accounts)
@@ -181,6 +181,6 @@ export const reconcileCashPayments = onCall({ enforceAppCheck: true }, async (ca
     id: reconciliationId, type: "CASH_LEDGER", currency: "PHP",
     createdAt: Date.now(), createdBy: call.auth!.uid, ...result,
   };
-  await database.ref(`cashReconciliations/${reconciliationId}`).set(snapshot);
+  await db().ref(`cashReconciliations/${reconciliationId}`).set(snapshot);
   return snapshot;
 });
