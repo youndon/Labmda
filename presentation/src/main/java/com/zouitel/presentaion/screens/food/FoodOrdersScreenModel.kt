@@ -48,7 +48,7 @@ class FoodOrdersScreenModel : ScreenModel {
         if (nextStatus == OrderStatus.DELIVERED) return
 
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("orders").child(order.id).child("status").setValue(nextStatus.name)
+            com.zouitel.presentaion.screens.trustedTransactionCall("transitionOrderStatus", mapOf("orderId" to order.id, "nextStatus" to nextStatus.name))
         }
     }
 }
