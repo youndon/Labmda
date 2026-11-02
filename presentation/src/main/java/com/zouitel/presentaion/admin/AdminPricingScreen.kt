@@ -315,7 +315,7 @@ private fun PricingSection(title: String, description: String, content: @Composa
 private fun PricingInput(label: String, value: String, onValueChange: (String) -> Unit, integerOnly: Boolean = false) {
     OutlinedTextField(
         value = value,
-        onValueChange = { next -> if (next.length <= 12 && (next.isEmpty() || if (integerOnly) next.all(Char::isDigit) else next.all { it.isDigit() || it == '.' })) onValueChange(next) },
+        onValueChange = { next -> if (next.length <= 12 && (next.isEmpty() || if (integerOnly) next.all { it.isDigit() } else next.all { it.isDigit() || it == '.' })) onValueChange(next) },
         modifier = Modifier.fillMaxWidth(),
         label = { Text(label) },
         singleLine = true,
