@@ -67,7 +67,7 @@
             ".write": "auth != null && auth.uid == $uid && ((!data.exists() && newData.val() == 'PENDING') || newData.val() == data.val())"
           },
           "isOnline": {
-            ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() == 'APPROVED'",
+            ".write": "auth != null && auth.uid == $uid && (newData.val() == false || root.child('users').child($uid).child('driverService').child('status').val() == 'APPROVED')",
             ".validate": "newData.isBoolean()"
           }
         },
@@ -93,6 +93,17 @@
         },
         "freightStatus": {
           ".write": false
+        },
+        "isFoodServiceOnline": {
+          ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('foodStatus').val() == 'APPROVED'",
+          ".validate": "newData.isBoolean()"
+        },
+        "isShopServiceOnline": {
+          ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('shopStatus').val() == 'APPROVED'",
+          ".validate": "newData.isBoolean()"
+        },
+        "restaurantImageUrl": {
+          ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('foodStatus').val() == 'APPROVED'"
         }
       }
     },
@@ -163,8 +174,10 @@
       }
     },
     "activeRideRequests": {
-      ".read": "auth != null && $passengerUid == auth.uid",
-      ".write": false
+      "$passengerUid": {
+        ".read": "auth != null && $passengerUid == auth.uid",
+        ".write": false
+      }
     },
     "driverLocations": {
       "$uid": {
