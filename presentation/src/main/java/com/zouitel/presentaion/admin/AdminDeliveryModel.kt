@@ -8,6 +8,7 @@ import com.zouitel.presentaion.screens.delivery.DeliveryAccountInfo
 import com.zouitel.presentaion.screens.delivery.DeliveryType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import com.zouitel.presentaion.screens.trustedTransactionCallData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -73,7 +74,10 @@ class AdminDeliveryModel : ScreenModel {
 
     fun updateCourierStatus(uid: String, newStatus: Status) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("deliveryServices").child("status").setValue(newStatus.name)
+            trustedTransactionCallData(
+                "adminUpdateProviderStatus",
+                mapOf("service" to "DELIVERY", "uid" to uid, "status" to newStatus.name)
+            )
         }
     }
 }
