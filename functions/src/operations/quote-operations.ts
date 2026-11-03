@@ -18,10 +18,6 @@ function quoteReference(quoteId: string): Reference {
   if (!idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
   return db().ref(`pricing/quotes/${quoteId}`);
 }
-function quoteReference(quoteId: string): Reference {
-  if (!idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
-  return db().ref(`pricing/quotes/${quoteId}`);
-}
 function pesos(minor: unknown, label: string): number {
   if (!Number.isSafeInteger(minor) || (minor as number) < 0) throw new HttpsError("failed-precondition", `The quoted ${label} is invalid.`);
   return (minor as number) / 100;
