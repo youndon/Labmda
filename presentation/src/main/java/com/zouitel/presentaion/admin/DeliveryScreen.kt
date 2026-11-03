@@ -11,6 +11,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -66,6 +67,10 @@ class DeliveryScreen : Screen {
         onApprove: () -> Unit,
         onReject: () -> Unit
     ) {
+        val uriHandler = LocalUriHandler.current
+        val identityDocumentLink = profile.deliveryServices?.identityDocumentLink.orEmpty()
+        val hasIdentityDocument = identityDocumentLink.startsWith("https://") || identityDocumentLink.startsWith("http://")
+
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = profile.fullName, style = MaterialTheme.typography.titleMedium)
@@ -73,17 +78,24 @@ class DeliveryScreen : Screen {
 
                 Text(text = "Phone: ${profile.phoneNumber}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Vehicle: ${profile.deliveryServices?.vehicleInfo}", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    text = "Docs: ${profile.uid}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                if (hasIdentityDocument) {
+                    TextButton(onClick = { uriHandler.openUri(identityDocumentLink) }) {
+                        Text("View identity document")
+                    }
+                } else {
+                    Text(
+                        text = "Identity document missing — approval is disabled",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = onApprove,
+                        enabled = hasIdentityDocument,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
