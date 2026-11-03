@@ -11,6 +11,7 @@ type PricingConfig = {
     perMinuteMinor: number;
     minimumFareMinor: number;
     platformCommissionBps: number;
+    vehicleMultipliersBps: Record<string, number>;
   };
   delivery: {
     baseFeeMinor: number;
@@ -47,6 +48,15 @@ function validateConfig(input: unknown, version: number): PricingConfig {
   const shop = value.shop ?? {};
   const gcash = value.providerFees?.GCASH ?? {};
   const payer = gcash.payer;
+  const vehicleTypes = ["CAR", "BIKE", "E_BIKE", "SCOOTER", "MOTORCYCLE", "TRUCK", "VAN", "OTHER"];
+  const suppliedMultipliers = ride.vehicleMultipliersBps ?? {};
+  if (!suppliedMultipliers || typeof suppliedMultipliers !== "object" || Array.isArray(suppliedMultipliers)
+    || Object.keys(suppliedMultipliers).some((key) => !vehicleTypes.includes(key))) {
+    throw new HttpsError("invalid-argument", "Ride vehicle multipliers contain an unsupported vehicle type.");
+  }
+  const vehicleMultipliersBps = Object.fromEntries(vehicleTypes.map((type) => [
+    type, integer(suppliedMultipliers[type] ?? 10000, `Ride ${type} multiplier`, 30000),
+  ]));
   if (payer !== "PLATFORM" && payer !== "CUSTOMER") {
     throw new HttpsError("invalid-argument", "GCash provider-fee payer must be PLATFORM or CUSTOMER.");
   }
@@ -59,6 +69,7 @@ function validateConfig(input: unknown, version: number): PricingConfig {
       perMinuteMinor: integer(ride.perMinuteMinor, "Ride price per minute"),
       minimumFareMinor: integer(ride.minimumFareMinor, "Ride minimum fare"),
       platformCommissionBps: integer(ride.platformCommissionBps, "Ride commission", 10000),
+      vehicleMultipliersBps,
     },
     delivery: {
       baseFeeMinor: integer(delivery.baseFeeMinor, "Delivery base fee"),
