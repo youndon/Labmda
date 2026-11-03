@@ -54,9 +54,11 @@ function validateConfig(input: unknown, version: number): PricingConfig {
     || Object.keys(suppliedMultipliers).some((key) => !vehicleTypes.includes(key))) {
     throw new HttpsError("invalid-argument", "Ride vehicle multipliers contain an unsupported vehicle type.");
   }
-  const vehicleMultipliersBps = Object.fromEntries(vehicleTypes.map((type) => [
-    type, integer(suppliedMultipliers[type] ?? 10000, `Ride ${type} multiplier`, 30000),
-  ]));
+  const vehicleMultipliersBps = Object.fromEntries(vehicleTypes.map((type) => {
+    const multiplier = integer(suppliedMultipliers[type] ?? 10000, `Ride ${type} multiplier`, 30000);
+    if (multiplier < 1000) throw new HttpsError("invalid-argument", `Ride ${type} multiplier must be at least 1,000 bps.`);
+    return [type, multiplier];
+  }));
   if (payer !== "PLATFORM" && payer !== "CUSTOMER") {
     throw new HttpsError("invalid-argument", "GCash provider-fee payer must be PLATFORM or CUSTOMER.");
   }
