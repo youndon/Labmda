@@ -59,10 +59,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-private const val BASE_FARE = 2.0
-private const val PER_KM_FARE = 1.2
-private const val MIN_FARE = 4.0
-
 private val ACTIVE_STATUSES = setOf("PENDING_PAYMENT", "REQUESTED", "ACCEPTED", "IN_PROGRESS")
 
 class PassengerScreen : Screen {
@@ -81,6 +77,7 @@ class PassengerScreen : Screen {
         val passengerInfo by screenModel.passengerInfo.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
         val requestError by screenModel.requestError.collectAsState()
+        val rideFareQuote by screenModel.rideFareQuote.collectAsState()
         val ridePaymentAvailability = rememberCustomerPaymentAvailability("RIDE")
         val deliveryPaymentAvailability = rememberCustomerPaymentAvailability("DELIVERY")
         val availablePaymentMethods = (ridePaymentAvailability.methods + deliveryPaymentAvailability.methods).distinct()
@@ -186,9 +183,27 @@ class PassengerScreen : Screen {
             }
         }
 
+        LaunchedEffect(pickup, destination, pickupAddress, destinationAddress, paymentMethod) {
+            val p = pickup
+            val d = destination
+            if (p != null && d != null && pickupAddress.isNotBlank() && destinationAddress.isNotBlank()) {
+                screenModel.previewRideQuote(
+                    pickupAddress = pickupAddress,
+                    pickupLat = p.latitude,
+                    pickupLng = p.longitude,
+                    dropoffAddress = destinationAddress,
+                    dropoffLat = d.latitude,
+                    dropoffLng = d.longitude,
+                    paymentMethod = paymentMethod
+                )
+            } else {
+                screenModel.clearRideQuote()
+            }
+        }
+
         val activeTrip = trips.firstOrNull { it.status in ACTIVE_STATUSES }
         val distanceKm = if (pickup != null && destination != null) distanceKm(pickup!!, destination!!) else 0.0
-        val fare = estimateFare(distanceKm)
+        val fare = rideFareQuote?.customerTotal ?: 0.0
 
         fun submitTrip(name: String, phone: String, driver: UserProfile?) {
             val p = pickup
@@ -202,6 +217,7 @@ class PassengerScreen : Screen {
                 dropoffLat = d.latitude,
                 dropoffLng = d.longitude,
                 fare = fare,
+                quoteId = rideFareQuote?.quoteId ?: return,
                 passengerName = name,
                 passengerPhone = phone,
                 targetDriver = driver,
@@ -423,6 +439,7 @@ class PassengerScreen : Screen {
                                     dropoffLat = d.latitude,
                                     dropoffLng = d.longitude,
                                     fare = fare,
+                                    quoteId = rideFareQuote?.quoteId ?: return@DriverRequestSheet,
                                     passengerName = name,
                                     passengerPhone = phone,
                                     targetDriver = driver,
@@ -597,11 +614,15 @@ class PassengerScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (fare > 0.0) {
+                        Text(
+                            "₱${"%.2f".format(fare)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Getting server fare quote…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 if (paymentAvailabilityMessage.isNotBlank()) {
@@ -623,7 +644,7 @@ class PassengerScreen : Screen {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { onSubmit(name.trim(), phone.trim()) },
-                        enabled = name.isNotBlank() && distanceKm > 0.05 && rideEnabled,
+                        enabled = name.isNotBlank() && distanceKm > 0.05 && rideEnabled && fare > 0.0,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.weight(1f).height(52.dp)
                     ) {
@@ -712,16 +733,20 @@ class PassengerScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Distance: ${"%.1f".format(tripDistanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (fare > 0.0) {
+                        Text(
+                            "₱${"%.2f".format(fare)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Getting server fare quote…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
 
                 Button(
                     onClick = { onRequest(name.trim(), phone.trim()) },
-                    enabled = name.isNotBlank() && tripDistanceKm > 0.05 && canRequestRide,
+                    enabled = name.isNotBlank() && tripDistanceKm > 0.05 && canRequestRide && fare > 0.0,
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().height(52.dp)
                 ) {
@@ -804,11 +829,15 @@ class PassengerScreen : Screen {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(
-                        "₱${"%.2f".format(fare)}",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    if (fare > 0.0) {
+                        Text(
+                            "₱${"%.2f".format(fare)}",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Text("Getting server fare quote…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
 
@@ -833,7 +862,7 @@ class PassengerScreen : Screen {
 
             Button(
                 onClick = { onRequest(name.trim(), phone.trim()) },
-                enabled = hasPickup && hasDestination && name.isNotBlank() && distanceKm > 0.05 && canRequestRide,
+                enabled = hasPickup && hasDestination && name.isNotBlank() && distanceKm > 0.05 && canRequestRide && fare > 0.0,
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) {
@@ -942,8 +971,6 @@ private fun distanceKm(a: LatLng, b: LatLng): Double {
     return result[0] / 1000.0
 }
 
-private fun estimateFare(distanceKm: Double): Double =
-    if (distanceKm <= 0.0) 0.0 else maxOf(MIN_FARE, BASE_FARE + distanceKm * PER_KM_FARE)
 
 private suspend fun reverseGeocode(context: Context, point: LatLng): String =
     withContext(Dispatchers.IO) {
