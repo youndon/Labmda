@@ -139,7 +139,20 @@ class DriverWorkplaceScreenModel : ScreenModel {
     fun deleteDriverService() {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).child("driverService").removeValue()
+            db.child("users").child(uid).child("driverService").updateChildren(
+                mapOf(
+                    "id" to null,
+                    "vehicleInfo/type" to null,
+                    "vehicleInfo/make" to null,
+                    "vehicleInfo/model" to null,
+                    "vehicleInfo/color" to null,
+                    "vehicleInfo/licensePlate" to null,
+                    "vehicleInfo/serviceType" to null,
+                    "status" to null,
+                    "isOnline" to null
+                )
+            )
+            db.child("driverLocations").child(uid).removeValue()
         }
     }
 }
