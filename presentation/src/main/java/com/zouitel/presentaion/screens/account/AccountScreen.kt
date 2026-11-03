@@ -38,6 +38,10 @@ import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
+import com.zouitel.presentaion.common.AppCard
+import com.zouitel.presentaion.common.AppCardContent
+import com.zouitel.presentaion.common.AppSectionTitle
+import com.zouitel.presentaion.common.AppSpacing
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.screens.account.LogInScreen
 import com.zouitel.presentaion.screens.delivery.DeliveryWorkplaceScreen
@@ -84,19 +88,19 @@ class AccountScreen : Screen {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                contentPadding = PaddingValues(AppSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.section)
             ) {
                 // --- 1. Profile Banner Card ---
                 item {
-                    ElevatedCard(
+                    AppCard(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp)
+                        shape = MaterialTheme.shapes.extraLarge
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                .padding(AppSpacing.lg),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             val photoUrl = user?.photoURL
@@ -126,7 +130,7 @@ class AccountScreen : Screen {
                                 }
                             }
 
-                            Spacer(Modifier.width(16.dp))
+                            Spacer(Modifier.width(AppSpacing.lg))
 
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -135,7 +139,7 @@ class AccountScreen : Screen {
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
-                                Spacer(Modifier.height(2.dp))
+                                Spacer(Modifier.height(AppSpacing.xxs))
                                 Text(
                                     text = user?.email ?: user?.phoneNumber ?: "Not signed in",
                                     style = MaterialTheme.typography.bodySmall,
@@ -164,16 +168,15 @@ class AccountScreen : Screen {
 
                 // --- 2. Business Portals (2x2 Super-App Grid) ---
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            text = "Business Portals",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
+                        AppSectionTitle(
+                            title = "Business Portals",
+                            subtitle = "Manage your services and provider workspaces."
                         )
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
                         ) {
                             BusinessGridCard(
                                 modifier = Modifier.weight(1f),
@@ -215,20 +218,15 @@ class AccountScreen : Screen {
 
                 // --- 3. Activity & Services Group ---
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Activity & Payments",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
+                        AppSectionTitle(
+                            title = "Activity & Payments",
+                            subtitle = "Your recent activity, payment options, and alerts."
                         )
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                        ) {
+                        AppCard(modifier = Modifier.fillMaxWidth()) {
                             Column {
                                 GroupedAccountRow(Icons.Filled.History, "Orders & Ride History") { navigator.push(RideHistoryScreen()) }
-                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = AppSpacing.lg), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.CreditCard, "Payment Methods & Wallet") { navigator.push(PaymentMethodsScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { /* TODO */ }
@@ -239,17 +237,12 @@ class AccountScreen : Screen {
 
                 // --- 4. System & Support Group ---
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Preferences & Support",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
+                        AppSectionTitle(
+                            title = "Preferences & Support",
+                            subtitle = "Get help and customize your app experience."
                         )
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                        ) {
+                        AppCard(modifier = Modifier.fillMaxWidth()) {
                             Column {
                                 GroupedAccountRow(Icons.AutoMirrored.Filled.HelpOutline, "Help & Support") { /* TODO */ }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
@@ -298,18 +291,13 @@ private fun BusinessGridCard(
         else -> "Apply" to MaterialTheme.colorScheme.outline
     }
 
-    OutlinedCard(
+    AppCard(
         modifier = modifier
             .heightIn(min = 116.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp)
+        shape = MaterialTheme.shapes.large
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        AppCardContent {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -318,7 +306,7 @@ private fun BusinessGridCard(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(MaterialTheme.shapes.medium)
                         .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
@@ -332,14 +320,14 @@ private fun BusinessGridCard(
 
                 Surface(
                     color = statusColor.copy(alpha = 0.12f),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = MaterialTheme.shapes.small
                 ) {
                     Text(
                         text = statusText,
                         color = statusColor,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = AppSpacing.sm, vertical = AppSpacing.xs)
                     )
                 }
             }
@@ -363,11 +351,11 @@ private fun GroupedAccountRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(AppSpacing.md))
         Text(text = label, modifier = Modifier.weight(1f), color = tint, style = MaterialTheme.typography.bodyMedium)
         Icon(
             imageVector = Icons.Filled.ChevronRight,
