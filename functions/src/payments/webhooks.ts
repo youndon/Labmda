@@ -29,7 +29,7 @@ export async function processSimulatedPaymentEvent(
 
   let duplicateEvent = false;
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const events = root.paymentWebhookEvents ?? {};
     if (events[event.eventId]) { duplicateEvent = true; return root; }
     const sessions = root.paymentSessions ?? {};

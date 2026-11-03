@@ -71,7 +71,7 @@ export const attachBdoCheckoutLink = onCall({ enforceAppCheck: true }, async (ca
   const linkKey = Buffer.from(new URL(checkoutUrl).pathname).toString("base64url");
 
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const payment = root.payments?.[paymentId] as Record<string, any> | undefined;
     const linkOwner = root.bdoCheckoutLinkIndex?.[linkKey];
     if (linkOwner && linkOwner !== paymentId) return;

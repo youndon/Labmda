@@ -159,7 +159,8 @@ export const transitionOrderStatus = onCall({ enforceAppCheck: true }, async (ca
   }
 
   const result = await orderRef.transaction((current: Record<string, any> | null) => {
-    if (!current || current.status !== order.status) return;
+    if (current === null) return null;
+    if (current.status !== order.status) return;
     if (!isAllowedOrderTransition(readString(current.status), nextStatus)
       && !(requireAdmin(call.auth?.token as Record<string, unknown> | undefined)
         && ["PLACED", "ACCEPTED", "PREPARING"].includes(readString(current.status)))) return;
@@ -185,7 +186,8 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
   const phone = readString(profile.child("phoneNumber").val()) || readString(profile.child("phone").val());
   const orderRef = db().ref(`orders/${orderId}`);
   const result = await orderRef.transaction((current: Record<string, any> | null) => {
-    if (!current || current.status !== "OUT_FOR_DELIVERY") return;
+    if (current === null) return null;
+    if (current.status !== "OUT_FOR_DELIVERY") return;
     if (readString(current.deliveryId).trim()) return;
     return { ...current, deliveryId: uid, deliveryName: name, deliveryPhone: phone, assignedAt: Date.now() };
   }, undefined, false);
@@ -204,7 +206,7 @@ export const releaseOrderDelivery = onCall({ enforceAppCheck: true }, async (cal
   const uid = requireUid(call.auth?.uid);
   const orderId = requireId(call.data?.orderId, "Order ID");
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const order = root.orders?.[orderId] as Record<string, any> | undefined;
     if (!order || order.status !== "OUT_FOR_DELIVERY" || order.deliveryId !== uid) return;
     const paymentId = readString(order.paymentId);
@@ -238,7 +240,8 @@ export const completeOrderDelivery = onCall({ enforceAppCheck: true }, async (ca
   const orderId = requireId(call.data?.orderId, "Order ID");
   const ref = db().ref(`orders/${orderId}`);
   const result = await ref.transaction((current: Record<string, any> | null) => {
-    if (!current || current.status !== "OUT_FOR_DELIVERY" || current.deliveryId !== uid) return;
+    if (current === null) return null;
+    if (current.status !== "OUT_FOR_DELIVERY" || current.deliveryId !== uid) return;
     return { ...current, status: "DELIVERED", deliveredAt: Date.now(), updatedAtTimestamp: Date.now() };
   }, undefined, false);
   if (!result.committed) fail("Only the assigned courier can complete an active delivery.");
@@ -270,7 +273,8 @@ export const claimRide = onCall({ enforceAppCheck: true }, async (call) => {
   const vehicleDetails = [color, make, model].filter(Boolean).join(" ") + (plate ? ` (${plate})` : "");
   const ref = db().ref(`trips/${tripId}`);
   const result = await ref.transaction((current: Record<string, any> | null) => {
-    if (!current || current.status !== "REQUESTED" || readString(current.driverId).trim()) return;
+    if (current === null) return null;
+    if (current.status !== "REQUESTED" || readString(current.driverId).trim()) return;
     return { ...current, driverId: uid, driverName: fullName, driverPhone: phone, vehicleDetails, status: "ACCEPTED", acceptedAt: Date.now() };
   }, undefined, false);
   if (!result.committed) {
@@ -293,7 +297,8 @@ export const transitionTripStatus = onCall({ enforceAppCheck: true }, async (cal
   }
   const ref = db().ref(`trips/${tripId}`);
   const result = await ref.transaction((current: Record<string, any> | null) => {
-    if (!current || current.driverId !== uid || !isAllowedTripTransition(readString(current.status), nextStatus)) return;
+    if (current === null) return null;
+    if (current.driverId !== uid || !isAllowedTripTransition(readString(current.status), nextStatus)) return;
     return { ...current, status: nextStatus, updatedAtTimestamp: Date.now(), ...(nextStatus === "COMPLETED" ? { completedAt: Date.now() } : {}) };
   }, undefined, false);
   if (!result.committed) fail("Only the assigned driver can make this valid trip transition.");
@@ -311,7 +316,7 @@ export const cancelPassengerTrip = onCall({ enforceAppCheck: true }, async (call
   const uid = requireUid(call.auth?.uid);
   const tripId = requireId(call.data?.tripId, "Trip ID");
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const trip = root.trips?.[tripId] as Record<string, any> | undefined;
     if (!trip || trip.passengerId !== uid || !["REQUESTED", "ACCEPTED"].includes(readString(trip.status))) return;
     const paymentId = readString(trip.paymentId);
@@ -335,7 +340,7 @@ export const cancelCustomerOrder = onCall({ enforceAppCheck: true }, async (call
   const uid = requireUid(call.auth?.uid);
   const orderId = requireId(call.data?.orderId, "Order ID");
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const order = root.orders?.[orderId] as Record<string, any> | undefined;
     if (!order || order.clientId !== uid) return;
     const orderStatus = readString(order.status);

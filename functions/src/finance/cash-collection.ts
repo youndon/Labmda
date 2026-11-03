@@ -38,7 +38,8 @@ export async function commitCashCollection(
   }
 
   const result = await database.ref().transaction((raw: Record<string, any> | null) => {
-    if (!raw) return;
+    // An initial null cache value must be preserved so RTDB retries with server data.
+    if (raw === null) return null;
     const current = raw.payments?.[expectedPayment.id] as Payment | undefined;
     if (!current || !samePaymentIdentity(current, expectedPayment)) return;
 
