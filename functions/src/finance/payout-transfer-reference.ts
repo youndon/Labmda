@@ -27,7 +27,7 @@ export function resolvePayoutTransferReference(
   submittedValue: unknown,
 ): string {
   const submitted = typeof submittedValue === "string" ? submittedValue.trim() : "";
-  if (!/^[A-Za-z0-9_-]{4,120}$/.test(submitted)) {
+  if (submitted && !/^[A-Za-z0-9_-]{4,120}$/.test(submitted)) {
     throw new PayoutTransferReferenceError("Enter a valid transfer reference (4–120 letters, numbers, hyphens or underscores).", "invalid-argument");
   }
 
