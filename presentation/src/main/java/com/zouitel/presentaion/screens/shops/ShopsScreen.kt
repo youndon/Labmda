@@ -25,6 +25,10 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import coil3.compose.AsyncImage
+import com.zouitel.presentaion.common.AppCard
+import com.zouitel.presentaion.common.AppCardContent
+import com.zouitel.presentaion.common.AppSectionTitle
+import com.zouitel.presentaion.common.AppSpacing
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.screens.food.Restaurant
 
@@ -99,19 +103,23 @@ class ShopsScreen : Screen {
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     item {
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.md)) {
+                            AppSectionTitle(
+                                title = "Discover local shops",
+                                subtitle = "Browse verified stores and find everyday essentials."
+                            )
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
+                                shape = MaterialTheme.shapes.large,
                                 placeholder = { Text("Search shops, categories, or addresses") },
                                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
                             )
                             Row(
                                 modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                             ) {
                                 listOf("All", "Online", "Offline").forEach { filter ->
                                     FilterChip(
@@ -166,13 +174,11 @@ class ShopsScreen : Screen {
 
     @Composable
     private fun ShopCardItem(shop: Shop, onClick: () -> Unit) {
-        Card(
+        AppCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            shape = MaterialTheme.shapes.large
         ) {
             Column {
                 AsyncImage(
@@ -185,7 +191,7 @@ class ShopsScreen : Screen {
                     contentScale = ContentScale.Crop
                 )
 
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                AppCardContent {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
