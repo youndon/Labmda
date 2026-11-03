@@ -232,11 +232,13 @@ export {
 // Phase 01 — server-owned BDO payment configuration and customer-safe payment options.
 export { getPaymentConfiguration, updateAdminPaymentConfiguration } from "./payments/payment-config.js";
 
-// BDO Checkout GCash verification bridge (admin-verified until BDO provides its merchant webhook contract).
+// Legacy BDO verification remains available only for historical BDO payment records.
 export { confirmBdoGcashPayment, attachBdoCheckoutLink } from "./payments/bdo-payment-operations.js";
 
-// Development-only simulated GCash checkout, webhook and refund lifecycle.
-export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payments/payment-sessions.js";
+// Xendit GCash checkout and authenticated payment webhook.
+export { createXenditGcashCheckout, xenditPaymentWebhook } from "./payments/xendit-payment.js";
+
+// Development-only simulated GCash checkout and refund lifecycle; never enabled in production.
 export { createSimulatedGcashRefund } from "./payments/refunds.js";
 export { expireSimulatedGcashSessions } from "./payments/expiration.js"; // null outside the emulator
 
