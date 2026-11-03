@@ -332,7 +332,8 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
   } else {
     reservation = reserved.snapshot.child("orders/" + orderId + "/deliveryReassignment").val() as Record<string, any>;
   }
-  const operationId = "delivery_reassign_" + reservationId;
+  const activeReservationId = String(reservation.id);
+  const operationId = "delivery_reassign_" + activeReservationId;
   const transfer = buildDeliveryReassignmentTransfer({
     operationId, orderId, previousCourierId: reservation.previousCourierId,
     replacementCourierId, amountMinor: reservation.amountMinor, createdAt: now,
@@ -344,7 +345,7 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
     if (!committedOperation) {
       await db().ref().transaction((root: Record<string, any> | null) => {
         const order = root?.orders?.[orderId] as Record<string, any> | undefined;
-        if (!order || order.deliveryReassignment?.id !== reservationId) return;
+        if (!order || order.deliveryReassignment?.id !== activeReservationId) return;
         const nextOrder = { ...order };
         delete nextOrder.deliveryReassignment;
         return { ...root, orders: { ...root.orders, [orderId]: nextOrder } };
@@ -359,7 +360,7 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
     const order = root.orders?.[orderId] as Record<string, any> | undefined;
     if (!order || order.status !== "OUT_FOR_DELIVERY"
       || order.deliveryId !== reservation.previousCourierId
-      || order.deliveryReassignment?.id !== reservationId
+      || order.deliveryReassignment?.id !== activeReservationId
       || order.deliveryReassignment?.status !== "PROCESSING") return;
     const payment = root.payments?.[reservation.paymentId] as Record<string, any> | undefined;
     const allocation = root.paymentAllocations?.[reservation.paymentId]?.[reservation.allocationId] as Record<string, any> | undefined;
@@ -368,7 +369,7 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
       || allocation.beneficiaryId !== reservation.previousCourierId
       || allocation.amountMinor !== reservation.amountMinor) return;
     const audit = {
-      id: reservationId, actorUid: adminUid, orderId, paymentId: reservation.paymentId,
+      id: activeReservationId, actorUid: adminUid, orderId, paymentId: reservation.paymentId,
       previousCourierId: reservation.previousCourierId, replacementCourierId,
       amountMinor: reservation.amountMinor, currency: "PHP", ledgerOperationId: operationId,
       createdAt: now, completedAt,
@@ -385,9 +386,9 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
         ...root.paymentAllocations[reservation.paymentId],
         [reservation.allocationId]: { ...allocation, beneficiaryId: replacementCourierId, deliveryId: replacementCourierId, updatedAt: completedAt },
       } },
-      deliveryReassignments: { ...(root.deliveryReassignments ?? {}), [reservationId]: audit },
-      adminAuditLogs: { ...(root.adminAuditLogs ?? {}), [reservationId]: {
-        id: reservationId, actorUid: adminUid, action: "ORDER_DELIVERY_REASSIGNED",
+      deliveryReassignments: { ...(root.deliveryReassignments ?? {}), [activeReservationId]: audit },
+      adminAuditLogs: { ...(root.adminAuditLogs ?? {}), [activeReservationId]: {
+        id: activeReservationId, actorUid: adminUid, action: "ORDER_DELIVERY_REASSIGNED",
         targetType: "ORDER", targetId: orderId,
         before: { deliveryId: reservation.previousCourierId },
         after: { deliveryId: replacementCourierId, amountMinor: reservation.amountMinor, ledgerOperationId: operationId },
