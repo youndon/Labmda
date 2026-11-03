@@ -2,7 +2,9 @@ package com.zouitel.presentaion.screens.food
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -101,7 +103,9 @@ data class MealScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(16.dp),
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Meal Details Card
@@ -111,18 +115,36 @@ data class MealScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
                 ) {
-                    // Meal Image
-                    AsyncImage(
-                        model = mealImageUrl,
-                        contentDescription = meal.name,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp),
-                        contentScale = ContentScale.Crop
-                    )
+                    // Meal image with a neutral fallback when no photo is available.
+                    if (mealImageUrl != null) {
+                        AsyncImage(
+                            model = mealImageUrl,
+                            contentDescription = meal.name,
+                            modifier = Modifier.fillMaxWidth().height(220.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(160.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.ShoppingBag,
+                                contentDescription = null,
+                                modifier = Modifier.size(44.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
 
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(text = meal.name, style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
+                        Text(
+                            text = meal.name,
+                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+                        )
                         Text(
                             text = "₱${"%.2f".format(meal.basePrice)}",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
@@ -139,7 +161,7 @@ data class MealScreen(
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
-                                text = meal.category.name,
+                                text = meal.category.name.lowercase().replaceFirstChar { it.uppercase() },
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -193,11 +215,14 @@ data class MealScreen(
                 OutlinedTextField(
                     value = specialInstructions,
                     onValueChange = { specialInstructions = it },
-                    label = { Text("Special Instructions / Notes") },
-                    placeholder = { Text("e.g. No tomatoes, extra sauce, allergic to gluten") },
+                    label = { Text("Special instructions (optional)") },
+                    placeholder = { Text("Add preparation preferences or notes for the restaurant") },
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
+                    minLines = 3,
+                    supportingText = {
+                        Text("Your note will be sent with this item to the restaurant.")
+                    }
                 )
             }
         }
