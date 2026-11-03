@@ -67,6 +67,7 @@
       }
     },
     "shops": {
+      ".indexOn": ["ownerUid"],
       "$shopId": {
         "status": {
           ".write": false
