@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations } from "../finance/payment-allocations.js";
 import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js";
-import { createFinancialTransfer, postFinancialOperation } from "../finance/ledger.js";
+import { createFinancialTransfer, getFinancialAccount, getFinancialOperation, postFinancialOperation } from "../finance/ledger.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -208,7 +209,7 @@ export const releaseOrderDelivery = onCall({ enforceAppCheck: true }, async (cal
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const order = root.orders?.[orderId] as Record<string, any> | undefined;
-    if (!order || order.status !== "OUT_FOR_DELIVERY" || order.deliveryId !== uid) return;
+    if (!order || order.status !== "OUT_FOR_DELIVERY" || order.deliveryId !== uid || order.deliveryReassignment?.status === "PROCESSING") return;
     const paymentId = readString(order.paymentId);
     const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
     // Once a non-cash payment has succeeded, its courier allocation is part of
@@ -234,6 +235,189 @@ export const releaseOrderDelivery = onCall({ enforceAppCheck: true }, async (cal
   return { orderId, released: true };
 });
 
+
+/** Build the balanced pending-wallet transfer for an administrator courier replacement. */
+export function buildDeliveryReassignmentTransfer(args: {
+  operationId: string; orderId: string; previousCourierId: string;
+  replacementCourierId: string; amountMinor: number; createdAt: number;
+}) {
+  if (!args.operationId || !args.orderId || !args.previousCourierId || !args.replacementCourierId
+    || args.previousCourierId === args.replacementCourierId
+    || !Number.isSafeInteger(args.amountMinor) || args.amountMinor <= 0
+    || !Number.isSafeInteger(args.createdAt) || args.createdAt <= 0) {
+    throw new Error("Delivery reassignment transfer details are invalid.");
+  }
+  return createFinancialTransfer({
+    operationId: args.operationId, eventType: "ADJUSTMENT", referenceType: "ORDER",
+    referenceId: args.orderId, idempotencyKey: args.operationId, createdAt: args.createdAt,
+    description: "Administrator reassigned pending courier earnings for a paid delivery",
+    amountMinor: args.amountMinor,
+    source: { accountId: "wallet_delivery_" + args.previousCourierId, bucket: "PENDING",
+      deltaMinor: 0, partyType: "COURIER", partyId: args.previousCourierId },
+    destination: { accountId: "wallet_delivery_" + args.replacementCourierId, bucket: "PENDING",
+      deltaMinor: 0, partyType: "COURIER", partyId: args.replacementCourierId },
+  });
+}
+
+/** Admin recovery path for an abandoned, already-paid GCash delivery. */
+export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, async (call) => {
+  const adminUid = requireUid(call.auth?.uid);
+  if (!requireAdmin(call.auth?.token as Record<string, unknown> | undefined)) {
+    throw new HttpsError("permission-denied", "Administrator access is required.");
+  }
+  const orderId = requireId(call.data?.orderId, "Order ID");
+  const replacementCourierId = requireId(call.data?.replacementCourierId, "Replacement courier ID");
+  const profile = await db().ref("users/" + replacementCourierId).get();
+  if (!profile.exists() || profile.child("deliveryServices/status").val() !== "APPROVED") {
+    throw new HttpsError("failed-precondition", "The replacement courier must have an approved delivery account.");
+  }
+  if (profile.child("deliveryServices/isOnline").val() !== true) {
+    throw new HttpsError("failed-precondition", "The replacement courier must be online before reassignment.");
+  }
+  const replacementName = readString(profile.child("fullName").val()) || "Delivery";
+  const replacementPhone = readString(profile.child("phoneNumber").val()) || readString(profile.child("phone").val());
+  const reservationId = randomUUID();
+  const now = Date.now();
+
+  const reserved = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const order = root.orders?.[orderId] as Record<string, any> | undefined;
+    if (!order || order.status !== "OUT_FOR_DELIVERY") return;
+    const previousCourierId = readString(order.deliveryId);
+    if (!previousCourierId || previousCourierId === replacementCourierId
+      || order.deliveryReassignment?.status === "PROCESSING") return;
+    const paymentId = readString(order.paymentId);
+    const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
+    if (!payment || payment.id !== paymentId || payment.orderId !== orderId
+      || payment.transactionType !== "ORDER" || payment.method !== "GCASH"
+      || payment.status !== "SUCCEEDED" || payment.currency !== "PHP"
+      || payment.deliveryId !== previousCourierId) return;
+    const allocations = root.paymentAllocations?.[paymentId] as Record<string, any> | undefined;
+    if (!allocations) return;
+    const courierRows = Object.entries(allocations).filter(([, row]) => (row as any)?.beneficiaryType === "DELIVERY");
+    if (courierRows.length !== 1) return;
+    const pair = courierRows[0]!;
+    const allocationId = pair[0];
+    const allocation = pair[1] as Record<string, any>;
+    if (allocation.id !== allocationId || allocation.paymentId !== paymentId
+      || allocation.transactionType !== "ORDER" || allocation.orderId !== orderId
+      || allocation.deliveryId !== previousCourierId || allocation.beneficiaryId !== previousCourierId
+      || allocation.status !== "PENDING" || allocation.currency !== "PHP"
+      || !Number.isSafeInteger(allocation.amountMinor) || allocation.amountMinor <= 0) return;
+    const reservation = {
+      id: reservationId, status: "PROCESSING", orderId, paymentId, allocationId,
+      previousCourierId, replacementCourierId, amountMinor: allocation.amountMinor,
+      initiatedBy: adminUid, createdAt: now,
+    };
+    return { ...root, orders: { ...root.orders, [orderId]: { ...order, deliveryReassignment: reservation } } };
+  }, undefined, false);
+
+  let reservation: Record<string, any>;
+  if (!reserved.committed) {
+    const current = reserved.snapshot.child("orders/" + orderId);
+    if (current.child("deliveryId").val() === replacementCourierId
+      && current.child("deliveryReassignment/status").val() === "COMPLETED") {
+      return { orderId, deliveryId: replacementCourierId, duplicate: true };
+    }
+    const pending = current.child("deliveryReassignment").val() as Record<string, any> | null;
+    if (current.child("status").val() === "OUT_FOR_DELIVERY"
+      && pending?.status === "PROCESSING"
+      && pending.replacementCourierId === replacementCourierId) {
+      // Resume a prior invocation that reserved the order but timed out while
+      // posting or finalizing the immutable ledger transfer.
+      reservation = pending;
+    } else {
+      fail("This paid delivery cannot be reassigned. Verify its status, payment, courier and pending allocation.");
+    }
+  } else {
+    reservation = reserved.snapshot.child("orders/" + orderId + "/deliveryReassignment").val() as Record<string, any>;
+  }
+  const activeReservationId = String(reservation.id);
+  const reservationCreatedAt = Number(reservation.createdAt);
+  const operationId = "delivery_reassign_" + activeReservationId;
+  const transfer = buildDeliveryReassignmentTransfer({
+    operationId, orderId, previousCourierId: reservation.previousCourierId,
+    replacementCourierId, amountMinor: reservation.amountMinor, createdAt: reservationCreatedAt,
+  });
+  try {
+    // Ensure the original successful payment is journaled before moving its courier liability.
+    await postPaymentReceiptFromDatabase(db(), reservation.paymentId);
+    const previousCourierAccount = await getFinancialAccount("wallet_delivery_" + reservation.previousCourierId);
+    if (!previousCourierAccount || previousCourierAccount.pendingMinor < reservation.amountMinor) {
+      throw new HttpsError("failed-precondition", "The previous courier's pending ledger balance does not cover this allocation.");
+    }
+    await postFinancialOperation(transfer);
+  } catch (error) {
+    const committedOperation = await getFinancialOperation(operationId);
+    if (!committedOperation) {
+      await db().ref().transaction((root: Record<string, any> | null) => {
+        if (!root) return;
+        const order = root.orders?.[orderId] as Record<string, any> | undefined;
+        if (!order || order.deliveryReassignment?.id !== activeReservationId) return;
+        const nextOrder = { ...order };
+        delete nextOrder.deliveryReassignment;
+        return { ...root, orders: { ...root.orders, [orderId]: nextOrder } };
+      }, undefined, false);
+      throw error;
+    }
+  }
+
+  const completedAt = Date.now();
+  const completed = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return;
+    const order = root.orders?.[orderId] as Record<string, any> | undefined;
+    if (!order || order.status !== "OUT_FOR_DELIVERY"
+      || order.deliveryId !== reservation.previousCourierId
+      || order.deliveryReassignment?.id !== activeReservationId
+      || order.deliveryReassignment?.status !== "PROCESSING") return;
+    const payment = root.payments?.[reservation.paymentId] as Record<string, any> | undefined;
+    const allocation = root.paymentAllocations?.[reservation.paymentId]?.[reservation.allocationId] as Record<string, any> | undefined;
+    if (!payment || payment.status !== "SUCCEEDED" || payment.deliveryId !== reservation.previousCourierId
+      || !allocation || allocation.status !== "PENDING"
+      || allocation.beneficiaryId !== reservation.previousCourierId
+      || allocation.amountMinor !== reservation.amountMinor) return;
+    const audit = {
+      id: activeReservationId, actorUid: adminUid, orderId, paymentId: reservation.paymentId,
+      previousCourierId: reservation.previousCourierId, replacementCourierId,
+      amountMinor: reservation.amountMinor, currency: "PHP", ledgerOperationId: operationId,
+      createdAt: reservationCreatedAt, completedAt,
+    };
+    return {
+      ...root,
+      orders: { ...root.orders, [orderId]: {
+        ...order, deliveryId: replacementCourierId, deliveryName: replacementName,
+        deliveryPhone: replacementPhone, assignedAt: completedAt, updatedAtTimestamp: completedAt,
+        deliveryReassignment: { ...order.deliveryReassignment, status: "COMPLETED", ledgerOperationId: operationId, completedAt },
+      } },
+      payments: { ...root.payments, [reservation.paymentId]: { ...payment, deliveryId: replacementCourierId, updatedAt: completedAt } },
+      paymentAllocations: { ...root.paymentAllocations, [reservation.paymentId]: {
+        ...root.paymentAllocations[reservation.paymentId],
+        [reservation.allocationId]: { ...allocation, beneficiaryId: replacementCourierId, deliveryId: replacementCourierId, updatedAt: completedAt },
+      } },
+      deliveryReassignments: { ...(root.deliveryReassignments ?? {}), [activeReservationId]: audit },
+      adminAuditLogs: { ...(root.adminAuditLogs ?? {}), [activeReservationId]: {
+        id: activeReservationId, actorUid: adminUid, action: "ORDER_DELIVERY_REASSIGNED",
+        targetType: "ORDER", targetId: orderId,
+        before: { deliveryId: reservation.previousCourierId },
+        after: { deliveryId: replacementCourierId, amountMinor: reservation.amountMinor, ledgerOperationId: operationId },
+        note: "Reassigned a succeeded GCash delivery and transferred its pending courier allocation.",
+        createdAt: completedAt,
+      } },
+    };
+  }, undefined, false);
+
+  if (!completed.committed) {
+    const latest = completed.snapshot.child("orders/" + orderId);
+    if (latest.child("deliveryId").val() === replacementCourierId
+      && latest.child("deliveryReassignment/id").val() === activeReservationId
+      && latest.child("deliveryReassignment/status").val() === "COMPLETED") {
+      return { orderId, deliveryId: replacementCourierId, duplicate: true };
+    }
+    throw new HttpsError("internal", "The ledger transfer was posted but the delivery reassignment could not be finalized. The order is locked for administrator recovery.");
+  }
+  return { orderId, deliveryId: replacementCourierId, amountMinor: reservation.amountMinor, ledgerOperationId: operationId, duplicate: false };
+});
+
 /** Only the assigned courier can mark an order delivered. */
 export const completeOrderDelivery = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
@@ -241,7 +425,7 @@ export const completeOrderDelivery = onCall({ enforceAppCheck: true }, async (ca
   const ref = db().ref(`orders/${orderId}`);
   const result = await ref.transaction((current: Record<string, any> | null) => {
     if (current === null) return null;
-    if (current.status !== "OUT_FOR_DELIVERY" || current.deliveryId !== uid) return;
+    if (current.status !== "OUT_FOR_DELIVERY" || current.deliveryId !== uid || current.deliveryReassignment?.status === "PROCESSING") return;
     return { ...current, status: "DELIVERED", deliveredAt: Date.now(), updatedAtTimestamp: Date.now() };
   }, undefined, false);
   if (!result.committed) fail("Only the assigned courier can complete an active delivery.");

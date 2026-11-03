@@ -3,6 +3,18 @@ import { getDatabase } from "firebase-admin/database";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
 
 /**
+ * Missing allocations are an expected intermediate state for courier-delivery
+ * payments: the courier claim creates them and posts the receipt later.
+ */
+export function shouldPostSucceededPaymentToLedger(
+  before: unknown,
+  after: unknown,
+  allocationsExist: boolean,
+): boolean {
+  return after === "SUCCEEDED" && before !== "SUCCEEDED" && allocationsExist;
+}
+
+/**
  * Posts every trusted successful payment to the immutable finance journal.
  *
  * This trigger deliberately loads the payment and allocations again from the
@@ -15,9 +27,11 @@ export const postSucceededPaymentToLedger = onValueWritten(
   async (event) => {
     const before = event.data.before.val();
     const after = event.data.after.val();
-    if (after !== "SUCCEEDED" || before === "SUCCEEDED") return;
-
     const paymentId = event.params.paymentId;
-    await postPaymentReceiptFromDatabase(getDatabase(), paymentId);
+    const database = getDatabase();
+    const allocations = await database.ref(`paymentAllocations/${paymentId}`).get();
+    if (!shouldPostSucceededPaymentToLedger(before, after, allocations.exists())) return;
+
+    await postPaymentReceiptFromDatabase(database, paymentId);
   },
 );
