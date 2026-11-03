@@ -14,7 +14,7 @@ function fakeDatabase(seed: Record<string, any>) {
       transaction: async (update: (current: Record<string, any> | null) => Record<string, any> | null | undefined) => {
         const next = update(structuredClone(value));
         if (next === undefined) return { committed: false, snapshot: { val: () => structuredClone(value) } };
-        value = structuredClone(next);
+        value = structuredClone(next) as Record<string, any>;
         return { committed: true, snapshot: { val: () => structuredClone(value) } };
       },
     }),
