@@ -76,7 +76,7 @@ class FoodRepository {
     }
 
     fun getMealsForRestaurant(restaurantId: String): Flow<List<Meal>> {
-        return db.child("restaurants").child(restaurantId).child("meals").valueEvents.map { snapshot ->
+        return db.child("restaurantMeals").child(restaurantId).valueEvents.map { snapshot ->
             snapshot.children.mapNotNull { child ->
                 val id = child.key ?: return@mapNotNull null
                 val name: String = child.child("name").value<String?>()
@@ -114,9 +114,9 @@ class FoodRepository {
         imageUrl: String
     ) {
         val mealRef = if (mealId.isBlank()) {
-            db.child("restaurants").child(restaurantId).child("meals").push()
+            db.child("restaurantMeals").child(restaurantId).push()
         } else {
-            db.child("restaurants").child(restaurantId).child("meals").child(mealId)
+            db.child("restaurantMeals").child(restaurantId).child(mealId)
         }
         val id = mealRef.key ?: return
         val mealMap = mapOf(
@@ -133,6 +133,6 @@ class FoodRepository {
     }
 
     suspend fun deleteMeal(restaurantId: String, mealId: String) {
-        db.child("restaurants").child(restaurantId).child("meals").child(mealId).removeValue()
+        db.child("restaurantMeals").child(restaurantId).child(mealId).removeValue()
     }
 }
