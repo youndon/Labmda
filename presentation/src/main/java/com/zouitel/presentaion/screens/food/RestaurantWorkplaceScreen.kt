@@ -315,7 +315,8 @@ class RestaurantWorkplaceScreen : Screen {
             item {
                 OutlinedTextField(
                     value = deliveryFee, onValueChange = { deliveryFee = it },
-                    label = { Text("Delivery Fee ($)") },
+                    label = { Text("Delivery Fee (₱)") },
+                    supportingText = { Text("Enter the fee in Philippine pesos (PHP).") },
                     shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
@@ -325,6 +326,7 @@ class RestaurantWorkplaceScreen : Screen {
                 OutlinedTextField(
                     value = estimatedTime, onValueChange = { estimatedTime = it },
                     label = { Text("Estimated Time (Minutes)") },
+                    supportingText = { Text("Enter the estimated preparation time in minutes.") },
                     shape = RoundedCornerShape(12.dp),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
