@@ -182,6 +182,9 @@ export const adminUpdateProviderStatus = onCall({ enforceAppCheck: true }, async
       };
     } else if (status === "REJECTED") {
       updates[`restaurants/${uid}`] = null;
+    } else {
+      updates[`restaurants/${uid}/status`] = "SUSPENDED";
+      updates[`restaurants/${uid}/isOpen`] = false;
     }
   } else if (service === "SHOP") {
     if (!validId(data.shopId)) throw new HttpsError("invalid-argument", "Shop ID is invalid.");
@@ -191,6 +194,7 @@ export const adminUpdateProviderStatus = onCall({ enforceAppCheck: true }, async
       throw new HttpsError("failed-precondition", "The shop does not belong to this provider.");
     }
     updates[`shops/${data.shopId}/status`] = statusValue;
+    if (status !== "APPROVED") updates[`shops/${data.shopId}/isOnline`] = false;
     updates[`users/${uid}/shopStatus`] = statusValue;
     updates[`users/${uid}/shopMode`] = status === "APPROVED" ? "MANAGER" : "CLIENT";
   } else if (service === "DRIVER") {
