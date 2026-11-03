@@ -16,6 +16,7 @@ export interface PricingConfig {
     perMinuteMinor: number;
     minimumFareMinor: number;
     platformCommissionBps: number;
+    vehicleMultipliersBps: Record<string, number>;
   };
   delivery: DeliveryRate;
   food: { commissionBps: number };
@@ -114,7 +115,7 @@ export function calculateDeliveryFee(config: DeliveryRate, route: RouteMetrics):
   const platformCommissionMinor = roundBps(feeMinor, config.platformCommissionBps);
   return { feeMinor, platformCommissionMinor, courierEarningsMinor: feeMinor - platformCommissionMinor };
 }
-export function calculateRideFare(config: PricingConfig["ride"], route: RouteMetrics): { fareMinor: number; platformCommissionMinor: number; driverEarningsMinor: number } {
+export function calculateRideFare(config: PricingConfig["ride"], route: RouteMetrics, vehicleMultiplierBps = 10000): { fareMinor: number; platformCommissionMinor: number; driverEarningsMinor: number } {
   assertMinor(config.baseFareMinor, "ride.baseFareMinor");
   assertMinor(config.minimumFareMinor, "ride.minimumFareMinor");
   assertMinor(config.perKmMinor, "ride.perKmMinor");
@@ -125,7 +126,9 @@ export function calculateRideFare(config: PricingConfig["ride"], route: RouteMet
   const minutes = Math.ceil(route.durationSeconds / 60);
   const timeCharge = minutes * config.perMinuteMinor;
   assertMinor(timeCharge, "ride.timeCharge");
-  const fareMinor = Math.max(config.minimumFareMinor, config.baseFareMinor + distanceCharge + timeCharge);
+  const standardFareMinor = Math.max(config.minimumFareMinor, config.baseFareMinor + distanceCharge + timeCharge);
+  assertBps(vehicleMultiplierBps, "ride vehicle multiplier");
+  const fareMinor = roundBps(standardFareMinor, vehicleMultiplierBps);
   assertMinor(fareMinor, "ride.fareMinor");
   const platformCommissionMinor = roundBps(fareMinor, config.platformCommissionBps);
   return { fareMinor, platformCommissionMinor, driverEarningsMinor: fareMinor - platformCommissionMinor };
