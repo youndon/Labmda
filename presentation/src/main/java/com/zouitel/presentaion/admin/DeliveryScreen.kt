@@ -49,6 +49,20 @@ class DeliveryScreen : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "${applications.size} application${if (applications.size == 1) "" else "s"} awaiting review",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                            )
+                            Text(
+                                "Review courier details and identity documents before approving delivery access.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     items(applications, key = { it.uid }) { profile ->
                         DeliveryApplicationCard(
                             profile = profile,
@@ -73,10 +87,32 @@ class DeliveryScreen : Screen {
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(text = profile.fullName, style = MaterialTheme.typography.titleMedium)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = profile.fullName.ifBlank { "Courier applicant" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    )
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Text(
+                            "PENDING",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Text(text = "Phone: ${profile.phoneNumber}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Phone: ${profile.phoneNumber?.takeIf { it.isNotBlank() } ?: "Not provided"}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Service: ${profile.deliveryServices?.deliveryType?.name ?: "Courier"}", style = MaterialTheme.typography.bodyMedium)
                 Text(text = "Vehicle: ${profile.deliveryServices?.vehicleInfo?.type?.name ?: "Not provided"}", style = MaterialTheme.typography.bodyMedium)
                 if (hasIdentityDocument) {
                     TextButton(onClick = { uriHandler.openUri(identityDocumentLink) }) {
