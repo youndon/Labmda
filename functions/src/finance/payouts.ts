@@ -48,7 +48,7 @@ function validatePayoutProfile(data: Record<string, unknown>): {
 async function ownsMerchant(uid: string): Promise<boolean> {
   const roots = ["shops", "restaurants"];
   const ownershipChecks = await Promise.all(roots.map(async (root) => {
-    const direct = await db().ref(\`\${root}/\${uid}\`).get();
+    const direct = await db().ref(`${root}/${uid}`).get();
     if (direct.exists()) return true;
     const owned = await db().ref(root).orderByChild("ownerUid").equalTo(uid).limitToFirst(1).get();
     return owned.exists();
