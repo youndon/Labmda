@@ -252,6 +252,7 @@ export {
   approvePayoutRequest,
   rejectPayoutRequest,
   markPayoutAsPaid,
+  recoverInterruptedPayouts,
 } from "./finance/payouts.js";
 
 // Phase 07 — administrator financial overview.
