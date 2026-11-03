@@ -4,6 +4,8 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.model.VehicleInfo
+import com.zouitel.presentaion.model.VehicleType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
@@ -68,6 +70,9 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
                             val vehicleType = runCatching {
                                 child.child("vehicleType").value<String>()
                             }.getOrDefault("")
+                            val vehicleInfo = VehicleInfo(
+                                type = runCatching { VehicleType.valueOf(vehicleType) }.getOrNull()
+                            )
                             val identityDocumentLink = runCatching {
                                 child.child("identityDocumentLink").value<String>()
                             }.getOrDefault("")
@@ -83,6 +88,7 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
                             DeliveryAccountInfo(
                                 id = id,
                                 deliveryType = deliveryType,
+                                vehicleInfo = vehicleInfo,
                                 identityDocumentLink = identityDocumentLink,
                                 status = status,
                                 isOnline = isOnline
