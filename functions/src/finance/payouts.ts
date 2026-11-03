@@ -47,14 +47,13 @@ function validatePayoutProfile(data: Record<string, unknown>): {
 }
 async function ownsMerchant(uid: string): Promise<boolean> {
   const roots = ["shops", "restaurants"];
-  const snapshots = await Promise.all(roots.map((root) => db().ref(root).get()));
-  return snapshots.some((snapshot) => {
-    let owned = false;
-    snapshot.forEach((child) => {
-      if (child.key === uid || child.child("ownerUid").val() === uid) owned = true;
-    });
-    return owned;
-  });
+  const ownershipChecks = await Promise.all(roots.map(async (root) => {
+    const direct = await db().ref(\`\${root}/\${uid}\`).get();
+    if (direct.exists()) return true;
+    const owned = await db().ref(root).orderByChild("ownerUid").equalTo(uid).limitToFirst(1).get();
+    return owned.exists();
+  }));
+  return ownershipChecks.some(Boolean);
 }
 async function providerAccounts(uid: string): Promise<Array<{
   accountId: string; providerKind: ProviderKind; providerId: string;
