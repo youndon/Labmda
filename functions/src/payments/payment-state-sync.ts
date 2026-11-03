@@ -74,7 +74,25 @@ export async function synchronizePaymentState(database: Database, paymentId: str
       if (Object.keys(common).every((key) => trip[key] === (common as Record<string, unknown>)[key])
         && trip.paymentState === paymentStatus && trip.status === nextStatus
         && trip.updatedAtTimestamp === now) return;
-      return { ...root, trips: { ...root.trips, [payment.tripId]: nextTrip } };
+
+      const activeRideRequests = { ...(root.activeRideRequests ?? {}) } as Record<string, Record<string, unknown>>;
+      const passengerId = typeof trip.passengerId === "string" ? trip.passengerId : "";
+      if (passengerId && ["REQUESTED", "ACCEPTED", "IN_PROGRESS"].includes(nextStatus)) {
+        activeRideRequests[passengerId] = {
+          ...(activeRideRequests[passengerId] ?? {}),
+          [payment.tripId]: { status: nextStatus, updatedAt: now },
+        };
+      } else if (passengerId && activeRideRequests[passengerId]) {
+        const passengerRequests = { ...activeRideRequests[passengerId] };
+        delete passengerRequests[payment.tripId];
+        if (Object.keys(passengerRequests).length) activeRideRequests[passengerId] = passengerRequests;
+        else delete activeRideRequests[passengerId];
+      }
+      return {
+        ...root,
+        trips: { ...root.trips, [payment.tripId]: nextTrip },
+        activeRideRequests,
+      };
     }
 
     return;
