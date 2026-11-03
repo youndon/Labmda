@@ -23,6 +23,11 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.screens.finance.ProviderEarningsScreen
 import com.zouitel.presentaion.common.Status
+import com.zouitel.presentaion.common.AppCard
+import com.zouitel.presentaion.common.AppPrimaryButton
+import com.zouitel.presentaion.common.AppOutlinedButton
+import com.zouitel.presentaion.common.AppSectionTitle
+import com.zouitel.presentaion.common.AppSpacing
 
 class DeliveryWorkplaceScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
@@ -59,7 +64,7 @@ class DeliveryWorkplaceScreen : Screen {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(16.dp)
+                    .padding(AppSpacing.lg)
             ) {
                 if (isLoading) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -85,9 +90,12 @@ class DeliveryWorkplaceScreen : Screen {
                                 modifier = Modifier.size(36.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.height(20.dp))
-                        Text("No Delivery Account Registered", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(AppSpacing.lg))
+                        AppSectionTitle(
+                            title = "Set up your delivery profile",
+                            subtitle = "Register your service to apply for delivery tasks and manage your earnings.",
+                        )
+                        Spacer(modifier = Modifier.height(AppSpacing.sm))
                         Text(
                             "Register your delivery profile to start accepting delivery tasks and earning.",
                             style = MaterialTheme.typography.bodyMedium,
@@ -95,54 +103,49 @@ class DeliveryWorkplaceScreen : Screen {
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(24.dp))
-                        Button(
+                        AppPrimaryButton(
+                            text = "Apply for Delivery Service",
                             onClick = { showAddEditDialog = true },
-                            modifier = Modifier.fillMaxWidth().height(50.dp),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Text("Apply for Delivery Service")
-                        }
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
                     ) {
                         item {
                             val approved = deliveryAccount?.status == Status.APPROVED
                             if (approved) {
-                                Button(
+                                AppSectionTitle(
+                                    title = "Delivery operations",
+                                    subtitle = "Your service is approved. Manage delivery availability and earnings."
+                                )
+                                AppPrimaryButton(
+                                    text = "Open Delivery Dashboard",
                                     onClick = { navigator?.push(DeliveryDashboardScreen()) },
-                                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text("Open Delivery Dashboard", fontWeight = FontWeight.Bold)
-                                }
-                                OutlinedButton(
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                AppOutlinedButton(
+                                    text = "Earnings & Payouts",
                                     onClick = { navigator?.push(ProviderEarningsScreen()) },
-                                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Text("Earnings & Payouts", fontWeight = FontWeight.Bold)
-                                }
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             } else {
                                 val message = when (deliveryAccount?.status) {
                                     Status.PENDING -> "Your application is waiting for administrator review. Delivery tasks and earnings become available after approval."
                                     Status.REJECTED -> "Your application was not approved. Update your service details or contact support before applying again."
                                     else -> "Your delivery service is not active yet."
                                 }
-                                Card(
+                                AppCard(
                                     modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                                    shape = RoundedCornerShape(16.dp)
+                                    shape = MaterialTheme.shapes.extraLarge
                                 ) {
-                                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(
-                                            if (deliveryAccount?.status == Status.PENDING) "Application under review" else "Service not active",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Bold
+                                    Column(Modifier.padding(AppSpacing.lg), verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)) {
+                                        AppSectionTitle(
+                                            title = if (deliveryAccount?.status == Status.PENDING) "Application under review" else "Service not active",
+                                            subtitle = message
                                         )
-                                        Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
@@ -150,12 +153,11 @@ class DeliveryWorkplaceScreen : Screen {
 
                         // Courier Profile Summary Card
                         item {
-                            Card(
+                            AppCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                                shape = MaterialTheme.shapes.extraLarge
                             ) {
-                                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Column(modifier = Modifier.padding(AppSpacing.lg), verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)) {
                                     Text(text = profile.fullName.ifBlank { "Courier Profile" }, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                     Text(text = "Phone: ${profile.phoneNumber?.takeIf { it.isNotBlank() } ?: "Not provided"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -163,7 +165,10 @@ class DeliveryWorkplaceScreen : Screen {
                         }
 
                         item {
-                            Text("Delivery Account Info", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            AppSectionTitle(
+                                title = "Delivery service details",
+                                subtitle = "Review your submitted vehicle and verification information."
+                            )
                         }
 
                         item {
@@ -203,17 +208,15 @@ class DeliveryWorkplaceScreen : Screen {
         onDelete: () -> Unit,
         onOnlineChanged: (Boolean) -> Unit
     ) {
-        Card(
+        AppCard(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            shape = MaterialTheme.shapes.extraLarge
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(AppSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
