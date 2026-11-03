@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -150,10 +151,12 @@ class RestaurantsScreen : Screen {
 
                 when {
                     restaurants.isEmpty() -> EmptyRestaurantsState(
+                        modifier = Modifier.weight(1f),
                         title = "No restaurants yet",
                         message = "Restaurants will appear here when they become available."
                     )
                     visibleRestaurants.isEmpty() -> EmptyRestaurantsState(
+                        modifier = Modifier.weight(1f),
                         title = "No matches found",
                         message = "Try another restaurant name or change the availability filter."
                     )
@@ -177,13 +180,12 @@ class RestaurantsScreen : Screen {
 
 @Composable
 private fun EmptyRestaurantsState(
+    modifier: Modifier = Modifier,
     title: String,
     message: String
 ) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .weight(1f),
+        modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
         Column(
