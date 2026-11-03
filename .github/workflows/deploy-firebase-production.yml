@@ -45,11 +45,11 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: functions/package-lock.json
+          cache-dependency-path: functions/package.json
 
       - name: Install Functions dependencies
         working-directory: functions
-        run: npm ci --no-audit --no-fund
+        run: npm install --no-audit --no-fund
 
       - name: Verify required Maps secret exists
         shell: bash
