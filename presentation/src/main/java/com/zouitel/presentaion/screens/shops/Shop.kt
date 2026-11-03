@@ -12,6 +12,8 @@ data class Shop(
     val category: String = "General Store",
     val phone: String = "",
     val address: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
     val imageUrl: String = "",
     val status: Status = Status.PENDING,
     val createdAtTimestamp: Long = 0L,
