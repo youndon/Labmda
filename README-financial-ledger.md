@@ -91,7 +91,7 @@ Each provider can save one payout destination:
 - `GCASH`: Philippine mobile number and account-holder name.
 - `BDO`: BDO account number and account-holder name.
 
-Sensitive destination data is stored under `payoutProfiles/{uid}` and copied into a payout request so a later profile edit does not change the destination for an already requested payout. Both `payoutProfiles` and `payoutRequests` are server-only in the financial rules fragment. Provider screens should use callable functions rather than direct RTDB reads.
+Sensitive destination data is stored under `payoutProfiles/{uid}` and copied into a payout request so a later profile edit does not change the destination for an already requested payout. Saving or changing a destination requires a recent Firebase sign-in (within ten minutes); the callable returns only a masked account number to the provider. Both `payoutProfiles` and `payoutRequests` are server-only in the financial rules fragment. Provider screens should use callable functions rather than direct RTDB reads.
 
 ### Payout lifecycle
 
