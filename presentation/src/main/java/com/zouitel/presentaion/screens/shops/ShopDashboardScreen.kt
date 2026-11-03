@@ -297,7 +297,6 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
 
         LabmdaAlertDialog(
             onDismissRequest = onDismiss,
-            shape = RoundedCornerShape(20.dp),
             title = { Text(if (product == null) "Add New Product" else "Edit Product", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
