@@ -5,6 +5,7 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.screens.trustedTransactionCall
 import dev.gitlive.firebase.auth.FirebaseAuth
 import dev.gitlive.firebase.auth.FirebaseUser
 import dev.gitlive.firebase.database.DatabaseReference
@@ -65,9 +66,16 @@ class AccountScreenModel(
     // Save or update user profile
     suspend fun saveUserProfile(userProfile: UserProfile) {
         if (userProfile.uid.isBlank()) return
+        val updates = mutableMapOf<String, Any?>(
+            "uid" to userProfile.uid,
+            "fullName" to userProfile.fullName
+        )
+        userProfile.email?.let { updates["email"] = it }
+        userProfile.phoneNumber?.let { updates["phoneNumber"] = it }
+        userProfile.photoUrl?.let { updates["photoUrl"] = it }
         db.child("users")
             .child(userProfile.uid)
-            .setValue(userProfile)
+            .updateChildren(updates)
     }
 
     // Fetch user profile
@@ -103,11 +111,7 @@ class AccountScreenModel(
     // Toggle active food user mode in Realtime Database
     suspend fun updateFoodUserMode(uid: String, mode: UserMode) {
         if (uid.isBlank()) return
-        db.child("users")
-            .child(uid)
-            .updateChildren(
-                mapOf("foodMode" to mode)
-            )
+        trustedTransactionCall("setFoodMode", mapOf("mode" to mode.name))
     }
 
 }
