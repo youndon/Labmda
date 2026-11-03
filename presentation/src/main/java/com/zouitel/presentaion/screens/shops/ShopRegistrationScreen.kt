@@ -57,6 +57,8 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
 
         val imageUpload by screenModel.imageUpload.collectAsState()
         val isUploading = imageUpload is ImageUploadState.Uploading
+        val isSaving by screenModel.isSaving.collectAsState()
+        val saveError by screenModel.saveError.collectAsState()
 
         LaunchedEffect(imageUpload) {
             val state = imageUpload
@@ -166,6 +168,9 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                 }
 
                 item {
+                    saveError?.let { error ->
+                        Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
                     Button(
                         onClick = {
                             if (existingShop != null) {
@@ -178,7 +183,8 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                                     address = address,
                                     imageUrl = imageUrl,
                                     latitude = storeLat ?: existingShop.latitude,
-                                    longitude = storeLng ?: existingShop.longitude
+                                    longitude = storeLng ?: existingShop.longitude,
+                                    onSuccess = { navigator?.pop() }
                                 )
                             } else {
                                 screenModel.submitShopApplication(
@@ -190,18 +196,19 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                                     imageUrl = imageUrl,
                                     isOnline = isOnline,
                                     latitude = storeLat ?: Double.NaN,
-                                    longitude = storeLng ?: Double.NaN
+                                    longitude = storeLng ?: Double.NaN,
+                                    onSuccess = { navigator?.pop() }
                                 )
                             }
-                            navigator?.pop()
                         },
-                        enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank() && storeLat != null && storeLng != null && !isUploading,
+                        enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank() && storeLat != null && storeLng != null && !isUploading && !isSaving,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().height(52.dp)
                     ) {
                         Text(
                             when {
                                 isUploading -> "Uploading photo…"
+                                isSaving -> "Saving…"
                                 existingShop == null -> "Submit Application"
                                 else -> "Save Changes"
                             },
