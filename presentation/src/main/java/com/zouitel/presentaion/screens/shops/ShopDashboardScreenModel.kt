@@ -36,7 +36,7 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
 
     private fun listenToProducts() {
         screenModelScope.launch {
-            db.child("shops").child(shopId).child("products").valueEvents.collect { snapshot ->
+            db.child("shopProducts").child(shopId).valueEvents.collect { snapshot ->
                 val list = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
@@ -82,9 +82,9 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
     ) {
         screenModelScope.launch {
             val productRef = if (productId.isNullOrBlank()) {
-                db.child("shops").child(shopId).child("products").push()
+                db.child("shopProducts").child(shopId).push()
             } else {
-                db.child("shops").child(shopId).child("products").child(productId)
+                db.child("shopProducts").child(shopId).child(productId)
             }
 
             val pId = productRef.key ?: System.currentTimeMillis().toString()
@@ -141,14 +141,14 @@ class ShopDashboardScreenModel(val shopId: String) : ScreenModel {
 
     fun toggleProductAvailability(product: Product) {
         screenModelScope.launch {
-            db.child("shops").child(shopId).child("products").child(product.id)
+            db.child("shopProducts").child(shopId).child(product.id)
                 .child("isAvailable").setValue(!product.isAvailable)
         }
     }
 
     fun deleteProduct(productId: String) {
         screenModelScope.launch {
-            db.child("shops").child(shopId).child("products").child(productId).removeValue()
+            db.child("shopProducts").child(shopId).child(productId).removeValue()
         }
     }
 
