@@ -406,6 +406,12 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
   }, undefined, false);
 
   if (!completed.committed) {
+    const latest = completed.snapshot.child("orders/" + orderId);
+    if (latest.child("deliveryId").val() === replacementCourierId
+      && latest.child("deliveryReassignment/id").val() === activeReservationId
+      && latest.child("deliveryReassignment/status").val() === "COMPLETED") {
+      return { orderId, deliveryId: replacementCourierId, duplicate: true };
+    }
     throw new HttpsError("internal", "The ledger transfer was posted but the delivery reassignment could not be finalized. The order is locked for administrator recovery.");
   }
   return { orderId, deliveryId: replacementCourierId, amountMinor: reservation.amountMinor, ledgerOperationId: operationId, duplicate: false };
