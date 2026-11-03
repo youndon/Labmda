@@ -80,6 +80,16 @@
           ".write": false
         }
       }
+    },
+    "shopProducts": {
+      "$shopId": {
+        ".read": "auth != null && (root.child('shops').child($shopId).child('status').val() == 'APPROVED' || root.child('shops').child($shopId).child('ownerUid').val() == auth.uid)"
+      }
+    },
+    "restaurantMeals": {
+      "$restaurantId": {
+        ".read": "auth != null && (root.child('restaurants').child($restaurantId).child('status').val() == 'APPROVED' || $restaurantId == auth.uid || root.child('restaurants').child($restaurantId).child('managerId').val() == auth.uid)"
+      }
     }
   }
 }
