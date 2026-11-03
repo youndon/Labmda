@@ -25,7 +25,7 @@ class AdminRestaurantModel : ScreenModel {
 
     private fun listenToRestaurantApplications() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").valueEvents.collect { snapshot ->
+            db.child("users").orderByChild("foodStatus").equalTo("PENDING").valueEvents.collect { snapshot ->
                 val profiles = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
