@@ -10,6 +10,7 @@
     "test": "vitest run",
     "set-admin-claim": "node scripts/set-admin-claim.cjs",
     "migrate:financial-ledger": "node scripts/migrate-financial-ledger.cjs",
+    "migrate:catalog-paths": "node scripts/migrate-catalog-paths.cjs",
     "test:emulator": "vitest run --no-file-parallelism src/operations/quote-claim.emulator.test.ts src/finance/cash-collection.emulator.test.ts src/payments/refund-transaction.emulator.test.ts src/finance/ledger.firestore.emulator.test.ts"
   },
   "dependencies": {
