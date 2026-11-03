@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.shops
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.layout.ContentScale
@@ -42,11 +44,28 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
 
         var showAddEditDialog by remember { mutableStateOf(false) }
         var selectedProductToEdit by remember { mutableStateOf<Product?>(null) }
+        var searchQuery by remember { mutableStateOf("") }
+        var inventoryFilter by remember { mutableStateOf("All") }
+
+        val inventoryFilters = listOf("All", "Available", "Unavailable")
+        val visibleProducts = remember(products, searchQuery, inventoryFilter) {
+            val query = searchQuery.trim().lowercase()
+            products.filter { product ->
+                val matchesSearch = query.isBlank() || listOf(product.name, product.description, product.category)
+                    .any { it.lowercase().contains(query) }
+                val matchesFilter = when (inventoryFilter) {
+                    "Available" -> product.isAvailable && product.stockQuantity > 0
+                    "Unavailable" -> !product.isAvailable || product.stockQuantity <= 0
+                    else -> true
+                }
+                matchesSearch && matchesFilter
+            }
+        }
 
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Store Manager Dashboard", fontWeight = FontWeight.Bold) },
+                    title = { Text("Shop inventory", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -70,22 +89,68 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                 Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-            } else if (products.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No products added to your store yet. Tap + to add items.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().padding(paddingValues),
                     contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(products, key = { it.id }) { product ->
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Products and stock", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(
+                                "${visibleProducts.size} of ${products.size} products · ${products.count { it.isAvailable && it.stockQuantity > 0 }} available",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                placeholder = { Text("Search product or category") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) TextButton(onClick = { searchQuery = "" }) { Text("Clear") }
+                                }
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                inventoryFilters.forEach { filter ->
+                                    FilterChip(
+                                        selected = inventoryFilter == filter,
+                                        onClick = { inventoryFilter = filter },
+                                        label = { Text(filter) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (products.isEmpty()) {
+                        item {
+                            Text(
+                                "No products added yet. Tap + to add your first product.",
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    } else if (visibleProducts.isEmpty()) {
+                        item {
+                            Text(
+                                "No products match this search or inventory filter.",
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                    items(visibleProducts, key = { it.id }) { product ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(16.dp),
@@ -112,7 +177,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                 ) {
                                     Text(text = product.name, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                     Text(
-                                        text = "$${"%.2f".format(product.price)}",
+                                        text = "₱${"%.2f".format(product.price)}",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary
                                     )
@@ -138,7 +203,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                             color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                     }
-                                    Text(text = "In Stock: ${product.stockQuantity} units", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
+                                    Text(text = if (product.stockQuantity > 0) "Stock: ${product.stockQuantity} units" else "Out of stock", style = MaterialTheme.typography.labelMedium, color = if (product.stockQuantity > 0) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error)
                                 }
 
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
@@ -154,7 +219,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                                             onCheckedChange = { screenModel.toggleProductAvailability(product) }
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
-                                        Text(if (product.isAvailable) "Available" else "Out of Stock", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                        Text(if (product.isAvailable && product.stockQuantity > 0) "Available" else "Unavailable", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                                     }
 
                                     Row {
@@ -250,7 +315,7 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
                     OutlinedTextField(
                         value = price,
                         onValueChange = { price = it },
-                        label = { Text("Price ($)") },
+                        label = { Text("Price (₱)") },
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth()
