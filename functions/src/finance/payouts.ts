@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolvePayoutTransferReference, PayoutTransferReferenceError } from "./payout-transfer-reference.js";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { recordAdminFinancialAudit } from "./admin-financial.js";
 import {
   createFinancialTransfer,
@@ -16,7 +17,7 @@ import {
 const db = () => getDatabase();
 type PayoutMethod = "GCASH" | "BDO";
 type ProviderKind = "MERCHANT" | "DRIVER" | "DELIVERY";
-type PayoutStatus = "REQUESTED" | "APPROVED" | "REJECTING" | "PAYING" | "REJECTED" | "PAID";
+type PayoutStatus = "RESERVING" | "REQUESTED" | "APPROVED" | "REJECTING" | "PAYING" | "REJECTED" | "PAID" | "FAILED";
 
 function uidFrom(call: { auth?: { uid?: string } | null }): string {
   const uid = call.auth?.uid;
@@ -253,26 +254,77 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
   }
   const payoutId = randomUUID();
   const createdAt = Date.now();
-  await postFinancialOperation(payoutReservation({
-    payoutId, uid, accountId: selected.accountId, providerKind: selected.providerKind,
-    providerId: selected.providerId, amountMinor, createdAt,
-  }));
   const record = {
     payoutId, uid, providerKind: selected.providerKind, providerId: selected.providerId,
     accountId: selected.accountId, amountMinor, currency: "PHP", method: profile.method,
     accountName: profile.accountName, accountNumber: profile.accountNumber,
-    status: "REQUESTED" as PayoutStatus, createdAt, updatedAt: createdAt,
+    status: "RESERVING" as PayoutStatus, createdAt, updatedAt: createdAt,
   };
+  const created = await db().ref(`payoutRequests/${payoutId}`).transaction((current) => current === null ? record : undefined);
+  if (!created.committed) throw new HttpsError("aborted", "Could not create the payout request. Please try again.");
   try {
-    await db().ref(`payoutRequests/${payoutId}`).set(record);
-  } catch (error) {
-    await postFinancialOperation(payoutRelease({
-      payoutId, accountId: selected.accountId, providerKind: selected.providerKind,
-      providerId: selected.providerId, amountMinor, createdAt: Date.now(),
+    await postFinancialOperation(payoutReservation({
+      payoutId, uid, accountId: selected.accountId, providerKind: selected.providerKind,
+      providerId: selected.providerId, amountMinor, createdAt,
     }));
+  } catch (error) {
+    // Firestore can commit even when the caller loses the response. Keep RESERVING
+    // and let the idempotent recovery worker determine the committed outcome.
+    if (error instanceof Error && /Payout exceeds the provider available balance/i.test(error.message)) {
+      await db().ref(`payoutRequests/${payoutId}`).transaction((current) =>
+        current?.status === "RESERVING" ? { ...current, status: "FAILED", failureReason: "INSUFFICIENT_AVAILABLE_BALANCE", updatedAt: Date.now() } : undefined);
+    }
     throw error;
   }
-  return { payoutId, status: record.status, amountMinor, currency: "PHP" };
+  const requested = await updatePayoutStatus(payoutId, ["RESERVING"], "REQUESTED", {});
+  return { payoutId, status: requested.status, amountMinor, currency: "PHP" };
+});
+
+/**
+ * Repairs payout state transitions that were interrupted between RTDB and Firestore.
+ * RESERVING is safe to replay because the journal operation has a stable idempotency key.
+ * REJECTING is safe to replay for the same reason. PAYING is deliberately excluded:
+ * only an administrator can verify whether the external transfer actually happened.
+ */
+export const recoverInterruptedPayouts = onSchedule("every 5 minutes", async () => {
+  const [reserving, rejecting] = await Promise.all([
+    db().ref("payoutRequests").orderByChild("status").equalTo("RESERVING").get(),
+    db().ref("payoutRequests").orderByChild("status").equalTo("REJECTING").get(),
+  ]);
+  const records = [
+    ...Object.values((reserving.val() ?? {}) as Record<string, Record<string, unknown>>),
+    ...Object.values((rejecting.val() ?? {}) as Record<string, Record<string, unknown>>),
+  ];
+  for (const payout of records) {
+    const payoutId = String(payout.payoutId ?? "");
+    if (!safeId(payoutId) || !safeId(String(payout.accountId ?? "")) || !safeId(String(payout.providerId ?? ""))
+      || !Number.isSafeInteger(payout.amountMinor) || Number(payout.amountMinor) <= 0
+      || !Number.isSafeInteger(payout.createdAt)) {
+      console.error("Skipping malformed interrupted payout record", payoutId);
+      continue;
+    }
+    try {
+      if (payout.status === "RESERVING") {
+        await postFinancialOperation(payoutReservation({
+          payoutId, uid: String(payout.uid), accountId: String(payout.accountId),
+          providerKind: payout.providerKind as ProviderKind, providerId: String(payout.providerId),
+          amountMinor: Number(payout.amountMinor), createdAt: Number(payout.createdAt),
+        }));
+        await updatePayoutStatus(payoutId, ["RESERVING"], "REQUESTED", {});
+      } else if (payout.status === "REJECTING") {
+        await postFinancialOperation(payoutRelease({
+          payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
+          providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor),
+          createdAt: Number(payout.createdAt),
+        }));
+        await updatePayoutStatus(payoutId, ["REJECTING"], "REJECTED", {
+          rejectedAt: Date.now(), recoveryApplied: true,
+        });
+      }
+    } catch (error) {
+      console.error("Interrupted payout recovery will retry", payoutId, error);
+    }
+  }
 });
 
 export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call) => {
