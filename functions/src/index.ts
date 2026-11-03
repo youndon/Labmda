@@ -181,6 +181,7 @@ export {
   transitionOrderStatus,
   claimOrderDelivery,
   releaseOrderDelivery,
+  adminReassignOrderDelivery,
   completeOrderDelivery,
   claimRide,
   transitionTripStatus,
