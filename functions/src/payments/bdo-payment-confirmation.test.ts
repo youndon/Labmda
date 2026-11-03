@@ -10,7 +10,7 @@ const payment = {
 };
 const order = {
   id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT",
-  orderType: "FOOD", paymentStatus: "PENDING",
+  orderType: "FOOD", paymentStatus: "PENDING", amountMinor: 12_500,
 };
 const input = {
   paymentId: "pay_1", transferReference: "BDO-REF-1234",
@@ -109,6 +109,13 @@ describe("confirmBdoGcashPaymentRecord", () => {
       await expect(confirmBdoGcashPaymentRecord(fake.database, input))
         .rejects.toThrow(/could not be verified/i);
     }
+  });
+
+  it("rejects a transaction total that differs from the verified payment amount", async () => {
+    const fake = fakeDatabase(seed({ order: { amountMinor: 12_499 } }));
+    await expect(confirmBdoGcashPaymentRecord(fake.database, input))
+      .rejects.toThrow(/could not be verified/i);
+    expect(fake.value().payments.pay_1.status).toBe("PENDING");
   });
 
   it("rejects invalid confirmation input", async () => {
