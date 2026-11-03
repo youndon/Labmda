@@ -172,7 +172,7 @@ class DeliveryDashboardScreen : Screen {
                             },
                             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
                         ) {
-                            Text("Available Tasks (${activeDeliveries.size})")
+                            Text("Active Tasks (${activeDeliveries.size})")
                         }
                         SegmentedButton(
                             selected = selectedTab == 1,
@@ -419,8 +419,43 @@ class DeliveryDashboardScreen : Screen {
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                // Pickup & Drop-off Flow Layout
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val isAssignedToCourier = order.deliveryId.isNotBlank()
+                val isCashOrder = order.paymentMethod.equals("CASH", ignoreCase = true)
+                val isPaid = order.paymentStatus.equals("PAID", ignoreCase = true)
+
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = when {
+                        isCompleted -> MaterialTheme.colorScheme.primaryContainer
+                        isAssignedToCourier -> MaterialTheme.colorScheme.secondaryContainer
+                        else -> MaterialTheme.colorScheme.surfaceVariant
+                    }
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            when {
+                                isCompleted -> "DELIVERY COMPLETED"
+                                isAssignedToCourier -> "ASSIGNED TO YOU"
+                                else -> "AVAILABLE TASK"
+                            },
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            when {
+                                isCompleted -> "This order has been marked as delivered."
+                                isAssignedToCourier -> "Pickup and drop-off details are below. Confirm completion only after handing the order to the customer."
+                                else -> "Review the pickup, destination, and package before accepting."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Pickup and destination are shown as separate route stops.
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
@@ -493,12 +528,32 @@ class DeliveryDashboardScreen : Screen {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Total to collect:", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "₱${"%.2f".format(order.totalPrice)}",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
+                        when {
+                            isCashOrder && !isPaid -> "Cash to collect:"
+                            isPaid -> "Payment received:"
+                            else -> "Order total:"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            "₱${"%.2f".format(order.totalPrice)}",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            when {
+                                isCashOrder && !isPaid -> "Customer payment due"
+                                isPaid -> "Paid"
+                                else -> order.paymentStatus.ifBlank { "Payment status unavailable" }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isCashOrder && !isPaid) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -540,7 +595,7 @@ class DeliveryDashboardScreen : Screen {
                             ) {
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Mark as Delivered")
+                                Text("Confirm delivery completion")
                             }
 
                             OutlinedButton(
