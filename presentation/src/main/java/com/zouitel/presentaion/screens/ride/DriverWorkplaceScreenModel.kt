@@ -111,15 +111,6 @@ class DriverWorkplaceScreenModel : ScreenModel {
         screenModelScope.launch {
             val statusToSet = keepStatus ?: Status.PENDING
 
-            val vehicleMap = mapOf(
-                "type" to vehicleType.name,
-                "make" to make,
-                "model" to model,
-                "color" to color,
-                "licensePlate" to licensePlate,
-                "serviceType" to "Ride"
-            )
-
             val driverRef = db.child("users").child(uid).child("driverService")
             driverRef.updateChildren(
                 mapOf(
