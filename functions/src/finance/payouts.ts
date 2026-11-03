@@ -322,6 +322,14 @@ export const recoverInterruptedPayouts = onSchedule("every 5 minutes", async () 
         });
       }
     } catch (error) {
+      if (payout.status === "RESERVING" && error instanceof Error
+        && /Payout exceeds the provider available balance/i.test(error.message)) {
+        await db().ref(`payoutRequests/${payoutId}`).transaction((current) =>
+          current?.status === "RESERVING"
+            ? { ...current, status: "FAILED", failureReason: "INSUFFICIENT_AVAILABLE_BALANCE", updatedAt: Date.now() }
+            : undefined);
+        continue;
+      }
       console.error("Interrupted payout recovery will retry", payoutId, error);
     }
   }
@@ -341,13 +349,15 @@ export const getMyPayoutHistory = onCall({ enforceAppCheck: true }, async (call)
 
 export const getPendingPayoutRequests = onCall({ enforceAppCheck: true }, async (call) => {
   requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
-  const [requested, approved, rejecting, paying] = await Promise.all([
+  const [reserving, requested, approved, rejecting, paying] = await Promise.all([
+    db().ref("payoutRequests").orderByChild("status").equalTo("RESERVING").get(),
     db().ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get(),
     db().ref("payoutRequests").orderByChild("status").equalTo("APPROVED").get(),
     db().ref("payoutRequests").orderByChild("status").equalTo("REJECTING").get(),
     db().ref("payoutRequests").orderByChild("status").equalTo("PAYING").get(),
   ]);
   const pending = {
+    ...((reserving.val() ?? {}) as Record<string, Record<string, unknown>>),
     ...((requested.val() ?? {}) as Record<string, Record<string, unknown>>),
     ...((approved.val() ?? {}) as Record<string, Record<string, unknown>>),
     ...((rejecting.val() ?? {}) as Record<string, Record<string, unknown>>),
