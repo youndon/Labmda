@@ -44,6 +44,10 @@
         ".write": false
       }
     },
+    "payoutTransferReferenceIndex": {
+      ".read": false,
+      ".write": false
+    },
     "payoutRequests": {
       ".read": false,
       ".write": false,
