@@ -312,16 +312,26 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
     return { ...root, orders: { ...root.orders, [orderId]: { ...order, deliveryReassignment: reservation } } };
   }, undefined, false);
 
+  let reservation: Record<string, any>;
   if (!reserved.committed) {
     const current = reserved.snapshot.child("orders/" + orderId);
     if (current.child("deliveryId").val() === replacementCourierId
       && current.child("deliveryReassignment/status").val() === "COMPLETED") {
       return { orderId, deliveryId: replacementCourierId, duplicate: true };
     }
-    fail("This paid delivery cannot be reassigned. Verify its status, payment, courier and pending allocation.");
+    const pending = current.child("deliveryReassignment").val() as Record<string, any> | null;
+    if (current.child("status").val() === "OUT_FOR_DELIVERY"
+      && pending?.status === "PROCESSING"
+      && pending.replacementCourierId === replacementCourierId) {
+      // Resume a prior invocation that reserved the order but timed out while
+      // posting or finalizing the immutable ledger transfer.
+      reservation = pending;
+    } else {
+      fail("This paid delivery cannot be reassigned. Verify its status, payment, courier and pending allocation.");
+    }
+  } else {
+    reservation = reserved.snapshot.child("orders/" + orderId + "/deliveryReassignment").val() as Record<string, any>;
   }
-
-  const reservation = reserved.snapshot.child("orders/" + orderId + "/deliveryReassignment").val() as Record<string, any>;
   const operationId = "delivery_reassign_" + reservationId;
   const transfer = buildDeliveryReassignmentTransfer({
     operationId, orderId, previousCourierId: reservation.previousCourierId,
