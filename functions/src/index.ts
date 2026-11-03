@@ -23,16 +23,16 @@ function requireAuth(uid?: string): string {
   return uid;
 }
 function validateAddress(value: unknown, field: string): string {
-  if (typeof value !== "string") throw new HttpsError("invalid-argument", \`\${field} address is required.\`);
+  if (typeof value !== "string") throw new HttpsError("invalid-argument", `${field} address is required.`);
   const address = value.trim();
   if (address.length < 2 || address.length > 250 || /[\u0000-\u001F\u007F]/.test(address)) {
-    throw new HttpsError("invalid-argument", \`\${field} address must be 2–250 valid characters.\`);
+    throw new HttpsError("invalid-argument", `${field} address must be 2–250 valid characters.`);
   }
   return address;
 }
 async function enforceRouteQuoteRateLimit(uid: string): Promise<void> {
   const now = Date.now();
-  const ref = database.ref(\`rateLimits/routeQuotes/\${uid}\`);
+  const ref = database.ref(`rateLimits/routeQuotes/${uid}`);
   const result = await ref.transaction((current: { windowStartedAt?: number; count?: number } | null) => {
     const start = typeof current?.windowStartedAt === "number" ? current.windowStartedAt : 0;
     const count = typeof current?.count === "number" ? current.count : 0;
@@ -142,7 +142,7 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
     }
   }
   const pricedItems = await Promise.all(items.map(async (line) => {
-    const item = await database.ref(\`\${collection}/\${sourceId}/\${line.itemId}\`).get();
+    const item = await database.ref(`${collection}/${sourceId}/${line.itemId}`).get();
     if (!item.exists() || item.child("isAvailable").val() === false) throw new HttpsError("failed-precondition", "An item is unavailable.");
     if (kind === "SHOP") {
       const stock = item.child("stockQuantity").val();
