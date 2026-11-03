@@ -38,17 +38,17 @@ export function resolvePayoutTransferReference(
     if (!submitted) {
       throw new PayoutTransferReferenceError("Enter the completed GCash or BDO transfer reference.", "invalid-argument");
     }
-    return submitted;
+    return submitted.toUpperCase();
   }
 
-  const stored = typeof storedValue === "string" ? storedValue.trim() : "";
+  const stored = typeof storedValue === "string" ? storedValue.trim().toUpperCase() : "";
   if (!stored) {
     throw new PayoutTransferReferenceError(
       "This payout is marked PAYING without a saved transfer reference. Resolve it manually before retrying.",
       "failed-precondition",
     );
   }
-  if (submitted && submitted !== stored) {
+  if (submitted && submitted.toUpperCase() !== stored) {
     throw new PayoutTransferReferenceError(
       "The transfer reference cannot be changed after payout processing has started.",
       "failed-precondition",
