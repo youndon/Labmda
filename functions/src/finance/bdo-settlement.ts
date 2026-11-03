@@ -17,7 +17,7 @@ function admin(call: { auth?: { uid?: string; token?: Record<string, unknown> } 
 function ref(value: unknown): string {
   const v = typeof value === "string" ? value.trim() : "";
   if (!/^[A-Za-z0-9_-]{4,120}$/.test(v)) throw new HttpsError("invalid-argument", "A valid bank transfer reference is required.");
-  return v;
+  return v.toUpperCase();
 }
 function amount(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) throw new HttpsError("invalid-argument", "Amount must be a positive PHP-centavo integer.");
@@ -91,7 +91,9 @@ export const recordBdoBankTransfer = onCall({ enforceAppCheck: true }, async (ca
       }
     } else {
       const matches = await db().ref("payoutRequests").orderByChild("transferReference").equalTo(transferReference).get();
-      const candidate = Object.values((matches.val() ?? {}) as Record<string, Record<string, unknown>>)[0];
+      const candidates = Object.values((matches.val() ?? {}) as Record<string, Record<string, unknown>>);
+      // Never guess when historical records contain a duplicate reference.
+      const candidate = candidates.length === 1 ? candidates[0] : undefined;
       if (candidate && candidate.status === "PAID" && candidate.amountMinor === amountMinor) {
         await db().ref(`bdoBankTransfers/${id}`).update({ status: "MATCHED", matchedType: "PAYOUT", matchedId: String(candidate.payoutId) });
         await db().ref(`payoutRequests/${String(candidate.payoutId)}`).update({ bdoReconciledAt: transactionAt, bdoTransferId: id });
