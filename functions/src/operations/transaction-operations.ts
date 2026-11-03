@@ -333,10 +333,11 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
     reservation = reserved.snapshot.child("orders/" + orderId + "/deliveryReassignment").val() as Record<string, any>;
   }
   const activeReservationId = String(reservation.id);
+  const reservationCreatedAt = Number(reservation.createdAt);
   const operationId = "delivery_reassign_" + activeReservationId;
   const transfer = buildDeliveryReassignmentTransfer({
     operationId, orderId, previousCourierId: reservation.previousCourierId,
-    replacementCourierId, amountMinor: reservation.amountMinor, createdAt: now,
+    replacementCourierId, amountMinor: reservation.amountMinor, createdAt: reservationCreatedAt,
   });
   try {
     await postFinancialOperation(transfer);
@@ -372,7 +373,7 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
       id: activeReservationId, actorUid: adminUid, orderId, paymentId: reservation.paymentId,
       previousCourierId: reservation.previousCourierId, replacementCourierId,
       amountMinor: reservation.amountMinor, currency: "PHP", ledgerOperationId: operationId,
-      createdAt: now, completedAt,
+      createdAt: reservationCreatedAt, completedAt,
     };
     return {
       ...root,
