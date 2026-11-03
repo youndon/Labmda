@@ -10,9 +10,13 @@ export async function createRtdbEmulatorContext(seed: Record<string, unknown>) {
   const suffix = randomUUID();
   const seedApp = initializeApp({ projectId, databaseURL }, `seed-${suffix}`);
   const transactionApp = initializeApp({ projectId, databaseURL }, `transaction-${suffix}`);
+  const verificationApp = initializeApp({ projectId, databaseURL }, `verification-${suffix}`);
   const seedDatabase = getDatabase(seedApp);
   const transactionDatabase = getDatabase(transactionApp);
+  const verificationDatabase = getDatabase(verificationApp);
   await seedDatabase.ref().set(seed);
+  const verifiedSeed = await verificationDatabase.ref().get();
+  if (!verifiedSeed.exists()) throw new Error("The RTDB emulator seed was not visible to an independent app.");
 
   const observed: unknown[] = [];
   const instrumentReference = (reference: any): any => new Proxy(reference, {
@@ -40,7 +44,7 @@ export async function createRtdbEmulatorContext(seed: Record<string, unknown>) {
     observed,
     cleanup: async () => {
       await seedDatabase.ref().remove();
-      await Promise.all([deleteApp(seedApp), deleteApp(transactionApp)]);
+      await Promise.all([deleteApp(seedApp), deleteApp(transactionApp), deleteApp(verificationApp)]);
     },
   };
 }

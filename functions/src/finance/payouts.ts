@@ -331,11 +331,8 @@ async function updatePayoutStatus(
     if (!allowed.includes(current.status as PayoutStatus)) return;
     return { ...current, ...patch, status: next, updatedAt: Date.now() };
   });
-  const saved = result.snapshot.val() as Record<string, unknown> | null;
-  if (!result.committed || !saved || saved.status !== next) {
-    throw new HttpsError("failed-precondition", "This payout has already been processed or no longer exists.");
-  }
-  return saved;
+  if (!result.committed) throw new HttpsError("failed-precondition", "This payout has already been processed or no longer exists.");
+  return result.snapshot.val() as Record<string, unknown>;
 }
 
 export const approvePayoutRequest = onCall({ enforceAppCheck: true }, async (call) => {

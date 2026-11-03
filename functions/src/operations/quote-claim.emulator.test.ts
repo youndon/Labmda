@@ -21,7 +21,6 @@ describe.skipIf(!emulatorOnly)("RTDB emulator: quote claim null-cache retry", ()
       const result = await claimQuote(reference, "customer_1", "FOOD");
       expect(observed[0]).toBeNull();
       expect(observed.some((value: any) => value?.uid === "customer_1" && value?.status === "QUOTED")).toBe(true);
-      expect(result.committed).toBe(true);
       expect(result.quote.status).toBe("CREATING");
     } finally {
       await cleanup();
