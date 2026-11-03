@@ -91,7 +91,7 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
       paymentBreakdown: breakdown,
       providerFeePayer: method === "GCASH" ? String((await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() ?? "PLATFORM") : "PLATFORM",
       paymentStatus: method === "GCASH" ? "PENDING" : "CASH_DUE",
-      paymentMethod: method, paymentProvider: method === "GCASH" ? "BDO_CHECKOUT" : "CASH", quoteId,
+      paymentMethod: method, paymentProvider: method === "GCASH" ? "XENDIT" : "CASH", quoteId,
       pickupLocation: String(source.child("address").val() ?? ""),
       pickupLat,
       pickupLng,
@@ -117,7 +117,7 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
     updates[`pricing/quotes/${quoteId}/orderId`] = orderId;
     updates[`pricing/quotes/${quoteId}/createdResourceAt`] = now;
     await db().ref().update(updates);
-    return { orderId, status: order.status, paymentStatus: order.paymentStatus, totalMinor: breakdown.customerTotalMinor };
+    return { orderId, paymentId, status: order.status, paymentStatus: order.paymentStatus, totalMinor: breakdown.customerTotalMinor };
   } catch (error) {
     await restoreQuote(ref, quote);
     throw error;
@@ -155,7 +155,7 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
       platformCommissionMinor: breakdown.platformCommissionMinor,
       driverEarningsMinor: breakdown.driverEarningsMinor,
       paymentMethod: quote.paymentMethod === "GCASH" ? "GCASH" : "CASH",
-      paymentProvider: quote.paymentMethod === "GCASH" ? "BDO_CHECKOUT" : "CASH",
+      paymentProvider: quote.paymentMethod === "GCASH" ? "XENDIT" : "CASH",
       paymentStatus: quote.paymentMethod === "GCASH" ? "PENDING" : "CASH_DUE",
       paymentState: quote.paymentMethod === "GCASH" ? "PENDING_PAYMENT" : "CASH_DUE",
       quoteId, pricingVersion: quote.pricingVersion, currency: "PHP",
@@ -181,7 +181,7 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
     updates[`pricing/quotes/${quoteId}/tripId`] = tripId;
     updates[`pricing/quotes/${quoteId}/createdResourceAt`] = now;
     await db().ref().update(updates);
-    return { tripId, status: trip.status, fareMinor: breakdown.fareMinor, customerTotalMinor: breakdown.customerTotalMinor };
+    return { tripId, paymentId, status: trip.status, fareMinor: breakdown.fareMinor, customerTotalMinor: breakdown.customerTotalMinor };
   } catch (error) {
     await restoreQuote(ref, quote);
     throw error;
@@ -239,7 +239,7 @@ export const createDeliveryFromQuote = onCall({ enforceAppCheck: true }, async (
     updates[`pricing/quotes/${quoteId}/orderId`] = orderId;
     updates[`pricing/quotes/${quoteId}/createdResourceAt`] = now;
     await db().ref().update(updates);
-    return { orderId, status: order.status, paymentStatus: order.paymentStatus, totalMinor: breakdown.customerTotalMinor };
+    return { orderId, paymentId, status: order.status, paymentStatus: order.paymentStatus, totalMinor: breakdown.customerTotalMinor };
   } catch (error) {
     await restoreQuote(ref, quote);
     throw error;
