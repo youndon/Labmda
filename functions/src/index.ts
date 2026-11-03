@@ -101,7 +101,7 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
   const clientRequest = data as unknown as QuoteRequest;
   validatePoint(clientRequest.dropoff, "Drop-off");
   const root = kind === "FOOD" ? "restaurants" : "shops";
-  const collection = kind === "FOOD" ? "meals" : "products";
+  const collection = kind === "FOOD" ? "restaurantMeals" : "shopProducts";
   const sourceSnapshot = await database.ref(`${root}/${sourceId}`).get();
   if (!sourceSnapshot.exists()) throw new HttpsError("not-found", "The selected merchant was not found.");
   if (kind === "FOOD" && sourceSnapshot.child("isOpen").val() === false) throw new HttpsError("failed-precondition", "This restaurant is currently closed.");
@@ -119,7 +119,7 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
     if (!line || typeof line.itemId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(line.itemId) || !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) {
       throw new HttpsError("invalid-argument", "Each item must have a valid ID and quantity from 1 to 99.");
     }
-    const item = await database.ref(`${root}/${sourceId}/${collection}/${line.itemId}`).get();
+    const item = await database.ref(`${collection}/${sourceId}/${line.itemId}`).get();
     if (!item.exists() || item.child("isAvailable").val() === false) throw new HttpsError("failed-precondition", "An item is unavailable.");
     if (kind === "SHOP") {
       const stock = item.child("stockQuantity").val();
