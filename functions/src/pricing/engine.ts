@@ -74,6 +74,11 @@ function roundBps(amountMinor: number, bps: number): number {
   assertBps(bps, "basisPoints");
   return Number((BigInt(amountMinor) * BigInt(bps) + 5000n) / 10000n);
 }
+function roundVehicleMultiplierBps(amountMinor: number, multiplierBps: number): number {
+  assertMinor(amountMinor, "amountMinor");
+  assertVehicleMultiplierBps(multiplierBps);
+  return Number((BigInt(amountMinor) * BigInt(multiplierBps) + 5000n) / 10000n);
+}
 function proratePerKm(distanceMeters: number, perKmMinor: number): number {
   if (!Number.isSafeInteger(distanceMeters) || distanceMeters < 0) throw new Error("distanceMeters must be a non-negative integer.");
   assertMinor(perKmMinor, "perKmMinor");
@@ -133,7 +138,7 @@ export function calculateRideFare(config: PricingConfig["ride"], route: RouteMet
   assertMinor(timeCharge, "ride.timeCharge");
   const standardFareMinor = Math.max(config.minimumFareMinor, config.baseFareMinor + distanceCharge + timeCharge);
   assertVehicleMultiplierBps(vehicleMultiplierBps);
-  const fareMinor = roundBps(standardFareMinor, vehicleMultiplierBps);
+  const fareMinor = roundVehicleMultiplierBps(standardFareMinor, vehicleMultiplierBps);
   assertMinor(fareMinor, "ride.fareMinor");
   const platformCommissionMinor = roundBps(fareMinor, config.platformCommissionBps);
   return { fareMinor, platformCommissionMinor, driverEarningsMinor: fareMinor - platformCommissionMinor };
