@@ -4,6 +4,8 @@ import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
+import com.zouitel.presentaion.model.VehicleInfo
+import com.zouitel.presentaion.model.VehicleType
 import com.zouitel.presentaion.screens.delivery.DeliveryAccountInfo
 import com.zouitel.presentaion.screens.delivery.DeliveryType
 import dev.gitlive.firebase.Firebase
@@ -41,11 +43,19 @@ class AdminDeliveryModel : ScreenModel {
                             val serviceStr = runCatching { deliveryChild.child("deliveryType").value<String>() }.getOrDefault("COURIER")
                             val deliveryType = runCatching { DeliveryType.valueOf(serviceStr) }.getOrDefault(DeliveryType.COURIER)
                             val vehicleType = runCatching { deliveryChild.child("vehicleType").value<String>() }.getOrDefault("")
+                            val vehicleInfo = VehicleInfo(
+                                type = runCatching { VehicleType.valueOf(vehicleType) }.getOrNull()
+                            )
+                            val identityDocumentLink = runCatching {
+                                deliveryChild.child("identityDocumentLink").value<String>()
+                            }.getOrDefault("")
                             val statusStr = runCatching { deliveryChild.child("status").value<String>() }.getOrDefault("NONE")
                             val status = runCatching { Status.valueOf(statusStr) }.getOrDefault(Status.NONE)
 
                             DeliveryAccountInfo(
                                 deliveryType = deliveryType,
+                                vehicleInfo = vehicleInfo,
+                                identityDocumentLink = identityDocumentLink,
                                 status = status
                             )
                         } else {
