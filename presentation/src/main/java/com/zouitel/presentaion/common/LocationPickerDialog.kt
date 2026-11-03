@@ -49,10 +49,12 @@ fun LocationPickerDialog(
     var picked by remember { mutableStateOf(initial) }
     var address by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
+    var isSearching by remember { mutableStateOf(false) }
+    var searchError by remember { mutableStateOf<String?>(null) }
 
     val start = initial ?: referencePoint
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(start ?: LatLng(0.0, 0.0), if (start != null) 14f else 2f)
+        position = CameraPosition.fromLatLngZoom(start ?: LatLng(12.8797, 121.7740), if (start != null) 14f else 5.5f)
     }
 
     LaunchedEffect(picked) {
@@ -63,11 +65,20 @@ fun LocationPickerDialog(
     }
 
     fun search() {
-        if (query.isBlank()) return
+        if (query.isBlank() || isSearching) return
         scope.launch {
-            forwardGeocode(context, query)?.let {
-                picked = it
-                runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(it, 16f), 600) }
+            isSearching = true
+            searchError = null
+            try {
+                val result = forwardGeocode(context, query)
+                if (result == null) {
+                    searchError = "No matching address found. Try a nearby street or landmark."
+                } else {
+                    picked = result
+                    runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(result, 16f), 600) }
+                }
+            } finally {
+                isSearching = false
             }
         }
     }
@@ -131,22 +142,39 @@ fun LocationPickerDialog(
                         }
                     }
 
-                    OutlinedTextField(
+                    Column(
+                        modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
                         placeholder = { Text("Search address") },
                         singleLine = true,
                         trailingIcon = {
-                            IconButton(onClick = { search() }) {
-                                Icon(Icons.Default.Search, contentDescription = "Search")
+                            if (isSearching) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                IconButton(onClick = { search() }) {
+                                    Icon(Icons.Default.Search, contentDescription = "Search")
+                                }
                             }
                         },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surface,
                             unfocusedContainerColor = MaterialTheme.colorScheme.surface
                         ),
-                        modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(12.dp)
+                        modifier = Modifier.fillMaxWidth()
                     )
+                        searchError?.let { error ->
+                            Text(
+                                text = error,
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
             }
         }

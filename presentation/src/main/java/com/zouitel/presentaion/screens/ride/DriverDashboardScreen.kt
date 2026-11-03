@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.common.LabmdaAlertDialog
+
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
@@ -335,7 +337,7 @@ class DriverDashboardScreen : Screen {
     ) {
         var showCashConfirmation by remember(trip.id) { mutableStateOf(false) }
         if (showCashConfirmation) {
-            AlertDialog(
+            LabmdaAlertDialog(
                 onDismissRequest = { showCashConfirmation = false },
                 title = { Text("Confirm cash collection") },
                 text = { Text("Confirm that you physically received ₱${"%.2f".format(trip.fare)} from the passenger for this completed ride.") },

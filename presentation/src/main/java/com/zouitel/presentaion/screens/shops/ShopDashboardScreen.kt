@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.common.LabmdaAlertDialog
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -293,9 +295,8 @@ data class ShopDashboardScreen(val shopId: String) : Screen {
             onDispose { onUploadHandled() }
         }
 
-        AlertDialog(
+        LabmdaAlertDialog(
             onDismissRequest = onDismiss,
-            shape = RoundedCornerShape(20.dp),
             title = { Text(if (product == null) "Add New Product" else "Edit Product", fontWeight = FontWeight.Bold) },
             text = {
                 Column(

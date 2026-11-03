@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.delivery
 
+import com.zouitel.presentaion.common.LabmdaAlertDialog
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -307,9 +309,8 @@ class DeliveryWorkplaceScreen : Screen {
         var documentLink by remember { mutableStateOf(service?.identityDocumentLink ?: "") }
         var expandedDropdown by remember { mutableStateOf(false) }
 
-        AlertDialog(
+        LabmdaAlertDialog(
             onDismissRequest = onDismiss,
-            shape = RoundedCornerShape(20.dp),
             title = { Text(if (service == null) "Register Delivery Service" else "Edit Delivery Service", fontWeight = FontWeight.Bold) },
             text = {
                 Column(

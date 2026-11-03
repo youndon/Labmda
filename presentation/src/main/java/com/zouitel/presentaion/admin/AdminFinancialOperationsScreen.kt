@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.admin
 
+import com.zouitel.presentaion.common.LabmdaAlertDialog
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,7 +19,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Scale
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -406,7 +407,7 @@ class AdminFinancialOperationsScreen : Screen {
         }
 
         checkoutTarget?.let { payment ->
-            AlertDialog(
+            LabmdaAlertDialog(
                 onDismissRequest = { checkoutTarget = null },
                 title = { Text("Attach BDO Checkout link") },
                 text = {
@@ -424,7 +425,7 @@ class AdminFinancialOperationsScreen : Screen {
         }
 
         bdoConfirmTarget?.let { payment ->
-            AlertDialog(
+            LabmdaAlertDialog(
                 onDismissRequest = { bdoConfirmTarget = null },
                 title = { Text("Verify BDO GCash payment") },
                 text = {
@@ -446,7 +447,7 @@ class AdminFinancialOperationsScreen : Screen {
         }
 
         refundTarget?.let { payment ->
-            AlertDialog(
+            LabmdaAlertDialog(
                 onDismissRequest = { refundTarget = null },
                 title = { Text("Create refund case") },
                 text = {
@@ -464,7 +465,7 @@ class AdminFinancialOperationsScreen : Screen {
         }
 
         completionTarget?.let { refund ->
-            AlertDialog(
+            LabmdaAlertDialog(
                 onDismissRequest = { completionTarget = null },
                 title = { Text("Confirm external refund") },
                 text = {
@@ -510,7 +511,7 @@ private fun AdjustmentDialog(onDismiss: () -> Unit, onSubmit: (List<String>) -> 
         "Destination account", "Destination bucket", "Destination party type", "Destination party ID"
     )
     val values = remember { labels.map { mutableStateOf("") } }
-    AlertDialog(
+    LabmdaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Resolve ledger discrepancy") },
         text = {

@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.delivery
 
+import com.zouitel.presentaion.common.LabmdaAlertDialog
+
 import com.zouitel.presentaion.common.LabmdaModalBottomSheet
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -351,7 +353,7 @@ class DeliveryDashboardScreen : Screen {
     ) {
         var showCashConfirmation by remember(order.id) { mutableStateOf(false) }
         if (showCashConfirmation) {
-            AlertDialog(
+            LabmdaAlertDialog(
                 onDismissRequest = { showCashConfirmation = false },
                 title = { Text("Confirm cash collection") },
                 text = { Text("Confirm that you physically received ₱${"%.2f".format(order.totalPrice)} from the customer for this delivered order.") },

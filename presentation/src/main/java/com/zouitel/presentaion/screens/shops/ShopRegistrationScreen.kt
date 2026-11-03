@@ -31,6 +31,7 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.ImagePicker
+import com.zouitel.presentaion.common.LocationPickerDialog
 import com.zouitel.presentaion.screens.food.ImageUploadState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -243,8 +244,10 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
             }
 
             if (showMapPicker) {
-                StoreLocationMapPicker(
-                    initialPosition = if (storeLat != null && storeLng != null) LatLng(storeLat!!, storeLng!!) else null,
+                LocationPickerDialog(
+                    title = "Select Store Location",
+                    confirmLabel = "Confirm location",
+                    initial = if (storeLat != null && storeLng != null) LatLng(storeLat!!, storeLng!!) else null,
                     onConfirm = { point, resolvedAddress ->
                         storeLat = point.latitude
                         storeLng = point.longitude
@@ -253,96 +256,6 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                     },
                     onDismiss = { showMapPicker = false }
                 )
-            }
-        }
-    }
-
-    @OptIn(ExperimentalMaterial3Api::class)
-    @Composable
-    private fun StoreLocationMapPicker(
-        initialPosition: LatLng?,
-        onConfirm: (LatLng, String) -> Unit,
-        onDismiss: () -> Unit
-    ) {
-        val context = LocalContext.current
-        var pickedLocation by remember { mutableStateOf(initialPosition) }
-        var resolvedAddress by remember { mutableStateOf("") }
-
-        val cameraPositionState = rememberCameraPositionState {
-            position = CameraPosition.fromLatLngZoom(initialPosition ?: LatLng(28.0339, 1.6596), if (initialPosition != null) 15f else 5f)
-        }
-
-        LaunchedEffect(pickedLocation) {
-            pickedLocation?.let {
-                resolvedAddress = reverseGeocode(context, it)
-            }
-        }
-
-        Dialog(
-            onDismissRequest = onDismiss,
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Surface(modifier = Modifier.fillMaxSize()) {
-                Scaffold(
-                    topBar = {
-                        CenterAlignedTopAppBar(
-                            title = { Text("Select Store Location", fontWeight = FontWeight.Bold) },
-                            navigationIcon = {
-                                IconButton(onClick = onDismiss) {
-                                    Icon(Icons.Default.Close, contentDescription = "Close")
-                                }
-                            }
-                        )
-                    },
-                    bottomBar = {
-                        Surface(
-                            tonalElevation = 8.dp,
-                            shadowElevation = 8.dp,
-                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.fillMaxWidth().padding(20.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Text(
-                                    text = when {
-                                        pickedLocation == null -> "Tap on the map to pin your store location"
-                                        resolvedAddress.isBlank() -> "Resolving address..."
-                                        else -> resolvedAddress
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Button(
-                                    onClick = { pickedLocation?.let { onConfirm(it, resolvedAddress) } },
-                                    enabled = pickedLocation != null && resolvedAddress.isNotBlank(),
-                                    shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier.fillMaxWidth().height(50.dp)
-                                ) {
-                                    Text("Confirm Location", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                ) { padding ->
-                    GoogleMap(
-                        modifier = Modifier.fillMaxSize().padding(padding),
-                        cameraPositionState = cameraPositionState,
-                        uiSettings = MapUiSettings(zoomControlsEnabled = true, myLocationButtonEnabled = true),
-                        onMapClick = { clickedPoint ->
-                            pickedLocation = clickedPoint
-                        }
-                    ) {
-                        pickedLocation?.let { point ->
-                            Marker(
-                                state = rememberUpdatedMarkerState(position = point),
-                                title = "Store Location",
-                                snippet = resolvedAddress,
-                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
-                            )
-                        }
-                    }
-                }
             }
         }
     }
