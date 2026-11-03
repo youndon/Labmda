@@ -44,6 +44,7 @@ import com.zouitel.presentaion.screens.delivery.DeliveryWorkplaceScreen
 import com.zouitel.presentaion.screens.food.RestaurantWorkplaceScreen
 import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
 import com.zouitel.presentaion.screens.ride.RideHistoryScreen
+import com.zouitel.presentaion.screens.payment.PaymentMethodsScreen
 import com.zouitel.presentaion.screens.shops.ShopWorkplaceScreen
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -228,7 +229,7 @@ class AccountScreen : Screen {
                             Column {
                                 GroupedAccountRow(Icons.Filled.History, "Orders & Ride History") { navigator.push(RideHistoryScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                                GroupedAccountRow(Icons.Filled.CreditCard, "Payment Methods & Wallet") { /* TODO */ }
+                                GroupedAccountRow(Icons.Filled.CreditCard, "Payment Methods & Wallet") { navigator.push(PaymentMethodsScreen()) }
                                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                                 GroupedAccountRow(Icons.Filled.NotificationsNone, "Notifications & Alerts") { /* TODO */ }
                             }
