@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.delivery
 
+import com.zouitel.presentaion.common.LabmdaModalBottomSheet
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -297,7 +298,7 @@ class DeliveryDashboardScreen : Screen {
                 }
 
                 if (selectedOrder != null) {
-                    ModalBottomSheet(onDismissRequest = { selectedOrderId = null }) {
+                    LabmdaModalBottomSheet(onDismissRequest = { selectedOrderId = null }) {
                         Column(
                             modifier = Modifier
                                 .verticalScroll(rememberScrollState())
