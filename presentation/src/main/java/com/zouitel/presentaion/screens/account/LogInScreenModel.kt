@@ -17,10 +17,10 @@ class LogInScreenModel(
             // Update identity fields only. Never serialize UserProfile here:
             // doing so would overwrite server-owned approvals and service settings.
             val updates = mutableMapOf<String, Any?>(
-                "uid" to userProfile.uid,
-                "fullName" to userProfile.fullName
+                "uid" to userProfile.uid
             )
-            userProfile.email?.let { updates["email"] = it }
+            userProfile.fullName.takeIf { it.isNotBlank() }?.let { updates["fullName"] = it }
+            userProfile.email?.takeIf { it.isNotBlank() }?.let { updates["email"] = it }
             userProfile.phoneNumber?.let { updates["phoneNumber"] = it }
             userProfile.photoUrl?.let { updates["photoUrl"] = it }
             userNode.updateChildren(updates)
