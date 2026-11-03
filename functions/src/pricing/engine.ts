@@ -64,6 +64,11 @@ function assertMinor(value: number, field: string): void {
 function assertBps(value: number, field: string): void {
   if (!Number.isSafeInteger(value) || value < 0 || value > 10000) throw new Error(`${field} must be between 0 and 10000 basis points.`);
 }
+function assertVehicleMultiplierBps(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1000 || value > 30000) {
+    throw new Error("ride vehicle multiplier must be between 1000 and 30000 basis points.");
+  }
+}
 function roundBps(amountMinor: number, bps: number): number {
   assertMinor(amountMinor, "amountMinor");
   assertBps(bps, "basisPoints");
@@ -127,7 +132,7 @@ export function calculateRideFare(config: PricingConfig["ride"], route: RouteMet
   const timeCharge = minutes * config.perMinuteMinor;
   assertMinor(timeCharge, "ride.timeCharge");
   const standardFareMinor = Math.max(config.minimumFareMinor, config.baseFareMinor + distanceCharge + timeCharge);
-  assertBps(vehicleMultiplierBps, "ride vehicle multiplier");
+  assertVehicleMultiplierBps(vehicleMultiplierBps);
   const fareMinor = roundBps(standardFareMinor, vehicleMultiplierBps);
   assertMinor(fareMinor, "ride.fareMinor");
   const platformCommissionMinor = roundBps(fareMinor, config.platformCommissionBps);
