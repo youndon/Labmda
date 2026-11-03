@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.shops
 
+import com.zouitel.presentaion.common.LabmdaModalBottomSheet
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
@@ -313,7 +314,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
             // Demand Card Bottom Sheet Popup
             if (showOrderSheet) {
-                ModalBottomSheet(onDismissRequest = { if (!isSubmitting) showOrderSheet = false }) {
+                LabmdaModalBottomSheet(onDismissRequest = { if (!isSubmitting) showOrderSheet = false }) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)

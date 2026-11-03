@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.food
 
+import com.zouitel.presentaion.common.LabmdaModalBottomSheet
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -244,7 +245,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
         // Checkout Bottom Sheet
         if (showOrderSheet) {
-            ModalBottomSheet(onDismissRequest = { if (!isSubmitting) showOrderSheet = false }) {
+            LabmdaModalBottomSheet(onDismissRequest = { if (!isSubmitting) showOrderSheet = false }) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
