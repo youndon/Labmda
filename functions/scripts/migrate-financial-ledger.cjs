@@ -4,6 +4,7 @@
 const { initializeApp, applicationDefault } = require("firebase-admin/app");
 const { getDatabase } = require("firebase-admin/database");
 const { getFirestore } = require("firebase-admin/firestore");
+const { isDeepStrictEqual } = require("node:util");
 
 const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
 const databaseURL = process.env.FIREBASE_DATABASE_URL;
@@ -23,15 +24,22 @@ function safeId(value, label) {
   if (typeof value !== "string" || !value || value.includes("/")) throw new Error(`Invalid ${label} in legacy financial data.`);
   return value;
 }
-async function assertEmpty(collection) {
-  const snapshot = await firestore.collection(collection).limit(1).get();
-  if (!snapshot.empty) throw new Error(`Firestore collection ${collection} is not empty. Refusing to overwrite existing financial data.`);
+async function writeDocument(ref, value) {
+  await firestore.runTransaction(async (transaction) => {
+    const existing = await transaction.get(ref);
+    if (existing.exists) {
+      if (!isDeepStrictEqual(existing.data(), value)) {
+        throw new Error(`Migration recovery conflict at ${ref.path}; existing target data differs from the frozen RTDB snapshot.`);
+      }
+      return;
+    }
+    transaction.create(ref, value);
+  });
 }
 async function writeDocuments(collection, values) {
-  for (const group of chunks(values, 400)) {
-    const batch = firestore.batch();
-    for (const [id, value] of group) batch.create(firestore.collection(collection).doc(id), value);
-    await batch.commit();
+  for (const group of chunks(values, 20)) {
+    await Promise.all(group.map(([id, value]) =>
+      writeDocument(firestore.collection(collection).doc(id), value)));
   }
 }
 async function main() {
@@ -95,24 +103,16 @@ async function main() {
     }
   }
 
-  for (const collection of ["financialOperations", "financialEntries", "financialAccounts", "financialIdempotency", "financialProviderActivity"]) {
-    await assertEmpty(collection);
-  }
+  // Resume safely after interruption. Existing matching documents are verified and
+  // skipped; a conflicting document aborts without overwriting financial history.
   const providerUids = [...new Set(activity.map(([uid]) => uid))];
-  for (const uid of providerUids) {
-    const existing = await firestore.collection("financialProviderActivity").doc(uid).collection("operations").limit(1).get();
-    if (!existing.empty) throw new Error(`Provider activity for ${uid} already exists. Refusing to overwrite Firestore data.`);
-  }
   await writeDocuments("financialOperations", operations);
   await writeDocuments("financialEntries", entries);
   await writeDocuments("financialAccounts", accounts);
   await writeDocuments("financialIdempotency", idempotency);
-  for (const group of chunks(activity, 400)) {
-    const batch = firestore.batch();
-    for (const [uid, operationId, operation] of group) {
-      batch.create(firestore.collection("financialProviderActivity").doc(uid).collection("operations").doc(operationId), operation);
-    }
-    await batch.commit();
+  for (const group of chunks(activity, 20)) {
+    await Promise.all(group.map(([uid, operationId, operation]) =>
+      writeDocument(firestore.collection("financialProviderActivity").doc(uid).collection("operations").doc(operationId), operation)));
   }
 
   const [operationCount, entryCount, accountCount, keyCount, activityCounts] = await Promise.all([
