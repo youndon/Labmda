@@ -29,7 +29,6 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
-import com.zouitel.presentaion.common.LocationPickerDialog
 import com.zouitel.presentaion.screens.payment.rememberCustomerPaymentAvailability
 import kotlinx.coroutines.launch
 import android.content.Context
@@ -459,12 +458,10 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
             }
 
             if (showMapPicker) {
-                LocationPickerDialog(
-                    title = "Choose drop-off location",
-                    confirmLabel = "Confirm Drop-off",
+                DropoffMapPicker(
+                    shopName = shop.name,
+                    shopPoint = shopPoint,
                     initial = dropoff,
-                    referencePoint = shopPoint,
-                    referenceLabel = shop.name,
                     onConfirm = { point, address ->
                         dropoff = point
                         deliveryAddress = address
@@ -476,6 +473,105 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         showOrderSheet = true
                     }
                 )
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun DropoffMapPicker(
+        shopName: String,
+        shopPoint: LatLng?,
+        initial: LatLng?,
+        onConfirm: (LatLng, String) -> Unit,
+        onDismiss: () -> Unit
+    ) {
+        val context = LocalContext.current
+        var picked by remember { mutableStateOf(initial) }
+        var address by remember { mutableStateOf("") }
+
+        val start = initial ?: shopPoint
+        val cameraPositionState = rememberCameraPositionState {
+            position = CameraPosition.fromLatLngZoom(start ?: LatLng(0.0, 0.0), if (start != null) 14f else 2f)
+        }
+
+        LaunchedEffect(picked) {
+            picked?.let {
+                address = ""
+                address = reverseGeocode(context, it)
+            }
+        }
+
+        Dialog(
+            onDismissRequest = onDismiss,
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                Scaffold(
+                    topBar = {
+                        CenterAlignedTopAppBar(
+                            title = { Text("Choose drop-off location", fontWeight = FontWeight.Bold) },
+                            navigationIcon = {
+                                IconButton(onClick = onDismiss) {
+                                    Icon(Icons.Default.Close, contentDescription = "Close")
+                                }
+                            }
+                        )
+                    },
+                    bottomBar = {
+                        Surface(
+                            tonalElevation = 8.dp,
+                            shadowElevation = 8.dp,
+                            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Text(
+                                    when {
+                                        picked == null -> "Tap the map to place your drop-off pin"
+                                        address.isBlank() -> "Resolving address…"
+                                        else -> address
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Button(
+                                    onClick = { picked?.let { onConfirm(it, address) } },
+                                    enabled = picked != null && address.isNotBlank(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                                ) {
+                                    Text("Confirm Drop-off", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                ) { padding ->
+                    GoogleMap(
+                        modifier = Modifier.fillMaxSize().padding(padding),
+                        cameraPositionState = cameraPositionState,
+                        uiSettings = MapUiSettings(myLocationButtonEnabled = false, zoomControlsEnabled = false),
+                        onMapClick = { picked = it }
+                    ) {
+                        shopPoint?.let {
+                            Marker(
+                                state = rememberUpdatedMarkerState(position = it),
+                                title = shopName,
+                                snippet = "Pickup",
+                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                            )
+                        }
+                        picked?.let {
+                            Marker(
+                                state = rememberUpdatedMarkerState(position = it),
+                                title = "Drop-off",
+                                icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
