@@ -77,7 +77,7 @@ export const syncActiveRideRequest = onValueWritten(
     }
     if (afterUid && isActiveRideStatus(after?.status)) {
       updates[`activeRideRequests/${afterUid}/${tripId}`] = {
-        status: String(after.status),
+        status: String(after?.status),
         updatedAt: Date.now(),
       };
     }
