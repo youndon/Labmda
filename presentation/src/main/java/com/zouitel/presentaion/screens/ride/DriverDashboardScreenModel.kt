@@ -6,13 +6,10 @@ import com.zouitel.presentaion.common.Trip
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
-import kotlinx.coroutines.DelicateCoroutinesApi
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class DriverDashboardScreenModel : ScreenModel {
@@ -171,11 +168,4 @@ class DriverDashboardScreenModel : ScreenModel {
 
     fun setDriverOffline() = setOnline(false)
 
-    @OptIn(DelicateCoroutinesApi::class)
-    override fun onDispose() {
-        val uid = currentUser?.uid ?: return
-        GlobalScope.launch {
-            runCatching { db.child("users").child(uid).child("driverService").child("isOnline").setValue(false) }
-        }
-    }
 }
