@@ -317,6 +317,7 @@ class LogInScreen : Screen {
 
                                         val gitLiveCredential = dev.gitlive.firebase.auth.PhoneAuthProvider().credential(id, otpCode)
                                         signInWithGitLiveCredential(gitLiveCredential, coroutineScope, context,
+                                            screenModel,
                                             onSignedIn) { isLoading = it }
                                     },
                                     modifier = Modifier
@@ -367,13 +368,27 @@ class LogInScreen : Screen {
         credential: AuthCredential,
         scope: CoroutineScope,
         context: android.content.Context,
+        screenModel: LogInScreenModel,
         onSignedIn: () -> Unit,
         setLoading: (Boolean) -> Unit
     ) {
         scope.launch {
             setLoading(true)
             try {
-                Firebase.auth.signInWithCredential(credential)
+                val authResult = Firebase.auth.signInWithCredential(credential)
+                val firebaseUser = authResult.user
+                if (firebaseUser != null && firebaseUser.uid.isNotBlank()) {
+                    val saved = screenModel.saveUserProfile(
+                        UserProfile(
+                            uid = firebaseUser.uid,
+                            fullName = firebaseUser.displayName ?: "",
+                            email = firebaseUser.email,
+                            phoneNumber = firebaseUser.phoneNumber,
+                            photoUrl = firebaseUser.photoURL
+                        )
+                    )
+                    saved.e?.let { throw it }
+                }
                 onSignedIn()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Invalid code, try again", Toast.LENGTH_SHORT).show()
@@ -394,7 +409,20 @@ class LogInScreen : Screen {
         scope.launch {
             setLoading(true)
             try {
-                FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                val firebaseUser = authResult.user
+                if (firebaseUser != null && !firebaseUser.uid.isNullOrBlank()) {
+                    val saved = screenModel.saveUserProfile(
+                        UserProfile(
+                            uid = firebaseUser.uid,
+                            fullName = firebaseUser.displayName ?: "",
+                            email = firebaseUser.email,
+                            phoneNumber = firebaseUser.phoneNumber,
+                            photoUrl = firebaseUser.photoUrl?.toString()
+                        )
+                    )
+                    saved.e?.let { throw it }
+                }
                 onSignedIn()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Invalid code, try again", Toast.LENGTH_SHORT).show()
