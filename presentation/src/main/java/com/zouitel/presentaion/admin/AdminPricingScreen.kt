@@ -221,6 +221,7 @@ class AdminPricingScreen : Screen {
                             Text("PRICING CONTROL", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             Text("Set the rates used by server-generated quotes.", style = MaterialTheme.typography.bodyMedium)
                             Text("Money is entered in PHP. Commission rates use basis points: 100 = 1%, 1,000 = 10%. Saving increments the pricing version.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("These values are submitted to the pricing backend. Customer quotes and fares must still be calculated and validated by the server.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (!configured) {
                                 Text("Pricing is not configured yet. Quotes will remain unavailable until approved rates are saved.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                             } else {

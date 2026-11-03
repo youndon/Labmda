@@ -256,6 +256,20 @@ class AdminFinancialOperationsScreen : Screen {
         var bdoReference by remember { mutableStateOf("") }
         var bdoAmount by remember { mutableStateOf("") }
         var bdoMethodVerified by remember { mutableStateOf(false) }
+        var searchQuery by remember { mutableStateOf("") }
+        val normalizedSearch = searchQuery.trim().lowercase()
+        val visiblePayments = payments.filter { row ->
+            normalizedSearch.isBlank() || listOf(row.paymentId, row.payerId, row.status, row.method, row.transactionType, row.orderId, row.tripId, row.provider, row.providerReference).any { it.lowercase().contains(normalizedSearch) }
+        }
+        val visibleBalances = balances.filter { row ->
+            normalizedSearch.isBlank() || listOf(row.accountId, row.kind, row.ownerId).any { it.lowercase().contains(normalizedSearch) }
+        }
+        val visibleRefunds = refunds.filter { row ->
+            normalizedSearch.isBlank() || listOf(row.id, row.paymentId, row.payerId, row.reason, row.status, row.providerReference.orEmpty()).any { it.lowercase().contains(normalizedSearch) }
+        }
+        val visibleAudit = audit.filter { row ->
+            normalizedSearch.isBlank() || listOf(row.id, row.actorUid, row.action, row.targetType, row.targetId, row.note).any { it.lowercase().contains(normalizedSearch) }
+        }
 
         Scaffold(topBar = {
             TopAppBar(
@@ -275,6 +289,15 @@ class AdminFinancialOperationsScreen : Screen {
                 ) {
                     if (!message.isNullOrBlank()) item { Text(message.orEmpty(), color = MaterialTheme.colorScheme.primary) }
                     item {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Search payments, accounts, refunds or audit entries") },
+                            singleLine = true
+                        )
+                    }
+                    item {
                         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Reconciliation", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -289,9 +312,9 @@ class AdminFinancialOperationsScreen : Screen {
                             }
                         }
                     }
-                    item { SectionTitle("Payments", "${payments.size} recent records") }
-                    if (payments.isEmpty()) item { EmptyFinanceText("No payment records found.") }
-                    items(payments, key = { it.paymentId }) { payment ->
+                    item { SectionTitle("Payments", "${visiblePayments.size} matching records • ${payments.size} loaded") }
+                    if (visiblePayments.isEmpty()) item { EmptyFinanceText(if (payments.isEmpty()) "No payment records found." else "No payments match this search.") }
+                    items(visiblePayments, key = { it.paymentId }) { payment ->
                         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -332,9 +355,9 @@ class AdminFinancialOperationsScreen : Screen {
                             }
                         }
                     }
-                    item { SectionTitle("Balances", "${balances.size} ledger accounts") }
-                    if (balances.isEmpty()) item { EmptyFinanceText("No wallet balances have been posted.") }
-                    items(balances, key = { it.accountId }) { account ->
+                    item { SectionTitle("Balances", "${visibleBalances.size} matching accounts • ${balances.size} loaded") }
+                    if (visibleBalances.isEmpty()) item { EmptyFinanceText(if (balances.isEmpty()) "No wallet balances have been posted." else "No accounts match this search.") }
+                    items(visibleBalances, key = { it.accountId }) { account ->
                         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("${account.kind} • ${account.ownerId.ifBlank { account.accountId }}", fontWeight = FontWeight.SemiBold)
@@ -344,9 +367,9 @@ class AdminFinancialOperationsScreen : Screen {
                             }
                         }
                     }
-                    item { SectionTitle("Refund management", "${refunds.size} latest cases") }
-                    if (refunds.isEmpty()) item { EmptyFinanceText("No refund cases are waiting for review.") }
-                    items(refunds, key = { it.id }) { refund ->
+                    item { SectionTitle("Refund management", "${visibleRefunds.size} matching cases • ${refunds.size} loaded") }
+                    if (visibleRefunds.isEmpty()) item { EmptyFinanceText(if (refunds.isEmpty()) "No refund cases are waiting for review." else "No refund cases match this search.") }
+                    items(visibleRefunds, key = { it.id }) { refund ->
                         Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -368,9 +391,9 @@ class AdminFinancialOperationsScreen : Screen {
                             }
                         }
                     }
-                    item { SectionTitle("Administrative audit trail", "${audit.size} latest actions") }
-                    if (audit.isEmpty()) item { EmptyFinanceText("No administrative financial actions recorded yet.") }
-                    items(audit, key = { it.id }) { entry ->
+                    item { SectionTitle("Administrative audit trail", "${visibleAudit.size} matching actions • ${audit.size} loaded") }
+                    if (visibleAudit.isEmpty()) item { EmptyFinanceText(if (audit.isEmpty()) "No administrative financial actions recorded yet." else "No audit entries match this search.") }
+                    items(visibleAudit, key = { it.id }) { entry ->
                         Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(entry.action.replace('_', ' '), fontWeight = FontWeight.SemiBold)
                             Text("${entry.targetType} • ${entry.targetId} • ${entry.actorUid}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
