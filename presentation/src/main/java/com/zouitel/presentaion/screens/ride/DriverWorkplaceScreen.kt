@@ -316,7 +316,6 @@ class DriverWorkplaceScreen : Screen {
 
         LabmdaAlertDialog(
             onDismissRequest = onDismiss,
-            shape = RoundedCornerShape(20.dp),
             title = { Text(if (account == null) "Register Driver Service" else "Edit Driver Service", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
