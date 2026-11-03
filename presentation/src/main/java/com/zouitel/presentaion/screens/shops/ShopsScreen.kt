@@ -3,11 +3,14 @@ package com.zouitel.presentaion.screens.shops
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesomeMosaic
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,6 +39,22 @@ class ShopsScreen : Screen {
         val userProfile by accountModel.profile.collectAsState()
         val managerShop by screenModel.managerShop.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        var searchQuery by remember { mutableStateOf("") }
+        var availabilityFilter by remember { mutableStateOf("All") }
+        val filteredShops = remember(approvedShops, searchQuery, availabilityFilter) {
+            approvedShops.filter { shop ->
+                val query = searchQuery.trim()
+                val matchesSearch = query.isBlank() || listOf(
+                    shop.name, shop.description, shop.category, shop.address
+                ).any { it.contains(query, ignoreCase = true) }
+                val matchesAvailability = when (availabilityFilter) {
+                    "Online" -> shop.isOnline
+                    "Offline" -> !shop.isOnline
+                    else -> true
+                }
+                matchesSearch && matchesAvailability
+            }
+        }
 
         Scaffold(
             topBar = {
@@ -75,17 +94,70 @@ class ShopsScreen : Screen {
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentPadding = PaddingValues(16.dp),
+                    modifier = Modifier.fillMaxSize().padding(paddingValues),
+                    contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(approvedShops, key = { it.id }) { shop ->
-                        ShopCardItem(
-                            shop = shop,
-                            onClick = { navigator?.push(StoreDetailsScreen(shop)) }
-                        )
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                placeholder = { Text("Search shops, categories, or addresses") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                            )
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf("All", "Online", "Offline").forEach { filter ->
+                                    FilterChip(
+                                        selected = availabilityFilter == filter,
+                                        onClick = { availabilityFilter = filter },
+                                        label = { Text(filter) }
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "${filteredShops.size} ${if (filteredShops.size == 1) "shop" else "shops"} available",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (filteredShops.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Storefront,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(40.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text("No matching shops", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                    Text(
+                                        "Try another search or availability filter.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        items(filteredShops, key = { it.id }) { shop ->
+                            ShopCardItem(shop = shop, onClick = { navigator?.push(StoreDetailsScreen(shop)) })
+                        }
                     }
                 }
             }
