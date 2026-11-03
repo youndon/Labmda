@@ -129,13 +129,6 @@ class DriverWorkplaceScreenModel : ScreenModel {
         }
     }
 
-    fun updateOnlineStatus(isOnline: Boolean) {
-        val uid = auth.currentUser?.uid ?: return
-        screenModelScope.launch {
-            db.child("users").child(uid).child("driverService").child("isOnline").setValue(isOnline)
-        }
-    }
-
     fun deleteDriverService() {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch {
