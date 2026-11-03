@@ -37,6 +37,9 @@ class ShopOrdersScreenModel : ScreenModel {
                 val fetchedOrders = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
+                        val orderType = runCatching { child.child("orderType").value<String>() }.getOrDefault("")
+                        if (orderType != OrderType.RETAIL.name) return@mapNotNull null
+                        val createdAtTimestamp: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
 
                         val targetShopId: String = runCatching { child.child("sourceId").value<String>() }.getOrDefault("")
                         val clientId: String = runCatching { child.child("clientId").value<String>() }.getOrDefault("")
@@ -92,7 +95,7 @@ class ShopOrdersScreenModel : ScreenModel {
                             dropoffLocation = dropoffLocation,
                             dropoffLat = dropoffLat,
                             dropoffLng = dropoffLng,
-//                            createdAtTimestamp = createdAtTimestamp,
+                            createdAtTimestamp = createdAtTimestamp,
                         )
                     } catch (e: Exception) {
                         null

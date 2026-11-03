@@ -33,6 +33,7 @@ data class MealScreen(
         var specialInstructions by remember { mutableStateOf("") }
 
         val calculatedTotalPrice = meal.basePrice * quantity
+        val mealImageUrl = meal.imageUrls.firstOrNull()?.takeIf { it.isNotBlank() }
 
         Scaffold(
             topBar = {
@@ -112,7 +113,7 @@ data class MealScreen(
                 ) {
                     // Meal Image
                     AsyncImage(
-                        model = meal.imageUrls,
+                        model = mealImageUrl,
                         contentDescription = meal.name,
                         modifier = Modifier
                             .fillMaxWidth()

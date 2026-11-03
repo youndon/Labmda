@@ -139,12 +139,12 @@ class ShopsScreen : Screen {
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "Delivery Fee:...",
+                            text = "Delivery fee calculated at checkout",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "Est. ${shop.createdAtTimestamp} mins",
+                            text = "ETA shown after address selection",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

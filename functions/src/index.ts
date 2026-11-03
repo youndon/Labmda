@@ -94,7 +94,7 @@ async function saveQuote(uid: string, kind: string, config: PricingConfig, reque
 async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<string, unknown>) {
   const sourceId = String(data.sourceId ?? "");
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(sourceId)) throw new HttpsError("invalid-argument", "Merchant ID is invalid.");
-  const items = data.items as Array<{ itemId: string; quantity: number }> | undefined;
+  const items = data.items as Array<{ itemId: string; quantity: number; specialInstructions?: string }> | undefined;
   if (!sourceId || !Array.isArray(items) || items.length === 0 || items.length > 50) {
     throw new HttpsError("invalid-argument", "A source and 1–50 order items are required.");
   }
@@ -114,7 +114,7 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
   const request: QuoteRequest = { ...clientRequest, pickup };
   const [config, route, discount] = await Promise.all([loadConfig(), routeMetrics(request), loadDiscount(data.discountCode as string | undefined)]);
   let subtotalMinor = 0;
-  const pricedItems: Array<{ itemId: string; name: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }> = [];
+  const pricedItems: Array<{ itemId: string; name: string; quantity: number; specialInstructions: string; unitPriceMinor: number; lineTotalMinor: number }> = [];
   for (const line of items) {
     if (!line || typeof line.itemId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(line.itemId) || !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) {
       throw new HttpsError("invalid-argument", "Each item must have a valid ID and quantity from 1 to 99.");
@@ -130,7 +130,8 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
     const lineTotalMinor = unitPriceMinor * line.quantity;
     if (!Number.isSafeInteger(lineTotalMinor) || !Number.isSafeInteger(subtotalMinor + lineTotalMinor)) throw new HttpsError("out-of-range", "Order total is too large.");
     subtotalMinor += lineTotalMinor;
-    pricedItems.push({ itemId: line.itemId, name: String(item.child("name").val() ?? ""), quantity: line.quantity, unitPriceMinor, lineTotalMinor });
+    const specialInstructions = typeof line.specialInstructions === "string" ? line.specialInstructions.trim().slice(0, 500) : "";
+    pricedItems.push({ itemId: line.itemId, name: String(item.child("name").val() ?? ""), quantity: line.quantity, specialInstructions, unitPriceMinor, lineTotalMinor });
   }
   await assertPaymentServiceEnabled(kind);
   const method = await paymentMethod(data.paymentMethod);

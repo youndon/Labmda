@@ -219,7 +219,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                         navigator?.push(
                                             MealScreen(
                                                 meal = meal,
-                                                onAddToOrderSheet = { screenModel.addMeal(meal.id) }
+                                                onAddToOrderSheet = { item -> screenModel.setMealDetails(item) }
                                             )
                                         )
                                     }

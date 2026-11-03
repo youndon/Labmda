@@ -34,6 +34,11 @@ class ShopWorkplaceScreenModel : ScreenModel {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isSaving = MutableStateFlow(false)
+    val isSaving: StateFlow<Boolean> = _isSaving.asStateFlow()
+    private val _saveError = MutableStateFlow<String?>(null)
+    val saveError: StateFlow<String?> = _saveError.asStateFlow()
+
     private val _imageUpload = MutableStateFlow<ImageUploadState>(ImageUploadState.Idle)
     val imageUpload: StateFlow<ImageUploadState> = _imageUpload.asStateFlow()
     private var uploadJob: Job? = null
@@ -164,10 +169,12 @@ class ShopWorkplaceScreenModel : ScreenModel {
         imageUrl: String,
         isOnline: Boolean,
         latitude: Double,
-        longitude: Double
+        longitude: Double,
+        onSuccess: () -> Unit
     ) {
-        if (auth.currentUser?.uid == null) return
-        _isLoading.value = true
+        if (auth.currentUser?.uid == null || _isSaving.value) return
+        _isSaving.value = true
+        _saveError.value = null
 
         screenModelScope.launch {
             try {
@@ -185,8 +192,11 @@ class ShopWorkplaceScreenModel : ScreenModel {
                         "isOnline" to false
                     )
                 )
+                onSuccess()
+            } catch (e: Exception) {
+                _saveError.value = e.message ?: "Could not save the shop application."
             } finally {
-                _isLoading.value = false
+                _isSaving.value = false
             }
         }
     }
@@ -200,22 +210,31 @@ class ShopWorkplaceScreenModel : ScreenModel {
         address: String,
         imageUrl: String,
         latitude: Double,
-        longitude: Double
+        longitude: Double,
+        onSuccess: () -> Unit
     ) {
-        _isLoading.value = true
+        if (_isSaving.value) return
+        _isSaving.value = true
+        _saveError.value = null
         screenModelScope.launch {
-            val updates = mapOf(
-                "name" to name,
-                "description" to description,
-                "category" to category,
-                "phone" to phone,
-                "address" to address,
-                "imageUrl" to imageUrl,
-                "latitude" to latitude,
-                "longitude" to longitude
-            )
-            db.child("shops").child(shopId).updateChildren(updates)
-            _isLoading.value = false
+            try {
+                val updates = mapOf(
+                    "name" to name,
+                    "description" to description,
+                    "category" to category,
+                    "phone" to phone,
+                    "address" to address,
+                    "imageUrl" to imageUrl,
+                    "latitude" to latitude,
+                    "longitude" to longitude
+                )
+                db.child("shops").child(shopId).updateChildren(updates)
+                onSuccess()
+            } catch (e: Exception) {
+                _saveError.value = e.message ?: "Could not update the shop."
+            } finally {
+                _isSaving.value = false
+            }
         }
     }
 }

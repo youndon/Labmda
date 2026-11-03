@@ -36,6 +36,9 @@ class ShopActivitiesScreenModel : ScreenModel {
                     try {
                         val id = child.key ?: return@mapNotNull null
 
+                        val orderType = runCatching { child.child("orderType").value<String>() }.getOrDefault("")
+                        if (orderType != OrderType.RETAIL.name) return@mapNotNull null
+
                         val userId: String = runCatching { child.child("clientId").value<String>() }.getOrDefault("")
 
 
@@ -48,7 +51,7 @@ class ShopActivitiesScreenModel : ScreenModel {
                         val courierFee: Double = runCatching { child.child("deliveryFee").value<Double>() }.getOrDefault(3.0)
                         val totalPrice: Double = runCatching { child.child("totalPrice").value<Double>() }.getOrDefault(0.0)
                         val statusStr: String = runCatching { child.child("status").value<String>() }.getOrDefault("PLACED")
-                        val deliveryAddress: String = runCatching { child.child("fromLocation").value<String>() }.getOrDefault("")
+                        val deliveryAddress: String = runCatching { child.child("dropoffLocation").value<String>() }.getOrDefault("")
                         val createdAtTimestamp: Long = runCatching { child.child("createdAtTimestamp").value<Long>() }.getOrDefault(0L)
                         val paymentMethod: String = runCatching { child.child("paymentMethod").value<String>() }.getOrDefault("Cash")
 
