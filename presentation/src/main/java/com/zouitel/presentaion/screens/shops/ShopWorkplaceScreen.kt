@@ -56,7 +56,7 @@ class ShopWorkplaceScreen : Screen {
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Shop Portal Choice", fontWeight = FontWeight.Bold) },
+                    title = { Text("Shop workspace", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -81,11 +81,17 @@ class ShopWorkplaceScreen : Screen {
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(
-                    text = "Select Portal Mode",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Choose your shop experience",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Text(
+                        text = "Switch between shopping as a client and managing your own store.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
 
                 SingleChoiceSegmentedButtonRow(
                     modifier = Modifier.fillMaxWidth()
@@ -203,7 +209,7 @@ class ShopWorkplaceScreen : Screen {
                 }
                 Text("Browse Stores as Client", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
                 Text(
-                    "Discover nearby verified retail stores, inspect product catalogs, add products to your demand card, and trigger home delivery.",
+                    "Discover nearby stores, browse product catalogs, add items to your cart, and arrange home delivery.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -411,7 +417,7 @@ class ShopWorkplaceScreen : Screen {
                             Column {
                                 Text("Store Status", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                                 Text(
-                                    text = if (isOnline) "Online & Accepting Orders" else "Offline",
+                                    text = if (isOnline) "Visible to customers and accepting orders" else "Hidden from customers",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                                 )
