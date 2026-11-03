@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.common.LabmdaModalBottomSheet
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -414,7 +415,7 @@ class PassengerScreen : Screen {
             }
 
             requestSheetDriver?.let { driver ->
-                ModalBottomSheet(onDismissRequest = {
+                LabmdaModalBottomSheet(onDismissRequest = {
                     requestSheetDriver = null
                     selectedDriver = null
                 }) {
@@ -459,7 +460,7 @@ class PassengerScreen : Screen {
             }
 
             if (showHistory) {
-                ModalBottomSheet(onDismissRequest = { showHistory = false }) {
+                LabmdaModalBottomSheet(onDismissRequest = { showHistory = false }) {
                     Column(
                         modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -485,7 +486,7 @@ class PassengerScreen : Screen {
             }
 
             if (tappedDriver != null && activeTrip == null) {
-                ModalBottomSheet(onDismissRequest = { tappedDriverId = null }) {
+                LabmdaModalBottomSheet(onDismissRequest = { tappedDriverId = null }) {
                     DriverRequestSheet(
                         driver = tappedDriver!!,
                         driverDistanceKm = pickup?.let { p ->
