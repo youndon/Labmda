@@ -1,4 +1,10 @@
+import { createHash } from "node:crypto";
+
 export type PayoutTransferState = "APPROVED" | "PAYING";
+
+export function payoutTransferReferenceIndexKey(reference: string): string {
+  return createHash("sha256").update(reference.trim().toUpperCase()).digest("hex");
+}
 
 export class PayoutTransferReferenceError extends Error {
   constructor(
@@ -21,8 +27,8 @@ export function resolvePayoutTransferReference(
   submittedValue: unknown,
 ): string {
   const submitted = typeof submittedValue === "string" ? submittedValue.trim() : "";
-  if (submitted.length > 120) {
-    throw new PayoutTransferReferenceError("The transfer reference is too long.", "invalid-argument");
+  if (!/^[A-Za-z0-9_-]{4,120}$/.test(submitted)) {
+    throw new PayoutTransferReferenceError("Enter a valid transfer reference (4–120 letters, numbers, hyphens or underscores).", "invalid-argument");
   }
 
   if (status === "APPROVED") {
