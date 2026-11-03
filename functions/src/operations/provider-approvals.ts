@@ -1,4 +1,5 @@
 import { getDatabase } from "firebase-admin/database";
+import { randomUUID } from "node:crypto";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 const db = () => getDatabase();
@@ -71,6 +72,55 @@ export const submitRestaurantApplication = onCall({ enforceAppCheck: true }, asy
     foodApplicationSubmittedAt: Date.now(),
   });
   return { submitted: true, status: "PENDING" };
+});
+
+ 
+export const submitShopApplication = onCall({ enforceAppCheck: true }, async (call) => {
+  const uid = requireSignedIn(call.auth?.uid);
+  const data = call.data as Record<string, unknown>;
+  const name = typeof data.name === "string" ? data.name.trim() : "";
+  const description = typeof data.description === "string" ? data.description.trim() : "";
+  const category = typeof data.category === "string" ? data.category.trim() : "";
+  const phone = typeof data.phone === "string" ? data.phone.trim() : "";
+  const address = typeof data.address === "string" ? data.address.trim() : "";
+  const imageUrl = typeof data.imageUrl === "string" ? data.imageUrl.trim() : "";
+  if (name.length < 2 || name.length > 100 || description.length > 1000
+    || category.length < 2 || category.length > 60 || phone.length < 5 || phone.length > 30
+    || address.length < 5 || address.length > 300
+    || (imageUrl && !/^https:\/\//i.test(imageUrl))) {
+    throw new HttpsError("invalid-argument", "Shop application details are invalid.");
+  }
+  const existing = await db().ref("shops").orderByChild("ownerUid").equalTo(uid).get();
+  if (existing.exists()) {
+    let activeApplication = false;
+    existing.forEach((child) => {
+      const status = child.child("status").val();
+      if (status === "PENDING" || status === "APPROVED") activeApplication = true;
+    });
+    if (activeApplication) throw new HttpsError("failed-precondition", "You already have an active shop application.");
+  }
+  const shopId = randomUUID();
+  await db().ref(`shops/${shopId}`).set({
+    id: shopId, ownerUid: uid, name, description, category, phone, address, imageUrl,
+    status: "PENDING", createdAtTimestamp: Date.now(), isOnline: false,
+  });
+  await db().ref(`users/${uid}`).update({ shopStatus: "PENDING", shopMode: "CLIENT" });
+  return { shopId, status: "PENDING" };
+});
+
+export const setShopMode = onCall({ enforceAppCheck: true }, async (call) => {
+  const uid = requireSignedIn(call.auth?.uid);
+  const mode = (call.data as { mode?: unknown }).mode;
+  if (mode !== "CLIENT" && mode !== "MANAGER") {
+    throw new HttpsError("invalid-argument", "Shop mode must be CLIENT or MANAGER.");
+  }
+  const userRef = db().ref(`users/${uid}`);
+  if (mode === "MANAGER") {
+    const status = (await userRef.child("shopStatus").get()).val();
+    if (status !== "APPROVED") throw new HttpsError("permission-denied", "Shop manager access requires an approved application.");
+  }
+  await userRef.child("shopMode").set(mode);
+  return { mode };
 });
 
 export const setFoodMode = onCall({ enforceAppCheck: true }, async (call) => {
