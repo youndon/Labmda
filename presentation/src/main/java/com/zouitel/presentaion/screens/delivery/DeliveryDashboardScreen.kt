@@ -116,10 +116,10 @@ class DeliveryDashboardScreen : Screen {
         fun pickupOf(o: Order): LatLng? =
             if (o.pickupLat != 0.0 || o.pickupLng != 0.0) LatLng(o.pickupLat, o.pickupLng) else null
 
-        val mappedCount = activeDeliveries.count { pointOf(it) != null }
+        val mappedCount = activeDeliveries.count { pointOf(it) != null || pickupOf(it) != null }
         LaunchedEffect(mappedCount, courier) {
             if (hasCentered || courier != null || mappedCount == 0) return@LaunchedEffect
-            val pts = activeDeliveries.mapNotNull { pointOf(it) }
+            val pts = activeDeliveries.flatMap { order -> listOfNotNull(pickupOf(order), pointOf(order)) }
             hasCentered = true
             runCatching {
                 cameraPositionState.animate(
@@ -235,23 +235,40 @@ class DeliveryDashboardScreen : Screen {
                     contentPadding = PaddingValues(bottom = peekHeight)
                 ) {
                     activeDeliveries.forEach { order ->
-                        val pos = pointOf(order) ?: return@forEach
-                        key(order.id) {
-                            Marker(
-                                state = rememberUpdatedMarkerState(position = pos),
-                                title = order.sourceName.ifBlank { "Delivery" },
-                                icon = BitmapDescriptorFactory.defaultMarker(
-                                    when {
-                                        selectedOrderId == order.id -> BitmapDescriptorFactory.HUE_AZURE
-                                        order.deliveryId.isBlank() -> BitmapDescriptorFactory.HUE_ORANGE
-                                        else -> BitmapDescriptorFactory.HUE_GREEN
+                        val pickup = pickupOf(order)
+                        val dropoff = pointOf(order)
+                        val markerHue = when {
+                            selectedOrderId == order.id -> BitmapDescriptorFactory.HUE_AZURE
+                            order.deliveryId.isBlank() -> BitmapDescriptorFactory.HUE_ORANGE
+                            else -> BitmapDescriptorFactory.HUE_GREEN
+                        }
+                        if (pickup != null) {
+                            key("${order.id}-pickup") {
+                                Marker(
+                                    state = rememberUpdatedMarkerState(position = pickup),
+                                    title = "Pickup · ${order.sourceName.ifBlank { "Delivery" }}",
+                                    snippet = order.pickupLocation,
+                                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN),
+                                    onClick = {
+                                        selectedOrderId = order.id
+                                        true
                                     }
-                                ),
-                                onClick = {
-                                    selectedOrderId = order.id
-                                    true
-                                }
-                            )
+                                )
+                            }
+                        }
+                        if (dropoff != null) {
+                            key("${order.id}-dropoff") {
+                                Marker(
+                                    state = rememberUpdatedMarkerState(position = dropoff),
+                                    title = "Drop-off · Order #${order.id.takeLast(6).uppercase()}",
+                                    snippet = order.dropoffLocation,
+                                    icon = BitmapDescriptorFactory.defaultMarker(markerHue),
+                                    onClick = {
+                                        selectedOrderId = order.id
+                                        true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -292,8 +309,11 @@ class DeliveryDashboardScreen : Screen {
                             val pickupPt = pickupOf(selectedOrder)
                             if (from != null && pickupPt != null) {
                                 val km = distanceKm(from, pickupPt)
-                                val eta = maxOf(1, Math.ceil(km / 25.0 * 60).toInt())
-                                Text("${"%.1f".format(km)} km to pickup · ~$eta min away", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    "${"%.1f".format(km)} km straight-line distance to pickup",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
                             }
                             DeliveryCardItem(
                                 order = selectedOrder,
