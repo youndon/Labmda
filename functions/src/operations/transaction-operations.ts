@@ -3,7 +3,7 @@ import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations } from "../finance/payment-allocations.js";
 import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js";
-import { createFinancialTransfer, getFinancialOperation, postFinancialOperation } from "../finance/ledger.js";
+import { createFinancialTransfer, getFinancialAccount, getFinancialOperation, postFinancialOperation } from "../finance/ledger.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -340,6 +340,12 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
     replacementCourierId, amountMinor: reservation.amountMinor, createdAt: reservationCreatedAt,
   });
   try {
+    // Ensure the original successful payment is journaled before moving its courier liability.
+    await postPaymentReceiptFromDatabase(db(), reservation.paymentId);
+    const previousCourierAccount = await getFinancialAccount("wallet_delivery_" + reservation.previousCourierId);
+    if (!previousCourierAccount || previousCourierAccount.pendingMinor < reservation.amountMinor) {
+      throw new HttpsError("failed-precondition", "The previous courier's pending ledger balance does not cover this allocation.");
+    }
     await postFinancialOperation(transfer);
   } catch (error) {
     const committedOperation = await getFinancialOperation(operationId);
@@ -379,7 +385,7 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
       ...root,
       orders: { ...root.orders, [orderId]: {
         ...order, deliveryId: replacementCourierId, deliveryName: replacementName,
-        deliveryPhone: replacementPhone, assignedAt: completedAt,
+        deliveryPhone: replacementPhone, assignedAt: completedAt, updatedAtTimestamp: completedAt,
         deliveryReassignment: { ...order.deliveryReassignment, status: "COMPLETED", ledgerOperationId: operationId, completedAt },
       } },
       payments: { ...root.payments, [reservation.paymentId]: { ...payment, deliveryId: replacementCourierId, updatedAt: completedAt } },
