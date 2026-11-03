@@ -56,7 +56,11 @@ data class AdminPricingRide(
     val perKmMinor: Long = 0,
     val perMinuteMinor: Long = 0,
     val minimumFareMinor: Long = 0,
-    val platformCommissionBps: Int = 0
+    val platformCommissionBps: Int = 0,
+    val vehicleMultipliersBps: Map<String, Int> = mapOf(
+        "CAR" to 10000, "BIKE" to 10000, "E_BIKE" to 10000, "SCOOTER" to 10000,
+        "MOTORCYCLE" to 10000, "TRUCK" to 10000, "VAN" to 10000, "OTHER" to 10000
+    )
 )
 
 @Serializable
@@ -151,6 +155,8 @@ data class AdminPricingSaveResponse(
     val config: AdminPricingConfig = AdminPricingConfig()
 )
 
+private val rideVehicleTypes = listOf("CAR", "BIKE", "E_BIKE", "SCOOTER", "MOTORCYCLE", "TRUCK", "VAN", "OTHER")
+
 class AdminPricingScreen : Screen {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
@@ -168,6 +174,9 @@ class AdminPricingScreen : Screen {
         var rideMinute by remember(config) { mutableStateOf(config?.ride?.perMinuteMinor?.let(::minorToPesos).orEmpty()) }
         var rideMinimum by remember(config) { mutableStateOf(config?.ride?.minimumFareMinor?.let(::minorToPesos).orEmpty()) }
         var rideCommission by remember(config) { mutableStateOf(config?.ride?.platformCommissionBps?.toString().orEmpty()) }
+        var rideMultipliers by remember(config) {
+            mutableStateOf(rideVehicleTypes.associateWith { type -> config?.ride?.vehicleMultipliersBps?.get(type)?.toString() ?: "10000" })
+        }
         var deliveryBase by remember(config) { mutableStateOf(config?.delivery?.baseFeeMinor?.let(::minorToPesos).orEmpty()) }
         var deliveryKm by remember(config) { mutableStateOf(config?.delivery?.perKmMinor?.let(::minorToPesos).orEmpty()) }
         var deliveryMinimum by remember(config) { mutableStateOf(config?.delivery?.minimumFeeMinor?.let(::minorToPesos).orEmpty()) }
@@ -229,6 +238,13 @@ class AdminPricingScreen : Screen {
                             PricingInput("Per minute (₱/min)", rideMinute, { rideMinute = it })
                             PricingInput("Minimum fare (₱)", rideMinimum, { rideMinimum = it })
                             PricingInput("Platform commission (bps)", rideCommission, { rideCommission = it }, true)
+                            Text("Vehicle fare multipliers", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                            Text("10,000 bps = standard fare. Adjust each vehicle category independently.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            rideVehicleTypes.forEach { type ->
+                                PricingInput("$type multiplier (bps)", rideMultipliers[type].orEmpty(), { value ->
+                                    rideMultipliers = rideMultipliers + (type to value)
+                                }, true)
+                            }
                         }
                     }
                     item {
@@ -273,7 +289,18 @@ class AdminPricingScreen : Screen {
                                         require(it in 0..10000) { "$field must be between 0 and 10,000 bps." }
                                     }
                                     val next = AdminPricingConfig(
-                                        ride = AdminPricingRide(pesos(rideBase, "Ride base fare"), pesos(rideKm, "Ride per km"), pesos(rideMinute, "Ride per minute"), pesos(rideMinimum, "Ride minimum"), bps(rideCommission, "Ride commission")),
+                                        ride = AdminPricingRide(
+                                            baseFareMinor = pesos(rideBase, "Ride base fare"),
+                                            perKmMinor = pesos(rideKm, "Ride per km"),
+                                            perMinuteMinor = pesos(rideMinute, "Ride per minute"),
+                                            minimumFareMinor = pesos(rideMinimum, "Ride minimum"),
+                                            platformCommissionBps = bps(rideCommission, "Ride commission"),
+                                            vehicleMultipliersBps = rideVehicleTypes.associateWith { type ->
+                                                bps(rideMultipliers[type].orEmpty(), "$type fare multiplier").also {
+                                                    require(it in 1000..30000) { "$type multiplier must be between 1,000 and 30,000 bps." }
+                                                }
+                                            }
+                                        ),
                                         delivery = AdminPricingDelivery(pesos(deliveryBase, "Delivery base fee"), pesos(deliveryKm, "Delivery per km"), pesos(deliveryMinimum, "Delivery minimum"), bps(deliveryCommission, "Delivery commission")),
                                         food = AdminPricingFood(bps(foodCommission, "Food commission")),
                                         shop = AdminPricingShop(bps(shopCommission, "Shop commission")),
