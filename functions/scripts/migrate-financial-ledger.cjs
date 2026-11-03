@@ -4,7 +4,7 @@
 const { initializeApp, applicationDefault } = require("firebase-admin/app");
 const { getDatabase } = require("firebase-admin/database");
 const { getFirestore } = require("firebase-admin/firestore");
-const { isDeepStrictEqual } = require("node:util");
+const { writeDocuments, writeDocument } = require("./financial-migration-writer.cjs");
 
 const projectId = process.env.GCLOUD_PROJECT || process.env.GOOGLE_CLOUD_PROJECT;
 const databaseURL = process.env.FIREBASE_DATABASE_URL;
@@ -23,24 +23,6 @@ function chunks(values, size) {
 function safeId(value, label) {
   if (typeof value !== "string" || !value || value.includes("/")) throw new Error(`Invalid ${label} in legacy financial data.`);
   return value;
-}
-async function writeDocument(ref, value) {
-  await firestore.runTransaction(async (transaction) => {
-    const existing = await transaction.get(ref);
-    if (existing.exists) {
-      if (!isDeepStrictEqual(existing.data(), value)) {
-        throw new Error(`Migration recovery conflict at ${ref.path}; existing target data differs from the frozen RTDB snapshot.`);
-      }
-      return;
-    }
-    transaction.create(ref, value);
-  });
-}
-async function writeDocuments(collection, values) {
-  for (const group of chunks(values, 20)) {
-    await Promise.all(group.map(([id, value]) =>
-      writeDocument(firestore.collection(collection).doc(id), value)));
-  }
 }
 async function main() {
   // Freeze financial writers and payment/payout/refund processing before running.
@@ -106,13 +88,13 @@ async function main() {
   // Resume safely after interruption. Existing matching documents are verified and
   // skipped; a conflicting document aborts without overwriting financial history.
   const providerUids = [...new Set(activity.map(([uid]) => uid))];
-  await writeDocuments("financialOperations", operations);
-  await writeDocuments("financialEntries", entries);
-  await writeDocuments("financialAccounts", accounts);
-  await writeDocuments("financialIdempotency", idempotency);
+  await writeDocuments(firestore, "financialOperations", operations);
+  await writeDocuments(firestore, "financialEntries", entries);
+  await writeDocuments(firestore, "financialAccounts", accounts);
+  await writeDocuments(firestore, "financialIdempotency", idempotency);
   for (const group of chunks(activity, 20)) {
     await Promise.all(group.map(([uid, operationId, operation]) =>
-      writeDocument(firestore.collection("financialProviderActivity").doc(uid).collection("operations").doc(operationId), operation)));
+      writeDocument(firestore, firestore.collection("financialProviderActivity").doc(uid).collection("operations").doc(operationId), operation)));
   }
 
   const [operationCount, entryCount, accountCount, keyCount, activityCounts] = await Promise.all([
