@@ -4,6 +4,7 @@ import { getDatabase } from "firebase-admin/database";
 import { defineSecret } from "firebase-functions/params";
 import { assertPaymentMethodEnabled, assertPaymentServiceEnabled } from "./payments/payment-config.js";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireMerchantPickup } from "./operations/merchant-location.js";
 import {
   calculateDeliveryOnlyBreakdown, calculateOrderBreakdown, calculateRideFare, calculateProviderFee,
   decimalPesosToMinor, type DiscountRule, type PaymentMethod, type PricingConfig,
@@ -109,8 +110,7 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
   if (typeof storedLatitude !== "number" || typeof storedLongitude !== "number") {
     throw new HttpsError("failed-precondition", "This merchant has no verified pickup location. Contact the merchant before ordering.");
   }
-  const pickup: Point = { latitude: storedLatitude, longitude: storedLongitude };
-  validatePoint(pickup, "Merchant pickup");
+  const pickup = requireMerchantPickup(storedLatitude, storedLongitude);
   const request: QuoteRequest = { ...clientRequest, pickup };
   const [config, route, discount] = await Promise.all([loadConfig(), routeMetrics(request), loadDiscount(data.discountCode as string | undefined)]);
   let subtotalMinor = 0;
