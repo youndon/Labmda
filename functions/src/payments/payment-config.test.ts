@@ -48,7 +48,7 @@ describe("Xendit payment configuration", () => {
   });
 
   it("does not silently switch provider or currency", () => {
-    expect(() => validatePaymentConfiguration({
+    expect(validatePaymentConfiguration({
       ...DEFAULT_PAYMENT_CONFIGURATION, provider: "BDO_CHECKOUT", checkoutMode: "MANUAL_LINK",
     })).toMatchObject({ provider: "XENDIT", checkoutMode: "API" });
     expect(() => validatePaymentConfiguration({
