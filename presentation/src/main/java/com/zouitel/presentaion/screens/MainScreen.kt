@@ -88,8 +88,21 @@ class MainScreen() : Screen {
     override fun Content() {
         val accountScreen = koinScreenModel<AccountScreenModel>()
         val profile by accountScreen.profile.collectAsState()
+        val auth = remember { FirebaseAuth.getInstance() }
+        var isAdmin by remember { mutableStateOf(false) }
 
-        val tabs = remember(profile?.driverService, profile?.foodMode, profile?.shopMode) {
+        DisposableEffect(auth) {
+            val listener = FirebaseAuth.AuthStateListener { state ->
+                isAdmin = false
+                state.currentUser?.getIdToken(true)
+                    ?.addOnSuccessListener { token -> isAdmin = token.claims["admin"] == true }
+                    ?.addOnFailureListener { isAdmin = false }
+            }
+            auth.addAuthStateListener(listener)
+            onDispose { auth.removeAuthStateListener(listener) }
+        }
+
+        val tabs = remember(profile?.driverService, profile?.foodMode, profile?.shopMode, isAdmin) {
             listOf(
                 // The first tab depends on whether the driver is online.
                 if (profile?.driverService != null && profile?.driverService?.isOnline == true) {
@@ -115,7 +128,7 @@ class MainScreen() : Screen {
                 },
                 MainTab(PanelScreen(), "Panel", Icons.Filled.AdminPanelSettings, Icons.Outlined.AdminPanelSettings),
                 MainTab(AccountScreen(), "Account", Icons.Filled.AccountCircle, Icons.Outlined.AccountCircle),
-            )
+            ).filter { isAdmin || it.screen !is PanelScreen }
         }
 
         Navigator(tabs.first().screen) { navigator ->
