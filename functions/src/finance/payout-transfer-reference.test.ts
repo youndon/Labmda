@@ -20,6 +20,11 @@ describe("resolvePayoutTransferReference", () => {
       .toBe("BDO-12345");
   });
 
+  it("normalizes transfer references to uppercase", () => {
+    expect(resolvePayoutTransferReference("APPROVED", undefined, "gcash-ab12")).toBe("GCASH-AB12");
+    expect(resolvePayoutTransferReference("PAYING", "gcash-ab12", "GCASH-AB12")).toBe("GCASH-AB12");
+  });
+
   it("keeps the reference immutable when a PAYING payout is retried", () => {
     expect(resolvePayoutTransferReference("PAYING", "GCASH-987", ""))
       .toBe("GCASH-987");
