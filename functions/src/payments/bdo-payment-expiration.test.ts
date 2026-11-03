@@ -57,7 +57,7 @@ describe("expireBdoGcashPaymentRecord", () => {
   it("is idempotent for the same closure reference", async () => {
     const fake = fakeDatabase({
       payments: { pay_1: { ...payment } },
-      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT" } },
+      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT", amountMinor: 12500 } },
     });
     await expireBdoGcashPaymentRecord(fake.database, input);
     expect(await expireBdoGcashPaymentRecord(fake.database, input))
@@ -67,7 +67,7 @@ describe("expireBdoGcashPaymentRecord", () => {
   it("refuses to expire a payment that is already successful", async () => {
     const fake = fakeDatabase({
       payments: { pay_1: { ...payment, status: "SUCCEEDED" } },
-      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT" } },
+      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT", amountMinor: 12500 } },
     });
     await expect(expireBdoGcashPaymentRecord(fake.database, input)).rejects.toThrow(/could not be safely expired/i);
     expect(fake.value().payments.pay_1.status).toBe("SUCCEEDED");
@@ -82,7 +82,7 @@ describe("expireBdoGcashPaymentRecord", () => {
     const key = createHash("sha256").update(input.closureReference.toUpperCase()).digest("hex");
     const duplicateReference = fakeDatabase({
       payments: { pay_1: { ...payment } },
-      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT" } },
+      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT", amountMinor: 12500 } },
       bdoPaymentClosureReferenceIndex: { [key]: "another_payment" },
     });
     await expect(expireBdoGcashPaymentRecord(duplicateReference.database, input)).rejects.toThrow(/could not be safely expired/i);
