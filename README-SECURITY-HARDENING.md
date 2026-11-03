@@ -96,7 +96,7 @@ rules deployment and production launch remain blocked**.
 ## Verification
 
 CI runs:
-- Android assembleDebug and testDebugUnitTest.
+- Android assembleDevelopmentDebug and testDevelopmentDebugUnitTest (the production flavor requires its own Firebase config).
 - Firebase Functions TypeScript build and Vitest suite, including the callable
   security regression test.
 
