@@ -18,6 +18,10 @@ function quoteReference(quoteId: string): Reference {
   if (!idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
   return db().ref(`pricing/quotes/${quoteId}`);
 }
+function quoteReference(quoteId: string): Reference {
+  if (!idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
+  return db().ref(`pricing/quotes/${quoteId}`);
+}
 function pesos(minor: unknown, label: string): number {
   if (!Number.isSafeInteger(minor) || (minor as number) < 0) throw new HttpsError("failed-precondition", `The quoted ${label} is invalid.`);
   return (minor as number) / 100;
@@ -31,8 +35,11 @@ export async function claimQuote(ref: Reference, uid: string, kind: string) {
     if (!isQuoteClaimable(quote, uid, kind, Date.now())) return;
     return { ...quote, status: "CREATING", creationStartedAt: Date.now() };
   }, undefined, false);
-  if (!result.committed) throw new HttpsError("failed-precondition", "This quote is expired, already used, or belongs to another account.");
-  return { ref, quote: result.snapshot.val() as Record<string, any> };
+  const claimedQuote = result.snapshot.val() as Record<string, any> | null;
+  if (!result.committed || !claimedQuote || claimedQuote.status !== "CREATING") {
+    throw new HttpsError("failed-precondition", "This quote is expired, already used, or belongs to another account.");
+  }
+  return { ref, quote: claimedQuote };
 }
 async function restoreQuote(ref: Reference, quote: Record<string, any>) {
   await ref.transaction((current: Record<string, any> | null) => {
@@ -120,7 +127,7 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
 export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidOrThrow(call.auth?.uid);
   const quoteId = requiredText(call.data?.quoteId, "Quote ID");
-  const ref = db().ref(`pricing/quotes/${quoteId}`);
+  const ref = quoteReference(quoteId);
   const { quote } = await claimQuote(ref, uid, "RIDE");
   try {
     const request = quote.request ?? {};

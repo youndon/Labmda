@@ -327,7 +327,8 @@ async function updatePayoutStatus(
 ): Promise<Record<string, unknown>> {
   if (!safeId(payoutId)) throw new HttpsError("invalid-argument", "Payout ID is invalid.");
   const result = await db().ref(`payoutRequests/${payoutId}`).transaction((current) => {
-    if (!current || !allowed.includes(current.status as PayoutStatus)) return;
+    if (current === null) return null;
+    if (!allowed.includes(current.status as PayoutStatus)) return;
     return { ...current, ...patch, status: next, updatedAt: Date.now() };
   });
   if (!result.committed) throw new HttpsError("failed-precondition", "This payout has already been processed or no longer exists.");

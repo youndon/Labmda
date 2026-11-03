@@ -83,7 +83,7 @@ export const recordBdoBankTransfer = onCall({ enforceAppCheck: true }, async (ca
       const candidate = Object.values((matches.val() ?? {}) as Record<string, Expected>)[0];
       if (candidate && candidate.amountMinor === amountMinor && candidate.status === "EXPECTED") {
         const updated = await db().ref(`expectedBdoSettlements/${candidate.id}`).transaction((current) =>
-          current?.status === "EXPECTED" && current.amountMinor === amountMinor
+          current === null ? null : current.status === "EXPECTED" && current.amountMinor === amountMinor
             ? { ...current, status: "SETTLED", settledAt: transactionAt, bankTransferId: id } : undefined, undefined, false);
         if (updated.committed) {
           await db().ref(`bdoBankTransfers/${id}`).update({ status: "MATCHED", matchedType: "EXPECTED_SETTLEMENT", matchedId: candidate.id });

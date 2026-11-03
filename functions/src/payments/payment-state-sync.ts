@@ -21,7 +21,7 @@ export async function synchronizePaymentState(database: Database, paymentId: str
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(paymentId)) throw new Error("Payment ID is invalid.");
 
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const payment = root.payments?.[paymentId] as PaymentRecord | undefined;
     if (!payment || payment.id !== paymentId) return;
 

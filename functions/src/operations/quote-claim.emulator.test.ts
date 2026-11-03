@@ -6,7 +6,7 @@ const emulatorOnly = !!process.env.FIREBASE_DATABASE_EMULATOR_HOST;
 
 describe.skipIf(!emulatorOnly)("RTDB emulator: quote claim null-cache retry", () => {
   it("retries the initial null callback with the server quote before claiming it", async () => {
-    const { database, observed, cleanup } = await createRtdbEmulatorContext({
+    const { database, instrumentReference, observed, cleanup } = await createRtdbEmulatorContext({
       pricing: {
         quotes: {
           quote_emulator: {
@@ -17,7 +17,7 @@ describe.skipIf(!emulatorOnly)("RTDB emulator: quote claim null-cache retry", ()
       },
     });
     try {
-      const reference = database.ref("pricing/quotes/quote_emulator");
+      const reference = instrumentReference(database.ref("pricing/quotes/quote_emulator"));
       const result = await claimQuote(reference, "customer_1", "FOOD");
       expect(observed[0]).toBeNull();
       expect(observed.some((value: any) => value?.uid === "customer_1" && value?.status === "QUOTED")).toBe(true);

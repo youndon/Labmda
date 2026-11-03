@@ -31,7 +31,7 @@ export async function confirmBdoGcashPaymentRecord(
   }
 
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const payment = root.payments?.[paymentId];
     if (!payment || payment.id !== paymentId || payment.method !== "GCASH"
       || payment.provider !== "BDO_CHECKOUT" || !payment.checkoutUrl

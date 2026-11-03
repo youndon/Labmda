@@ -182,7 +182,7 @@ export const createAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
   const refund: RefundCase = { id: caseId, paymentId, payerId: "", amountMinor,
     currency: "PHP", reason, status: "REQUESTED", requestedBy: uid, createdAt: now, updatedAt: now };
   const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const payment = root.payments?.[paymentId] as PaymentRecord | undefined;
     if (!payment || payment.id !== paymentId || payment.currency !== "PHP"
       || (payment.status !== "SUCCEEDED" && payment.status !== "PARTIALLY_REFUNDED")
@@ -212,7 +212,7 @@ export const reviewAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
   const note = text(call.data?.note, "Review note");
   let before: RefundCase | null = null;
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const current = root.refundCases?.[refundId] as RefundCase | undefined;
     if (!current || current.status !== "REQUESTED") return;
     before = current;
@@ -249,7 +249,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   const referenceKey = createHash("sha256").update(providerReference.trim().toUpperCase()).digest("hex");
   const now = Date.now();
   const claim = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const current = root.refundCases?.[refundId] as RefundCase | undefined;
     if (!current) return;
     if (current.status === "COMPLETED") return root;
@@ -297,7 +297,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   });
   const posted = await postFinancialOperation(db(), reversal);
   const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
+    if (root === null) return null;
     const currentCase = root.refundCases?.[refundId] as RefundCase | undefined;
     const currentPayment = root.payments?.[refund.paymentId] as PaymentRecord | undefined;
     if (!currentCase || currentCase.status !== "PROCESSING" || currentCase.providerReference !== providerReference

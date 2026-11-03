@@ -47,6 +47,11 @@ export const createSimulatedGcashRefund = onCall({ enforceAppCheck: true }, asyn
   const result = await commitSimulatedRefund(db, {
     sessionId, uid, amountMinor, now, refundId, refund,
   });
-  if (!result.committed) throw new HttpsError("failed-precondition", "The refund exceeds the remaining refundable amount or the session is no longer refundable.");
+  const savedRoot = result.snapshot.val() as Record<string, any> | null;
+  const savedRefund = savedRoot?.paymentRefunds?.[refundId];
+  if (!result.committed || !savedRefund || savedRefund.sessionId !== sessionId
+    || savedRefund.requestedBy !== uid || savedRefund.amountMinor !== amountMinor) {
+    throw new HttpsError("failed-precondition", "The refund exceeds the remaining refundable amount or the session is no longer refundable.");
+  }
   return { refundId, status: refund.status, amountMinor, currency: "PHP", simulationOnly: true };
 });
