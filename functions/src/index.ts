@@ -22,6 +22,27 @@ function requireAuth(uid?: string): string {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in to request a quotation.");
   return uid;
 }
+function validateAddress(value: unknown, field: string): string {
+  if (typeof value !== "string") throw new HttpsError("invalid-argument", \`\${field} address is required.\`);
+  const address = value.trim();
+  if (address.length < 2 || address.length > 250 || /[\u0000-\u001F\u007F]/.test(address)) {
+    throw new HttpsError("invalid-argument", \`\${field} address must be 2–250 valid characters.\`);
+  }
+  return address;
+}
+async function enforceRouteQuoteRateLimit(uid: string): Promise<void> {
+  const now = Date.now();
+  const ref = database.ref(\`rateLimits/routeQuotes/\${uid}\`);
+  const result = await ref.transaction((current: { windowStartedAt?: number; count?: number } | null) => {
+    const start = typeof current?.windowStartedAt === "number" ? current.windowStartedAt : 0;
+    const count = typeof current?.count === "number" ? current.count : 0;
+    if (now - start < 60_000 && count >= 10) return;
+    return now - start >= 60_000
+      ? { windowStartedAt: now, count: 1 }
+      : { windowStartedAt: start || now, count: count + 1 };
+  }, undefined, false);
+  if (!result.committed) throw new HttpsError("resource-exhausted", "Too many fare or delivery quotes. Please wait a minute and try again.");
+}
 function validatePoint(point: Point, field: string): void {
   if (!point || !Number.isFinite(point.latitude) || !Number.isFinite(point.longitude)
     || point.latitude < -90 || point.latitude > 90 || point.longitude < -180 || point.longitude > 180) {
@@ -54,7 +75,8 @@ async function loadDiscount(code: string | undefined): Promise<DiscountRule | un
   if (!snapshot.exists()) throw new HttpsError("not-found", "Discount code was not found.");
   return snapshot.val() as DiscountRule;
 }
-async function routeMetrics(request: QuoteRequest): Promise<{ distanceMeters: number; durationSeconds: number }> {
+async function routeMetrics(uid: string, request: QuoteRequest): Promise<{ distanceMeters: number; durationSeconds: number }> {
+  await enforceRouteQuoteRateLimit(uid);
   validatePoint(request.pickup, "Pickup");
   validatePoint(request.dropoff, "Drop-off");
   const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
@@ -99,6 +121,7 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
     throw new HttpsError("invalid-argument", "A source and 1–50 order items are required.");
   }
   const clientRequest = data as unknown as QuoteRequest;
+  const dropoffAddress = validateAddress(data.dropoffAddress, "Drop-off");
   validatePoint(clientRequest.dropoff, "Drop-off");
   const root = kind === "FOOD" ? "restaurants" : "shops";
   const collection = kind === "FOOD" ? "restaurantMeals" : "shopProducts";
@@ -111,15 +134,15 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
     throw new HttpsError("failed-precondition", "This merchant has no verified pickup location. Contact the merchant before ordering.");
   }
   const pickup = requireMerchantPickup(storedLatitude, storedLongitude);
-  const request: QuoteRequest = { ...clientRequest, pickup };
-  const [config, route, discount] = await Promise.all([loadConfig(), routeMetrics(request), loadDiscount(data.discountCode as string | undefined)]);
-  let subtotalMinor = 0;
-  const pricedItems: Array<{ itemId: string; name: string; quantity: number; specialInstructions: string; unitPriceMinor: number; lineTotalMinor: number }> = [];
+  const request: QuoteRequest = { ...clientRequest, pickup, dropoffAddress } as QuoteRequest;
+  const [config, route, discount] = await Promise.all([loadConfig(), routeMetrics(uid, request), loadDiscount(data.discountCode as string | undefined)]);
   for (const line of items) {
     if (!line || typeof line.itemId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(line.itemId) || !Number.isSafeInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) {
       throw new HttpsError("invalid-argument", "Each item must have a valid ID and quantity from 1 to 99.");
     }
-    const item = await database.ref(`${collection}/${sourceId}/${line.itemId}`).get();
+  }
+  const pricedItems = await Promise.all(items.map(async (line) => {
+    const item = await database.ref(\`\${collection}/\${sourceId}/\${line.itemId}\`).get();
     if (!item.exists() || item.child("isAvailable").val() === false) throw new HttpsError("failed-precondition", "An item is unavailable.");
     if (kind === "SHOP") {
       const stock = item.child("stockQuantity").val();
@@ -128,11 +151,15 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
     const rawPrice = kind === "FOOD" ? item.child("basePrice").val() : item.child("price").val();
     const unitPriceMinor = decimalPesosToMinor(rawPrice, "item price");
     const lineTotalMinor = unitPriceMinor * line.quantity;
-    if (!Number.isSafeInteger(lineTotalMinor) || !Number.isSafeInteger(subtotalMinor + lineTotalMinor)) throw new HttpsError("out-of-range", "Order total is too large.");
-    subtotalMinor += lineTotalMinor;
+    if (!Number.isSafeInteger(lineTotalMinor)) throw new HttpsError("out-of-range", "Order total is too large.");
     const specialInstructions = typeof line.specialInstructions === "string" ? line.specialInstructions.trim().slice(0, 500) : "";
-    pricedItems.push({ itemId: line.itemId, name: String(item.child("name").val() ?? ""), quantity: line.quantity, specialInstructions, unitPriceMinor, lineTotalMinor });
-  }
+    return { itemId: line.itemId, name: String(item.child("name").val() ?? ""), quantity: line.quantity, specialInstructions, unitPriceMinor, lineTotalMinor };
+  }));
+  const subtotalMinor = pricedItems.reduce((sum, item) => {
+    const total = sum + item.lineTotalMinor;
+    if (!Number.isSafeInteger(total)) throw new HttpsError("out-of-range", "Order total is too large.");
+    return total;
+  }, 0);
   await assertPaymentServiceEnabled(kind);
   const method = await paymentMethod(data.paymentMethod);
   const breakdown = calculateOrderBreakdown({ config, service: kind, subtotalMinor, route, paymentMethod: method, discount });
@@ -141,8 +168,9 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
 
 export const quoteRide = onCall({ secrets: [mapsApiKey], enforceAppCheck: true }, async (call) => {
   const uid = requireAuth(call.auth?.uid);
-  const data = call.data as QuoteRequest & { rideType?: string };
-  const [config, route] = await Promise.all([loadConfig(), routeMetrics(data)]);
+  const rawData = call.data as QuoteRequest & { rideType?: string; pickupAddress?: unknown; dropoffAddress?: unknown };
+  const data = { ...rawData, pickupAddress: validateAddress(rawData.pickupAddress, "Pickup"), dropoffAddress: validateAddress(rawData.dropoffAddress, "Drop-off") };
+  const [config, route] = await Promise.all([loadConfig(), routeMetrics(uid, data)]);
   const fare = calculateRideFare(config.ride, route);
   await assertPaymentServiceEnabled("RIDE");
   const method = await paymentMethod(data.paymentMethod);
@@ -166,8 +194,9 @@ export const quoteShopOrder = onCall({ secrets: [mapsApiKey], enforceAppCheck: t
 });
 export const quoteDelivery = onCall({ secrets: [mapsApiKey], enforceAppCheck: true }, async (call) => {
   const uid = requireAuth(call.auth?.uid);
-  const data = call.data as QuoteRequest;
-  const [config, route] = await Promise.all([loadConfig(), routeMetrics(data)]);
+  const rawData = call.data as QuoteRequest & { pickupAddress?: unknown; dropoffAddress?: unknown };
+  const data = { ...rawData, pickupAddress: validateAddress(rawData.pickupAddress, "Pickup"), dropoffAddress: validateAddress(rawData.dropoffAddress, "Drop-off") };
+  const [config, route] = await Promise.all([loadConfig(), routeMetrics(uid, data)]);
   await assertPaymentServiceEnabled("DELIVERY");
   const method = await paymentMethod(data.paymentMethod);
   const breakdown = calculateDeliveryOnlyBreakdown({ config, route, paymentMethod: method });
