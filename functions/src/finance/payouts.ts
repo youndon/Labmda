@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { resolvePayoutTransferReference, payoutTransferReferenceIndexKey, PayoutTransferReferenceError } from "./payout-transfer-reference.js";
+import { hasRecentAuthentication } from "./payout-profile-security.js";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -26,6 +27,11 @@ function uidFrom(call: { auth?: { uid?: string } | null }): string {
 }
 function requireAdmin(claims: Record<string, unknown> | undefined): void {
   if (claims?.admin !== true) throw new HttpsError("permission-denied", "Administrator access is required.");
+}
+function requireRecentAuthentication(call: { auth?: { token?: Record<string, unknown> } | null }): void {
+  if (!hasRecentAuthentication(call.auth?.token?.auth_time)) {
+    throw new HttpsError("failed-precondition", "Sign in again before changing your payout destination.");
+  }
 }
 function safeId(value: string): boolean {
   return /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -124,6 +130,7 @@ function payoutPaid(args: {
 
 export const saveMyPayoutProfile = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
+  requireRecentAuthentication(call);
   const profile = validatePayoutProfile(call.data as Record<string, unknown>);
   await db().ref(`payoutProfiles/${uid}`).set({
     ...profile, updatedAt: Date.now(), updatedBy: uid,
