@@ -1,6 +1,7 @@
 package com.zouitel.presentaion.screens.food
 
 import cafe.adriel.voyager.core.model.ScreenModel
+import com.zouitel.presentaion.model.CartItem
 import cafe.adriel.voyager.core.model.screenModelScope
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
@@ -25,6 +26,12 @@ class RestaurantScreenModel(
     /** mealId -> quantity */
     private val _quantities = MutableStateFlow<Map<String, Int>>(emptyMap())
     val quantities: StateFlow<Map<String, Int>> = _quantities.asStateFlow()
+    private val _specialInstructions = MutableStateFlow<Map<String, String>>(emptyMap())
+
+    fun setMealDetails(item: CartItem) {
+        _quantities.value = _quantities.value + (item.id to item.quantity.coerceAtLeast(1))
+        _specialInstructions.value = _specialInstructions.value + (item.id to item.specialInstructions)
+    }
 
     private val _isSubmitting = MutableStateFlow(false)
     val isSubmitting: StateFlow<Boolean> = _isSubmitting.asStateFlow()
@@ -54,6 +61,7 @@ class RestaurantScreenModel(
 
     fun clearCart() {
         _quantities.value = emptyMap()
+        _specialInstructions.value = emptyMap()
     }
 
     fun clearError() {
@@ -88,7 +96,7 @@ class RestaurantScreenModel(
                     mapOf(
                         "sourceId" to restaurant.id,
                         "items" to lines.map { meal ->
-                            mapOf("itemId" to meal.id, "quantity" to (_quantities.value[meal.id] ?: 1))
+                            mapOf("itemId" to meal.id, "quantity" to (_quantities.value[meal.id] ?: 1), "specialInstructions" to (_specialInstructions.value[meal.id] ?: ""))
                         },
                         "pickup" to mapOf("latitude" to restaurant.latitude, "longitude" to restaurant.longitude),
                         "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
