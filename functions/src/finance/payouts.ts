@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { resolvePayoutTransferReference, PayoutTransferReferenceError } from "./payout-transfer-reference.js";
+import { resolvePayoutTransferReference, payoutTransferReferenceIndexKey, PayoutTransferReferenceError } from "./payout-transfer-reference.js";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -445,6 +445,17 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
   } catch (error) {
     if (error instanceof PayoutTransferReferenceError) throw new HttpsError(error.code, error.message);
     throw error;
+  }
+  if (typeof payout.approvedBy === "string" && payout.approvedBy === call.auth!.uid) {
+    throw new HttpsError("permission-denied", "A different administrator must verify and record the transfer after approval.");
+  }
+  const referenceIndexKey = payoutTransferReferenceIndexKey(confirmedReference);
+  const referenceIndex = await db().ref(`payoutTransferReferenceIndex/${referenceIndexKey}`).transaction((current) => {
+    if (current === null) return { payoutId, normalizedReference: confirmedReference.toUpperCase(), createdAt: Date.now(), createdBy: call.auth!.uid };
+    return current.payoutId === payoutId && current.normalizedReference === confirmedReference.toUpperCase() ? current : undefined;
+  }, undefined, false);
+  if (!referenceIndex.committed) {
+    throw new HttpsError("already-exists", "This transfer reference is already assigned to another payout.");
   }
   if (payout.status === "APPROVED") {
     await updatePayoutStatus(payoutId, ["APPROVED"], "PAYING", {
