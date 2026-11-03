@@ -4,6 +4,7 @@ import android.content.Context
 import android.location.Geocoder
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -14,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -88,18 +90,27 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    Text(
-                        text = if (existingShop == null) "Submit your store details for admin verification." else "Update your store information.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            if (existingShop == null) "Set up your shop" else "Shop information",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            if (existingShop == null) "Add accurate business details and pin your physical store location. Your application will be reviewed before the shop is listed." else "Keep your public shop details and pickup location up to date.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text("BUSINESS DETAILS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
                 }
 
                 item {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Store Name") },
+                        label = { Text("Store name *") },
+                        singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -109,7 +120,8 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },
-                        label = { Text("Store Description") },
+                        label = { Text("Store description") },
+                        minLines = 3,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -119,7 +131,8 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                     OutlinedTextField(
                         value = category,
                         onValueChange = { category = it },
-                        label = { Text("Store Category") },
+                        label = { Text("Store category *") },
+                        singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -129,7 +142,9 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                     OutlinedTextField(
                         value = phone,
                         onValueChange = { phone = it },
-                        label = { Text("Business Phone Number") },
+                        label = { Text("Business phone number *") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -140,7 +155,7 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                         OutlinedTextField(
                             value = address,
                             onValueChange = { address = it },
-                            label = { Text("Physical Store Address") },
+                            label = { Text("Physical store address *") },
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -152,12 +167,21 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                         ) {
                             Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Mark Store Location on Map", fontWeight = FontWeight.Bold)
+                            Text(
+                                if (storeLat != null && storeLng != null) "Update pinned store location" else "Pin store location on map",
+                                fontWeight = FontWeight.Bold
+                            )
                         }
+                        Text(
+                            if (storeLat != null && storeLng != null) "Location pinned and ready for submission." else "A map pin is required so the delivery pickup point can be identified.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (storeLat != null && storeLng != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
                 item {
+                    Text("STORE PHOTO", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     ImagePicker(
                         imageUrl = imageUrl,
                         uploadState = imageUpload,
