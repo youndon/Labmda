@@ -3,7 +3,7 @@ import { calculateDeliveryFee, calculateOrderBreakdown, calculateRideFare, decim
 
 const config = {
   version: 1, currency: "PHP" as const,
-  ride: { baseFareMinor: 5000, perKmMinor: 1200, perMinuteMinor: 200, minimumFareMinor: 8000, platformCommissionBps: 1500 },
+  ride: { baseFareMinor: 5000, perKmMinor: 1200, perMinuteMinor: 200, minimumFareMinor: 8000, platformCommissionBps: 1500, vehicleMultipliersBps: {} },
   delivery: { baseFeeMinor: 3000, perKmMinor: 1000, minimumFeeMinor: 3000, platformCommissionBps: 1000 },
   food: { commissionBps: 1200 }, shop: { commissionBps: 1000 },
   providerFees: { GCASH: { rateBps: 250, fixedFeeMinor: 1500, payer: "PLATFORM" as const } },
