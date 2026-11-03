@@ -2,6 +2,8 @@ package com.zouitel.presentaion.screens.food
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,12 +12,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
@@ -34,6 +38,23 @@ class FoodActivitiesScreen : Screen {
         val screenModel = rememberScreenModel { FoodActivitiesScreenModel() }
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        var searchQuery by remember { mutableStateOf("") }
+        var selectedFilter by remember { mutableStateOf("All") }
+        val filteredOrders = remember(orders, searchQuery, selectedFilter) {
+            orders.filter { order ->
+                val query = searchQuery.trim()
+                val matchesQuery = query.isBlank() || listOf(
+                    order.id, order.sourceName, order.pickupLocation, order.dropoffLocation, order.deliveryName
+                ).any { it.contains(query, ignoreCase = true) }
+                val matchesFilter = when (selectedFilter) {
+                    "Active" -> order.status != OrderStatus.DELIVERED && order.status != OrderStatus.CANCELLED
+                    "Completed" -> order.status == OrderStatus.DELIVERED
+                    "Cancelled" -> order.status == OrderStatus.CANCELLED
+                    else -> true
+                }
+                matchesQuery && matchesFilter
+            }
+        }
 
         Scaffold(
             topBar = {
@@ -92,19 +113,66 @@ class FoodActivitiesScreen : Screen {
                     }
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(orders, key = { it.id }) { order ->
-                        ClientOrderHistoryCard(
-                            order = order,
-                            onTrackOrder = { navigator?.push(LiveOrderTrackingScreen(order.id)) },
-                            onCancelOrder = { screenModel.cancelOrder(order.id) }
+                Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            shape = RoundedCornerShape(14.dp),
+                            placeholder = { Text("Search orders, restaurants, or addresses") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
                         )
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("All", "Active", "Completed", "Cancelled").forEach { filter ->
+                                FilterChip(
+                                    selected = selectedFilter == filter,
+                                    onClick = { selectedFilter = filter },
+                                    label = { Text(filter) }
+                                )
+                            }
+                        }
+                        Text(
+                            text = "${filteredOrders.size} ${if (filteredOrders.size == 1) "order" else "orders"}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (filteredOrders.isEmpty()) {
+                        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.ReceiptLong, contentDescription = null,
+                                    modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("No matching orders", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                                Text("Try another search or choose a different filter.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(filteredOrders, key = { it.id }) { order ->
+                                ClientOrderHistoryCard(
+                                    order = order,
+                                    onTrackOrder = { navigator?.push(LiveOrderTrackingScreen(order.id)) },
+                                    onCancelOrder = { screenModel.cancelOrder(order.id) }
+                                )
+                            }
+                        }
                     }
                 }
             }
