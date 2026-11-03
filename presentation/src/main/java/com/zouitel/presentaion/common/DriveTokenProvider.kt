@@ -48,7 +48,7 @@ class DriveUploadException(message: String, cause: Throwable? = null) : Exceptio
  */
 object DriveImageUploader {
 
-    private const val FOLDER_NAME = "RideGo Media"
+    private const val FOLDER_NAME = "Labmda Media"
     private const val FOLDER_MIME = "application/vnd.google-apps.folder"
     private const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
     private const val UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
