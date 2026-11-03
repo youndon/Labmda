@@ -40,7 +40,7 @@ export const createSimulatedGcashRefund = onCall({ enforceAppCheck: true }, asyn
   });
   const refund = {
     id: refundId, sessionId, paymentId: session.paymentId, requestedBy: uid,
-    amountMinor, currency: "PHP", reason, status: providerRefund.status,
+    amountMinor, currency: "PHP" as const, reason, status: providerRefund.status,
     provider: providerRefund.provider, providerRefundId: providerRefund.providerRefundId,
     simulationOnly: true, createdAt: now, updatedAt: now, completedAt: now,
   };
