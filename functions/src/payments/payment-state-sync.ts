@@ -47,7 +47,7 @@ export async function synchronizePaymentState(database: Database, paymentId: str
       if (!order || order.paymentId !== paymentId) return;
       const nextStatus = rawStatus === "SUCCEEDED" && order.status === "PENDING_PAYMENT"
         ? (order.orderType === "DELIVERY" ? "OUT_FOR_DELIVERY" : "PLACED")
-        : rawStatus === "CANCELLED" && order.status === "PENDING_PAYMENT"
+        : ["CANCELLED", "FAILED", "EXPIRED"].includes(rawStatus) && order.status === "PENDING_PAYMENT"
           ? "CANCELLED"
           : order.status;
       const nextOrder = { ...order, ...common, status: nextStatus, updatedAtTimestamp: now };
@@ -61,7 +61,7 @@ export async function synchronizePaymentState(database: Database, paymentId: str
       if (!trip || trip.paymentId !== paymentId) return;
       const nextStatus = rawStatus === "SUCCEEDED" && trip.status === "PENDING_PAYMENT"
         ? "REQUESTED"
-        : rawStatus === "CANCELLED" && trip.status === "PENDING_PAYMENT"
+        : ["CANCELLED", "FAILED", "EXPIRED"].includes(rawStatus) && trip.status === "PENDING_PAYMENT"
           ? "CANCELLED"
           : trip.status;
       const nextTrip = {

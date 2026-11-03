@@ -1,6 +1,8 @@
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { confirmBdoGcashPaymentRecord } from "./bdo-payment-confirmation.js";
+import { expireBdoGcashPaymentRecord } from "./bdo-payment-expiration.js";
+import { recordAdminFinancialAudit } from "../finance/admin-financial.js";
 
 const db = () => getDatabase();
 const safeId = /^[A-Za-z0-9_-]{1,128}$/;
@@ -120,4 +122,38 @@ export const attachBdoCheckoutLink = onCall({ enforceAppCheck: true }, async (ca
     throw new HttpsError("failed-precondition", "The BDO Checkout link could not be attached to this pending payment.");
   }
   return { paymentId, checkoutUrl, status: saved.status, duplicate: !result.committed };
+});
+
+
+/**
+ * Records an expiry only after an administrator confirms in the BDO merchant
+ * portal that the attached payment request is expired, voided or no longer
+ * payable. No automatic expiry is inferred from elapsed time.
+ */
+export const expireBdoGcashPayment = onCall({ enforceAppCheck: true }, async (call) => {
+  const uid = call.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
+  if (call.auth?.token?.admin !== true) throw new HttpsError("permission-denied", "Administrator access is required.");
+
+  const paymentId = String(call.data?.paymentId ?? "");
+  const closureReference = String(call.data?.closureReference ?? "").trim();
+  const reason = String(call.data?.reason ?? "").trim();
+  let result: Awaited<ReturnType<typeof expireBdoGcashPaymentRecord>>;
+  try {
+    result = await expireBdoGcashPaymentRecord(db(), {
+      paymentId, closureReference, reason, expiredBy: uid,
+    });
+  } catch (error) {
+    throw new HttpsError(
+      "failed-precondition",
+      error instanceof Error ? error.message : "BDO payment expiry could not be verified.",
+    );
+  }
+  if (!result.duplicate) {
+    await recordAdminFinancialAudit({
+      uid, action: "BDO_GCASH_PAYMENT_EXPIRED", targetType: "PAYMENT",
+      targetId: paymentId, after: { ...result, reason },
+    });
+  }
+  return result;
 });

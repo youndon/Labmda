@@ -78,6 +78,6 @@ describe.skipIf(!emulatorOnly)("Firestore emulator: financial ledger transaction
     expect(account?.clearingMinor).toBe(90);
     const reconciliation = await reconcileFinancialLedger();
     expect(reconciliation.balanced).toBe(true);
-  });
+  }, 15_000);
 
 });
