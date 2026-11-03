@@ -163,8 +163,7 @@ class DriverWorkplaceScreen : Screen {
                             DriverServiceCard(
                                 account = driverAccount!!,
                                 onEdit = { showAddEditDialog = true },
-                                onDelete = { screenModel.deleteDriverService() },
-                                onOnlineChanged = { screenModel.updateOnlineStatus(it) }
+                                onDelete = { screenModel.deleteDriverService() }
                             )
                         }
                     }
@@ -195,8 +194,7 @@ class DriverWorkplaceScreen : Screen {
     private fun DriverServiceCard(
         account: DriverAccountInfo,
         onEdit: () -> Unit,
-        onDelete: () -> Unit,
-        onOnlineChanged: (Boolean) -> Unit
+        onDelete: () -> Unit
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -275,18 +273,11 @@ class DriverWorkplaceScreen : Screen {
 
                 if (account.status == Status.APPROVED) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (account.isOnline) "Visible for ride requests" else "Not accepting ride requests",
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (account.isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        )
-                        Switch(checked = account.isOnline, onCheckedChange = onOnlineChanged)
-                    }
+                    Text(
+                        text = "Manage ride availability and live location from the Driver Dashboard.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
