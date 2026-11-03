@@ -3,12 +3,15 @@ package com.zouitel.presentaion.screens.food
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +34,18 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
         val screenModel = rememberScreenModel { RestaurantDashboardScreenModel(restaurantId) }
         val meals by screenModel.meals.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        var searchQuery by remember { mutableStateOf("") }
+        var selectedCategory by remember { mutableStateOf("All") }
+        val categories = remember(meals) { meals.map { it.category.name }.distinct().sorted() }
+        val filteredMeals = remember(meals, searchQuery, selectedCategory) {
+            meals.filter { meal ->
+                val matchesSearch = searchQuery.isBlank() ||
+                    meal.name.contains(searchQuery.trim(), ignoreCase = true) ||
+                    meal.description.contains(searchQuery.trim(), ignoreCase = true)
+                val matchesCategory = selectedCategory == "All" || meal.category.name == selectedCategory
+                matchesSearch && matchesCategory
+            }
+        }
 
         Scaffold(
             topBar = {
@@ -78,28 +93,66 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                 }
 
                 else -> LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
+                    modifier = Modifier.fillMaxSize().padding(paddingValues),
                     contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 88.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
-                        Text(
-                            text = "Restaurant Menu (${meals.size})",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                text = "Your Menu",
+                                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "${filteredMeals.size} of ${meals.size} menu items",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                placeholder = { Text("Search menu items") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                            )
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                (listOf("All") + categories).forEach { category ->
+                                    FilterChip(
+                                        selected = selectedCategory == category,
+                                        onClick = { selectedCategory = category },
+                                        label = { Text(category) }
+                                    )
+                                }
+                            }
+                        }
                     }
-                    items(meals, key = { it.id }) { meal ->
-                        MealItemCard(
-                            meal = meal,
-                            onClick = {
-                                navigator?.push(
-                                    MealWorkplaceScreen(restaurantId = restaurantId, meal = meal)
+                    if (filteredMeals.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    "No menu items match your search.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                        )
+                        }
+                    } else {
+                        items(filteredMeals, key = { it.id }) { meal ->
+                            MealItemCard(
+                                meal = meal,
+                                onClick = {
+                                    navigator?.push(MealWorkplaceScreen(restaurantId = restaurantId, meal = meal))
+                                }
+                            )
+                        }
                     }
                 }
             }
