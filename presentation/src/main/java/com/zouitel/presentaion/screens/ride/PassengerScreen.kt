@@ -374,6 +374,7 @@ class PassengerScreen : Screen {
                                 Spacer(Modifier.height(12.dp))
                                 PassengerTripCard(
                                     trip = activeTrip,
+                                    driver = onlineDrivers.firstOrNull { it.uid == activeTrip.driverId },
                                     onCancel = { screenModel.cancelTrip(activeTrip.id) }
                                 )
                             } else {
@@ -873,44 +874,168 @@ class PassengerScreen : Screen {
     }
 
     @Composable
-    private fun PassengerTripCard(trip: Trip, onCancel: () -> Unit) {
+    private fun PassengerTripCard(
+        trip: Trip,
+        driver: UserProfile? = null,
+        onCancel: () -> Unit
+    ) {
+        val statusSteps = listOf("REQUESTED", "ACCEPTED", "IN_PROGRESS", "COMPLETED")
+        val currentStep = statusSteps.indexOf(trip.status).coerceAtLeast(0)
+        val statusTitle = when (trip.status) {
+            "PENDING_PAYMENT" -> "Payment required"
+            "REQUESTED" -> "Finding your driver"
+            "ACCEPTED" -> "Driver confirmed"
+            "IN_PROGRESS" -> "Your ride is underway"
+            "COMPLETED" -> "Ride completed"
+            "CANCELLED" -> "Ride cancelled"
+            else -> trip.status.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+        }
+        val statusMessage = when (trip.status) {
+            "PENDING_PAYMENT" -> "Complete the payment step to move your booking forward."
+            "REQUESTED" -> "Your request is in the driver-matching queue. Driver details will appear here after a driver accepts."
+            "ACCEPTED" -> "Your driver has accepted the ride. Get ready at the pickup location."
+            "IN_PROGRESS" -> "Your driver has started the trip to your destination."
+            "COMPLETED" -> "This trip has been marked as completed."
+            "CANCELLED" -> "This trip is no longer active."
+            else -> "Your trip status will update here."
+        }
+        val driverLocation = driver?.driverService?.currentLocation
+        val hasLiveLocation = driverLocation != null &&
+            (driverLocation.latitude != 0.0 || driverLocation.longitude != 0.0)
+
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Trip #${trip.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("TRIP #${trip.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(statusTitle, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    }
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(10.dp)) {
                         Text(
-                            trip.status,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            trip.status.replace('_', ' '),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
                     }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(6.dp))
-                        Text("From: ${trip.pickupLocation}", style = MaterialTheme.typography.bodySmall)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        statusMessage,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+
+                if (trip.status != "PENDING_PAYMENT" && trip.status != "CANCELLED") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        listOf("Requested", "Accepted", "On trip", "Done").forEachIndexed { index, label ->
+                            val reached = trip.status == "COMPLETED" || index <= currentStep
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().height(5.dp),
+                                    color = if (reached) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(50)
+                                ) {}
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (reached) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (reached) FontWeight.SemiBold else FontWeight.Normal
+                                )
+                            }
+                        }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.width(6.dp))
-                        Text("To: ${trip.dropoffLocation}", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Pickup", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(trip.pickupLocation, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                        }
                     }
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Destination", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(trip.dropoffLocation, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+
+                if (trip.driverId.isNotBlank()) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                        shape = RoundedCornerShape(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(44.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        trip.driverName.ifBlank { "D" }.take(1).uppercase(),
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(trip.driverName.ifBlank { "Assigned driver" }, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold))
+                                if (trip.driverPhone.isNotBlank()) {
+                                    Text(trip.driverPhone, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                if (trip.vehicleDetails.isNotBlank()) {
+                                    Text(trip.vehicleDetails, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Text(
+                                    if (hasLiveLocation) "Live location available" else "Driver location is not currently available",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (hasLiveLocation) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                } else if (trip.status == "REQUESTED") {
+                    Text(
+                        "No driver has accepted this ride yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Row(
@@ -932,20 +1057,8 @@ class PassengerScreen : Screen {
                     checkoutUrl = trip.checkoutUrl
                 )
 
-                if (trip.driverId.isNotBlank()) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    Text("Driver: ${trip.driverName} (${trip.driverPhone})", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium))
-                    if (trip.vehicleDetails.isNotBlank()) {
-                        Text(
-                            "Vehicle: ${trip.vehicleDetails}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                    }
-                }
-
-                if (trip.paymentStatus != "PAID" && (trip.status == "PENDING_PAYMENT" || trip.status == "REQUESTED" || trip.status == "ACCEPTED")) {
-                    Spacer(Modifier.height(4.dp))
+                if (trip.paymentStatus != "PAID" &&
+                    (trip.status == "PENDING_PAYMENT" || trip.status == "REQUESTED" || trip.status == "ACCEPTED")) {
                     OutlinedButton(
                         onClick = onCancel,
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
