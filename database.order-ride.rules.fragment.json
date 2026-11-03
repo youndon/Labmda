@@ -28,7 +28,7 @@
       }
     },
     "driverPresence": {
-      ".read": "auth != null",
+      ".read": "auth != null && root.child('activeRideRequests').child(auth.uid).exists()",
       ".write": false
     },
     "users": {
@@ -40,11 +40,35 @@
       ],
       "$uid": {
         "driverService": {
+          "id": {
+            ".write": "auth != null && auth.uid == $uid && newData.val() == $uid"
+          },
+          "vehicleInfo": {
+            "type": {
+              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+            },
+            "make": {
+              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+            },
+            "model": {
+              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+            },
+            "color": {
+              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+            },
+            "licensePlate": {
+              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+            },
+            "serviceType": {
+              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+            }
+          },
           "status": {
             ".write": "auth != null && auth.uid == $uid && ((!data.exists() && newData.val() == 'PENDING') || newData.val() == data.val())"
           },
           "isOnline": {
-            ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() == 'APPROVED'"
+            ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() == 'APPROVED'",
+            ".validate": "newData.isBoolean()"
           }
         },
         "deliveryServices": {
@@ -73,10 +97,39 @@
       }
     },
     "shops": {
-      ".indexOn": ["ownerUid"],
+      ".indexOn": [
+        "ownerUid"
+      ],
       "$shopId": {
         "status": {
           ".write": false
+        },
+        "isOnline": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "name": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "description": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "category": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "phone": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "address": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "imageUrl": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "latitude": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
+        },
+        "longitude": {
+          ".write": "auth != null && root.child('shops').child($shopId).child('ownerUid').val() == auth.uid && root.child('shops').child($shopId).child('status').val() == 'APPROVED'"
         }
       }
     },
@@ -84,6 +137,12 @@
       "$restaurantId": {
         "status": {
           ".write": false
+        },
+        "isOpen": {
+          ".write": "auth != null && auth.uid == $restaurantId && root.child('restaurants').child($restaurantId).child('status').val() == 'APPROVED'"
+        },
+        "imageUrl": {
+          ".write": "auth != null && auth.uid == $restaurantId && root.child('restaurants').child($restaurantId).child('status').val() == 'APPROVED'"
         }
       }
     },
@@ -95,6 +154,16 @@
     "restaurantMeals": {
       "$restaurantId": {
         ".read": "auth != null && (root.child('restaurants').child($restaurantId).child('status').val() == 'APPROVED' || $restaurantId == auth.uid || root.child('restaurants').child($restaurantId).child('managerId').val() == auth.uid)"
+      }
+    },
+    "activeRideRequests": {
+      ".read": "auth != null && $passengerUid == auth.uid",
+      ".write": false
+    },
+    "driverLocations": {
+      "$uid": {
+        ".write": "auth != null && auth.uid == $uid && (!newData.exists() || (root.child('users').child($uid).child('driverService').child('status').val() == 'APPROVED' && root.child('users').child($uid).child('driverService').child('isOnline').val() == true))",
+        ".validate": "!newData.exists() || (newData.hasChildren(['latitude','longitude']) && newData.child('latitude').isNumber() && newData.child('longitude').isNumber() && newData.child('latitude').val() >= -90 && newData.child('latitude').val() <= 90 && newData.child('longitude').val() >= -180 && newData.child('longitude').val() <= 180)"
       }
     }
   }
