@@ -111,23 +111,20 @@ class DriverWorkplaceScreenModel : ScreenModel {
         screenModelScope.launch {
             val statusToSet = keepStatus ?: Status.PENDING
 
-            val vehicleMap = mapOf(
-                "type" to vehicleType.name,
-                "make" to make,
-                "model" to model,
-                "color" to color,
-                "licensePlate" to licensePlate,
-                "serviceType" to "Ride"
+            val driverRef = db.child("users").child(uid).child("driverService")
+            driverRef.updateChildren(
+                mapOf(
+                    "id" to uid,
+                    "vehicleInfo/type" to vehicleType.name,
+                    "vehicleInfo/make" to make,
+                    "vehicleInfo/model" to model,
+                    "vehicleInfo/color" to color,
+                    "vehicleInfo/licensePlate" to licensePlate,
+                    "vehicleInfo/serviceType" to "Ride",
+                    "status" to statusToSet.name,
+                    "isOnline" to false
+                )
             )
-
-            val driverMap = mapOf(
-                "id" to uid,
-                "vehicleInfo" to vehicleMap,
-                "status" to statusToSet.name,
-                "isOnline" to false
-            )
-
-            db.child("users").child(uid).child("driverService").setValue(driverMap)
             _isLoading.value = false
         }
     }
@@ -142,7 +139,20 @@ class DriverWorkplaceScreenModel : ScreenModel {
     fun deleteDriverService() {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).child("driverService").removeValue()
+            db.child("users").child(uid).child("driverService").updateChildren(
+                mapOf(
+                    "id" to null,
+                    "vehicleInfo/type" to null,
+                    "vehicleInfo/make" to null,
+                    "vehicleInfo/model" to null,
+                    "vehicleInfo/color" to null,
+                    "vehicleInfo/licensePlate" to null,
+                    "vehicleInfo/serviceType" to null,
+                    "status" to null,
+                    "isOnline" to null
+                )
+            )
+            db.child("driverLocations").child(uid).removeValue()
         }
     }
 }

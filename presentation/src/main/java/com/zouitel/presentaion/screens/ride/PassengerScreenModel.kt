@@ -8,7 +8,9 @@ import com.zouitel.presentaion.model.VehicleType
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -24,6 +26,7 @@ class PassengerScreenModel : ScreenModel {
     val trips: StateFlow<List<Trip>> = _trips.asStateFlow()
 
     private val _onlineDrivers = MutableStateFlow<List<UserProfile>>(emptyList())
+    private var driverPresenceJob: Job? = null
     val onlineDrivers: StateFlow<List<UserProfile>> = _onlineDrivers.asStateFlow()
 
     private val _passengerInfo = MutableStateFlow(PassengerInfo())
@@ -36,7 +39,6 @@ class PassengerScreenModel : ScreenModel {
 
     init {
         listenToPassengerTrips()
-        listenToOnlineDrivers()
         listenToPassengerInfo()
     }
 
@@ -97,48 +99,46 @@ class PassengerScreenModel : ScreenModel {
                 }.sortedByDescending { it.createdAtTimestamp }
 
                 _trips.value = list
+                listenToOnlineDrivers(list)
                 _isLoading.value = false
             }
         }
     }
 
-    private fun listenToOnlineDrivers() {
-        screenModelScope.launch {
-            db.child("driverPresence").valueEvents.collect { snapshot ->
-                val drivers = snapshot.children.mapNotNull { child ->
-                    try {
-                        val uid = child.key ?: return@mapNotNull null
-                        val isOnline = true
-                        if (!isOnline) return@mapNotNull null
+    private fun listenToOnlineDrivers(trips: List<Trip>) {
+        val hasActiveRideRequest = trips.any { it.status in setOf("REQUESTED", "ACCEPTED", "IN_PROGRESS") }
+        driverPresenceJob?.cancel()
+        if (!hasActiveRideRequest) {
+            _onlineDrivers.value = emptyList()
+            return
+        }
 
-                        val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
-                        val phone = ""
+        driverPresenceJob = screenModelScope.launch {
+            db.child("driverPresence").valueEvents
+                .catch { _onlineDrivers.value = emptyList() }
+                .collect { snapshot ->
+                    val drivers = snapshot.children.mapNotNull { child ->
+                        try {
+                            val uid = child.key ?: return@mapNotNull null
+                            val fullName = runCatching { child.child("fullName").value<String>() }.getOrDefault("Driver")
+                            val lat = runCatching { child.child("latitude").value<Double>() }.getOrDefault(0.0)
+                            val lng = runCatching { child.child("longitude").value<Double>() }.getOrDefault(0.0)
+                            val heading = runCatching { child.child("heading").value<Float>() }.getOrDefault(0f)
 
-                        val loc = child
-                        val lat = runCatching { loc.child("latitude").value<Double>() }.getOrDefault(0.0)
-                        val lng = runCatching { loc.child("longitude").value<Double>() }.getOrDefault(0.0)
-                        val heading = runCatching { loc.child("heading").value<Float>() }.getOrDefault(0f)
-
-                        val v = child.child("vehicleInfo")
-                        val typeStr = runCatching { child.child("vehicleType").value<String>() }.getOrDefault("CAR")
-                        val vehicleType = runCatching { VehicleType.valueOf(typeStr) }.getOrDefault(VehicleType.CAR)
-
-                        UserProfile(
-                            uid = uid,
-                            fullName = fullName,
-                            phoneNumber = phone,
-
-                            driverService = DriverAccountInfo(
-                                currentLocation = DriverLocation(latitude = lat, longitude = lng, heading = heading),
-                                isOnline = true,
+                            UserProfile(
+                                uid = uid,
+                                fullName = fullName,
+                                driverService = DriverAccountInfo(
+                                    currentLocation = DriverLocation(latitude = lat, longitude = lng, heading = heading),
+                                    isOnline = true,
+                                )
                             )
-                        )
-                    } catch (e: Exception) {
-                        null
+                        } catch (e: Exception) {
+                            null
+                        }
                     }
+                    _onlineDrivers.value = drivers
                 }
-                _onlineDrivers.value = drivers
-            }
         }
     }
 

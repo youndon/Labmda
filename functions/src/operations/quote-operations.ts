@@ -166,6 +166,9 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
     };
     const updates: Record<string, unknown> = {};
     updates[`trips/${tripId}`] = trip;
+    if (trip.status === "REQUESTED") {
+      updates[`activeRideRequests/${uid}/${tripId}`] = { status: "REQUESTED", updatedAt: now };
+    }
     updates[`payments/${paymentId}`] = {
       id: paymentId, transactionType: "RIDE", orderId: "", tripId, deliveryId: "",
       payerId: uid, method: quote.paymentMethod === "GCASH" ? "GCASH" : "CASH",

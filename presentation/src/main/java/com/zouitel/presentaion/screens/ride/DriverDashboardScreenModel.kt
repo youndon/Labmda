@@ -52,12 +52,15 @@ class DriverDashboardScreenModel : ScreenModel {
 
         screenModelScope.launch {
             if (online) {
-                // If the app is killed or loses connection, Firebase flips the driver offline
+                // Do not republish an old GPS fix when the driver reconnects.
+                db.child("driverLocations").child(uid).removeValue()
+                // If the app is killed or loses connection, Firebase flips the driver offline.
                 runCatching { onlineRef.onDisconnect().setValue(false) }
                 onlineRef.setValue(true)
             } else {
                 runCatching { onlineRef.onDisconnect().cancel() }
                 onlineRef.setValue(false)
+                db.child("driverLocations").child(uid).removeValue()
             }
         }
     }
@@ -161,7 +164,7 @@ class DriverDashboardScreenModel : ScreenModel {
     fun updateDriverLocation(latitude: Double, longitude: Double, heading: Float = 0f) {
         val uid = currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).child("currentLocation").setValue(
+            db.child("driverLocations").child(uid).setValue(
                 mapOf(
                     "latitude" to latitude,
                     "longitude" to longitude,
