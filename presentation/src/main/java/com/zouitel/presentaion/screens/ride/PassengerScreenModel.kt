@@ -14,9 +14,11 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 /** Name and phone used to prefill the request form. */
 data class PassengerInfo(val name: String = "", val phone: String = "")
+data class RideFareQuote(val quoteId: String, val customerTotal: Double)
 
 class PassengerScreenModel : ScreenModel {
     private val db = Firebase.database.reference()
@@ -34,6 +36,9 @@ class PassengerScreenModel : ScreenModel {
 
     private val _isLoading = MutableStateFlow(true)
     private val _requestError = MutableStateFlow<String?>(null)
+    private val _rideFareQuote = MutableStateFlow<RideFareQuote?>(null)
+    val rideFareQuote: StateFlow<RideFareQuote?> = _rideFareQuote.asStateFlow()
+    private var rideQuoteJob: Job? = null
     val requestError: StateFlow<String?> = _requestError.asStateFlow()
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
@@ -142,22 +147,25 @@ class PassengerScreenModel : ScreenModel {
         }
     }
 
-    fun requestTrip(
+    fun clearRideQuote() {
+        rideQuoteJob?.cancel()
+        _rideFareQuote.value = null
+    }
+
+    fun previewRideQuote(
         pickupAddress: String,
         pickupLat: Double,
         pickupLng: Double,
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        fare: Double,
-        passengerName: String,
-        passengerPhone: String,
-        targetDriver: UserProfile? = null,
-        paymentMethod: String = "CASH",
-        onSuccess: (String) -> Unit = {}
+        paymentMethod: String
     ) {
-        if (currentUser?.uid == null) return
-        screenModelScope.launch {
+        rideQuoteJob?.cancel()
+        _rideFareQuote.value = null
+        val uid = currentUser?.uid ?: return
+        rideQuoteJob = screenModelScope.launch {
+            delay(900)
             runCatching {
                 val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
                 val quote = com.zouitel.presentaion.screens.trustedTransactionCallData(
@@ -171,8 +179,37 @@ class PassengerScreenModel : ScreenModel {
                         "rideType" to "STANDARD"
                     )
                 )
-                val quoteId = quote["quoteId"] as? String
-                    ?: error("The server did not return a ride fare quote.")
+                val quoteId = quote["quoteId"] as? String ?: error("The server did not return a fare quote.")
+                val breakdown = quote["breakdown"] as? Map<*, *> ?: error("The server returned an invalid fare quote.")
+                val totalMinor = (breakdown["customerTotalMinor"] as? Number)?.toLong()
+                    ?: error("The server returned an invalid fare amount.")
+                RideFareQuote(quoteId, totalMinor / 100.0)
+            }.onSuccess { result ->
+                if (currentUser?.uid == uid) _rideFareQuote.value = result
+            }.onFailure { error ->
+                if (currentUser?.uid == uid) _requestError.value = error.message ?: "Could not calculate the ride fare."
+            }
+        }
+    }
+
+    fun requestTrip(
+        pickupAddress: String,
+        pickupLat: Double,
+        pickupLng: Double,
+        dropoffAddress: String,
+        dropoffLat: Double,
+        dropoffLng: Double,
+        fare: Double,
+        quoteId: String,
+        passengerName: String,
+        passengerPhone: String,
+        targetDriver: UserProfile? = null,
+        paymentMethod: String = "CASH",
+        onSuccess: (String) -> Unit = {}
+    ) {
+        if (currentUser?.uid == null) return
+        screenModelScope.launch {
+            runCatching {
                 val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
                     "createRideFromQuote",
                     mapOf("quoteId" to quoteId)
