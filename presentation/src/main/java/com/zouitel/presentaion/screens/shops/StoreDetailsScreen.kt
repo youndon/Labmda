@@ -1,5 +1,6 @@
 package com.zouitel.presentaion.screens.shops
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -63,6 +65,17 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         }
 
         val cartItems = remember { mutableStateMapOf<String, ShopCartItem>() }
+        var productSearch by remember { mutableStateOf("") }
+        var selectedCategory by remember { mutableStateOf("All") }
+        val categories = remember(products) { listOf("All") + products.map { it.category }.filter { it.isNotBlank() }.distinct().sorted() }
+        val visibleProducts = remember(products, productSearch, selectedCategory) {
+            val query = productSearch.trim().lowercase()
+            products.filter { product ->
+                val matchesQuery = query.isBlank() || listOf(product.name, product.description, product.category).any { it.lowercase().contains(query) }
+                val matchesCategory = selectedCategory == "All" || product.category == selectedCategory
+                matchesQuery && matchesCategory
+            }
+        }
         var showOrderSheet by remember { mutableStateOf(false) }
 
         var deliveryAddress by remember { mutableStateOf("") }
@@ -136,7 +149,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         ) {
                             Column {
                                 Text(
-                                    text = "$totalItemsCount product(s) selected",
+                                    text = "$totalItemsCount item(s) in cart",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -154,7 +167,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             ) {
                                 Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("View Demand Card", fontWeight = FontWeight.Bold)
+                                Text("View cart", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -162,12 +175,39 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
             }
         ) { paddingValues ->
             Column(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-                Text(
-                    text = "Store Products Catalog",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text("Shop products", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = productSearch,
+                        onValueChange = { productSearch = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        placeholder = { Text("Search products") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (productSearch.isNotEmpty()) TextButton(onClick = { productSearch = "" }) { Text("Clear") }
+                        }
+                    )
+                    if (categories.size > 1) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            categories.forEach { category ->
+                                FilterChip(
+                                    selected = selectedCategory == category,
+                                    onClick = { selectedCategory = category },
+                                    label = { Text(category) }
+                                )
+                            }
+                        }
+                    }
+                    Text("${visibleProducts.size} products", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
 
                 if (isLoading) {
                     Box(modifier = Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
@@ -182,6 +222,15 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
+                } else if (visibleProducts.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize().weight(1f).padding(28.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            "No products match your search or category.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
@@ -189,7 +238,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(products, key = { it.id }) { product ->
+                        items(visibleProducts, key = { it.id }) { product ->
                             val currentItem = cartItems[product.id]
                             val currentQty = currentItem?.quantity ?: 0
 
@@ -237,7 +286,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                                             contentPadding = PaddingValues(0.dp)
                                         ) {
-                                            Text("Add to Card", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                            Text("Add to cart", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                                         }
                                     } else {
                                         Row(
@@ -268,7 +317,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("Store Demand Card Summary", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                        Text("Your cart", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                         LazyColumn(
@@ -351,9 +400,14 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             }
                         }
 
+                        Text(
+                            "Delivery fee and final total are calculated by the server from the selected route.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Total Demand Price", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text("₱${"%.2f".format(grandTotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            Text("Items subtotal", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
 
                         Button(
