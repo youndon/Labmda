@@ -109,7 +109,7 @@ class Restaurants : Screen {
                         Text(text = restaurant.name, style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "Delivery Fee: $${"%.2f".format(restaurant.deliveryFee)} • ⭐ ${restaurant.rating}",
+                            text = "Delivery Fee: ₱${"%.2f".format(restaurant.deliveryFee)} • ⭐ ${restaurant.rating}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
