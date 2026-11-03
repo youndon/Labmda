@@ -109,7 +109,7 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
     updates[`orders/${orderId}`] = order;
     updates[`payments/${paymentId}`] = {
       id: paymentId, transactionType: "ORDER", orderId, tripId: "", deliveryId: "",
-      payerId: uid, method, status: "PENDING", provider: method === "GCASH" ? "BDO_CHECKOUT" : "CASH", amountMinor: breakdown.customerTotalMinor,
+      payerId: uid, method, status: "PENDING", provider: method === "GCASH" ? "XENDIT" : "CASH", amountMinor: breakdown.customerTotalMinor,
       currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
     };
     updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
@@ -172,7 +172,7 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
     updates[`payments/${paymentId}`] = {
       id: paymentId, transactionType: "RIDE", orderId: "", tripId, deliveryId: "",
       payerId: uid, method: quote.paymentMethod === "GCASH" ? "GCASH" : "CASH",
-      provider: quote.paymentMethod === "GCASH" ? "BDO_CHECKOUT" : "CASH",
+      provider: quote.paymentMethod === "GCASH" ? "XENDIT" : "CASH",
       status: "PENDING", amountMinor: breakdown.customerTotalMinor,
       currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
     };
@@ -232,7 +232,7 @@ export const createDeliveryFromQuote = onCall({ enforceAppCheck: true }, async (
       id: paymentId, transactionType: "ORDER", orderId, tripId: "", deliveryId: "",
       payerId: uid, method, status: "PENDING", amountMinor: breakdown.customerTotalMinor,
       currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
-      provider: method === "GCASH" ? "BDO_CHECKOUT" : "CASH",
+      provider: method === "GCASH" ? "XENDIT" : "CASH",
     };
     updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
     updates[`pricing/quotes/${quoteId}/status`] = "DELIVERY_CREATED";
