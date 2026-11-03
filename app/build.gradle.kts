@@ -4,6 +4,13 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// Android Maps keys are public client identifiers, not server secrets. Keep the
+// value out of source control and restrict it by Android package + signing SHA-1
+// and by the minimum required APIs in Google Cloud Console.
+val labmdaMapsApiKey = providers.gradleProperty("LABMDA_MAPS_API_KEY")
+    .orElse(providers.environmentVariable("LABMDA_MAPS_API_KEY"))
+    .getOrElse("")
+
 android {
     namespace = "com.zouitel.labmda"
     compileSdk {
@@ -17,6 +24,7 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["LABMDA_MAPS_API_KEY"] = labmdaMapsApiKey
     }
 
     buildTypes {
@@ -44,7 +52,6 @@ dependencies {
     implementation(libs.ui.graphics)
     implementation(libs.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
