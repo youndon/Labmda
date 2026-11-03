@@ -1,0 +1,55 @@
+name: Firebase Emulator Journey Tests
+
+on:
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "functions/**"
+      - "firebase.json"
+      - ".github/workflows/firebase-emulator.yml"
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "functions/**"
+      - "firebase.json"
+      - ".github/workflows/firebase-emulator.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  emulator-journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java for Firebase Emulator Suite
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package.json
+
+      - name: Install Functions dependencies
+        run: npm install --prefix functions --no-audit --no-fund
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Run Realtime Database and Firestore emulator journey tests
+        env:
+          GCLOUD_PROJECT: demo-labmda
+          FIREBASE_DATABASE_EMULATOR_HOST: 127.0.0.1:9000
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+        run: |
+          firebase emulators:exec \
+            --only database,firestore \
+            --project demo-labmda \
+            "npm --prefix functions run test:emulator"
