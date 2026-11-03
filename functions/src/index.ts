@@ -237,7 +237,7 @@ export { confirmBdoGcashPayment, attachBdoCheckoutLink } from "./payments/bdo-pa
 // Development-only simulated GCash checkout, webhook and refund lifecycle.
 export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payments/payment-sessions.js";
 export { createSimulatedGcashRefund } from "./payments/refunds.js";
-export { expireSimulatedGcashSessions } from "./payments/expiration.js";
+export { expireSimulatedGcashSessions } from "./payments/expiration.js"; // null outside the emulator
 
 // Phase 06 — provider earnings, private payout profiles and admin-managed payouts.
 export {
