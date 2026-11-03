@@ -34,7 +34,7 @@ export interface Payment {
   payerId: string;
   method: PaymentMethod;
   /** Collection processor label; never a customer-selectable payment method. */
-  provider?: "BDO_CHECKOUT" | "CASH" | "SIMULATED";
+  provider?: "BDO_CHECKOUT" | "XENDIT" | "CASH" | "SIMULATED";
   providerReference?: string;
   checkoutUrl?: string;
   checkoutAmountMinor?: number;
