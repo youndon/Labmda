@@ -21,7 +21,7 @@ This phase validates Labmda as a complete marketplace and transport system, not 
 - Functions build: `npm --prefix functions run build`
 - Realtime Database and Firestore emulator suite: `firebase emulators:exec --only database,firestore --project demo-labmda "npm --prefix functions run test:emulator"`
 
-The emulator suite covers quote claiming, cash collection, simulated refund transaction safety, financial ledger concurrency/reconciliation, and the payment-to-order/ride state projections. The new payment projection tests assert FOOD, RETAIL/SHOP, standalone DELIVERY and RIDE behavior.
+The emulator suite covers quote claiming, cash collection, simulated refund transaction safety, financial ledger concurrency/reconciliation, and the payment-to-order/ride state projections. The new payment projection tests assert FOOD, RETAIL/SHOP, standalone DELIVERY and RIDE behavior. The RTDB emulator uses `testing/database.emulator.rules.json`, which denies client reads and writes while Admin SDK test code exercises the trusted server paths; do not deploy this test-only rules file as the application's production RTDB rules.
 
 These tests exercise backend state transitions. They do not replace UI automation or physical-device tests.
 
