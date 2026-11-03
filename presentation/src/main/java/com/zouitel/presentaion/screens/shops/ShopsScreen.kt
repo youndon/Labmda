@@ -191,9 +191,7 @@ class ShopsScreen : Screen {
                     contentScale = ContentScale.Crop
                 )
 
-                AppCardContent(
-                    verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
-                ) {
+                AppCardContent {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
