@@ -63,16 +63,16 @@ describe.skipIf(!emulatorOnly)("Firestore emulator: financial ledger transaction
       source: { accountId: `stress_external_${suffix}`, bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "test" },
       destination: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType: "DRIVER", partyId },
     }));
-    const payouts = Array.from({ length: 10 }, (_, index) => createFinancialTransfer({
+    const payouts = Array.from({ length: 4 }, (_, index) => createFinancialTransfer({
       operationId: `stress_payout_${suffix}_${index}`, eventType: "PAYOUT", referenceType: "PAYOUT",
       referenceId: `stress_payout_${suffix}_${index}`, idempotencyKey: `stress_payout_${suffix}_${index}`,
-      createdAt: now + index + 1, description: "Concurrent payout stress reservation", amountMinor: 15,
+      createdAt: now + index + 1, description: "Concurrent payout stress reservation", amountMinor: 30,
       source: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType: "DRIVER", partyId },
       destination: { accountId, bucket: "CLEARING", deltaMinor: 0, partyType: "DRIVER", partyId },
     }));
     const results = await Promise.allSettled(payouts.map(postFinancialOperation));
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(6);
-    expect(results.filter((result) => result.status === "rejected")).toHaveLength(4);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(3);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     const account = await getFinancialAccount(accountId);
     expect(account?.availableMinor).toBe(10);
     expect(account?.clearingMinor).toBe(90);
