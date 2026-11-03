@@ -75,7 +75,8 @@ export async function expireBdoGcashPaymentRecord(
 
     if (payment.transactionType === "ORDER" && payment.orderId) {
       const order = root.orders?.[payment.orderId];
-      if (!order || order.paymentId !== paymentId || order.status !== "PENDING_PAYMENT") return;
+      if (!order || order.paymentId !== paymentId || order.status !== "PENDING_PAYMENT"
+        || order.amountMinor !== payment.amountMinor) return;
       nextRoot.orders = {
         ...root.orders,
         [payment.orderId]: {
@@ -86,7 +87,8 @@ export async function expireBdoGcashPaymentRecord(
       };
     } else if (payment.transactionType === "RIDE" && payment.tripId) {
       const trip = root.trips?.[payment.tripId];
-      if (!trip || trip.paymentId !== paymentId || trip.status !== "PENDING_PAYMENT") return;
+      if (!trip || trip.paymentId !== paymentId || trip.status !== "PENDING_PAYMENT"
+        || trip.customerTotalMinor !== payment.amountMinor) return;
       nextRoot.trips = {
         ...root.trips,
         [payment.tripId]: {
