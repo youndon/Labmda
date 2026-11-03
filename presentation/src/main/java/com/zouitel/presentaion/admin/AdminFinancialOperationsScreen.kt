@@ -300,6 +300,9 @@ class AdminFinancialOperationsScreen : Screen {
                                 }
                                 Text(formatAdminMoney(payment.amountMinor), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                                 Text("Payment ${payment.paymentId}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (payment.method == "GCASH" && payment.provider == "XENDIT") {
+                                    Text("Processor: Xendit Payments API • Customer method: GCash", style = MaterialTheme.typography.bodySmall)
+                                }
                                 if (payment.method == "GCASH" && payment.provider == "BDO_CHECKOUT" && payment.status in setOf("PENDING", "PROCESSING")) {
                                     Text("Processor: BDO Checkout • Customer method: GCash", style = MaterialTheme.typography.bodySmall)
                                     if (payment.checkoutUrl.isBlank()) {
