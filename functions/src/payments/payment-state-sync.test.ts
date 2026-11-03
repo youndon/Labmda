@@ -61,6 +61,29 @@ describe("payment state synchronization", () => {
     expect(db.value().activeRideRequests?.passenger_1).toBeUndefined();
   });
 
+  it("closes an unpaid order when its payment fails or expires", async () => {
+    for (const status of ["FAILED", "EXPIRED"]) {
+      const db = fakeDatabase({
+        payments: { p1: { id: "p1", transactionType: "ORDER", orderId: "o1", method: "GCASH", provider: "BDO_CHECKOUT", status, updatedAt: 60 } },
+        orders: { o1: { id: "o1", paymentId: "p1", status: "PENDING_PAYMENT", paymentStatus: "PENDING" } },
+      });
+      await synchronizePaymentState(db, "p1");
+      expect(db.value().orders.o1.status).toBe("CANCELLED");
+      expect(db.value().orders.o1.paymentStatus).toBe(status);
+    }
+  });
+
+  it("closes an expired unpaid ride and removes it from active requests", async () => {
+    const db = fakeDatabase({
+      payments: { p1: { id: "p1", transactionType: "RIDE", tripId: "t1", method: "GCASH", provider: "BDO_CHECKOUT", status: "EXPIRED", updatedAt: 70 } },
+      trips: { t1: { id: "t1", passengerId: "passenger_1", paymentId: "p1", status: "PENDING_PAYMENT", paymentState: "PENDING" } },
+      activeRideRequests: { passenger_1: { t1: { status: "REQUESTED", updatedAt: 65 } } },
+    });
+    await synchronizePaymentState(db, "p1");
+    expect(db.value().trips.t1).toMatchObject({ status: "CANCELLED", paymentStatus: "EXPIRED", paymentState: "EXPIRED" });
+    expect(db.value().activeRideRequests.passenger_1).toBeUndefined();
+  });
+
   it("does not touch a different transaction or an unrelated payment", async () => {
     const db = fakeDatabase({
       payments: { p1: { id: "p1", transactionType: "ORDER", orderId: "o1", method: "GCASH", status: "SUCCEEDED" } },
