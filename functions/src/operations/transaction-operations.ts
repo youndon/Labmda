@@ -351,7 +351,8 @@ export const adminReassignOrderDelivery = onCall({ enforceAppCheck: true }, asyn
     const committedOperation = await getFinancialOperation(operationId);
     if (!committedOperation) {
       await db().ref().transaction((root: Record<string, any> | null) => {
-        const order = root?.orders?.[orderId] as Record<string, any> | undefined;
+        if (!root) return;
+        const order = root.orders?.[orderId] as Record<string, any> | undefined;
         if (!order || order.deliveryReassignment?.id !== activeReservationId) return;
         const nextOrder = { ...order };
         delete nextOrder.deliveryReassignment;
