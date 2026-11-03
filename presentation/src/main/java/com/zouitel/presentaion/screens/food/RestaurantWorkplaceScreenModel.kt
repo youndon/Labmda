@@ -11,6 +11,8 @@ import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import com.zouitel.presentaion.screens.trustedTransactionCall
+import com.zouitel.presentaion.screens.trustedTransactionCallData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -145,7 +147,7 @@ class RestaurantWorkplaceScreenModel(
     fun updateFoodMode(foodMode: UserMode) {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("foodMode").setValue(foodMode.name)
+            trustedTransactionCall("setFoodMode", mapOf("mode" to foodMode.name))
         }
     }
 
@@ -163,34 +165,23 @@ class RestaurantWorkplaceScreenModel(
         _isLoading.value = true
 
         screenModelScope.launch(Dispatchers.IO) {
-            val updates = mapOf(
-                "sourceName" to restaurantName,
-                "restaurantImageUrl" to imageUrl,
-                "deliveryFee" to deliveryFee,
-                "estimatedTimeMinutes" to estimatedTimeMinutes,
-                "managerPhone" to managerPhone,
-                "restaurantAddress" to address,
-                "restaurantLatitude" to latitude,
-                "restaurantLongitude" to longitude,
-                "foodStatus" to Status.APPROVED.name,
-                "foodMode" to UserMode.MANAGER.name
-            )
-            db.child("users").child(uid).updateChildren(updates)
-
-            val publicMap = mapOf(
-                "id" to uid,
-                "name" to restaurantName,
-                "imageUrl" to imageUrl,
-                "deliveryFee" to deliveryFee,
-                "estimatedTimeMinutes" to estimatedTimeMinutes,
-                "managers" to listOf(managerPhone),
-                "address" to address,
-                "latitude" to latitude,
-                "longitude" to longitude
-            )
-            db.child("restaurants").child(uid).updateChildren(publicMap)
-
-            _isLoading.value = false
+            try {
+                trustedTransactionCallData(
+                    "submitRestaurantApplication",
+                    mapOf(
+                        "restaurantName" to restaurantName,
+                        "imageUrl" to imageUrl,
+                        "deliveryFee" to deliveryFee,
+                        "estimatedTimeMinutes" to estimatedTimeMinutes,
+                        "managerPhone" to managerPhone,
+                        "address" to address,
+                        "latitude" to latitude,
+                        "longitude" to longitude
+                    )
+                )
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 

@@ -11,6 +11,8 @@ import com.zouitel.presentaion.screens.food.ImageUploadState
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
+import com.zouitel.presentaion.screens.trustedTransactionCall
+import com.zouitel.presentaion.screens.trustedTransactionCallData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -137,7 +139,7 @@ class ShopWorkplaceScreenModel : ScreenModel {
     fun updateShopMode(shopMode: UserMode) {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).child("shopMode").setValue(shopMode.name)
+            trustedTransactionCall("setShopMode", mapOf("mode" to shopMode.name))
         }
     }
 
@@ -160,28 +162,26 @@ class ShopWorkplaceScreenModel : ScreenModel {
         imageUrl: String,
         isOnline: Boolean
     ) {
-        val uid = auth.currentUser?.uid ?: return
+        if (auth.currentUser?.uid == null) return
         _isLoading.value = true
 
         screenModelScope.launch {
-            val newShopRef = db.child("shops").push()
-            val shopId = newShopRef.key ?: System.currentTimeMillis().toString()
-
-            val shop = Shop(
-                id = shopId,
-                ownerUid = uid,
-                name = name,
-                description = description,
-                category = category,
-                phone = phone,
-                address = address,
-                imageUrl = imageUrl,
-                createdAtTimestamp = System.currentTimeMillis(),
-                isOnline = isOnline
-            )
-
-            newShopRef.setValue(shop)
-            _isLoading.value = false
+            try {
+                trustedTransactionCallData(
+                    "submitShopApplication",
+                    mapOf(
+                        "name" to name,
+                        "description" to description,
+                        "category" to category,
+                        "phone" to phone,
+                        "address" to address,
+                        "imageUrl" to imageUrl,
+                        "isOnline" to false
+                    )
+                )
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 

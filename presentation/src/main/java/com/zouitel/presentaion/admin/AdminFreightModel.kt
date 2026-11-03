@@ -5,6 +5,7 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import com.zouitel.presentaion.common.Status
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import com.zouitel.presentaion.screens.trustedTransactionCallData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,7 +65,10 @@ class AdminFreightModel : ScreenModel {
 
     fun updateFreightStatus(uid: String, newStatus: Status) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("freightStatus").setValue(newStatus.name)
+            trustedTransactionCallData(
+                "adminUpdateProviderStatus",
+                mapOf("service" to "FREIGHT", "uid" to uid, "status" to newStatus.name)
+            )
         }
     }
 }

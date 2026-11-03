@@ -6,6 +6,7 @@ import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.screens.shops.Shop
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import com.zouitel.presentaion.screens.trustedTransactionCallData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,10 +71,10 @@ class AdminShopsModel : ScreenModel {
 
     fun updateShopStatus(shopId: String, ownerUid: String, newStatus: Status) {
         screenModelScope.launch(Dispatchers.IO) {
-            // Update the shop status
-            db.child("shops").child(shopId).child("status").setValue(newStatus.name)
-            // Synchronize shopStatus in the user's profile[cite: 28]
-            db.child("users").child(ownerUid).child("shopStatus").setValue(newStatus.name)
+            trustedTransactionCallData(
+                "adminUpdateProviderStatus",
+                mapOf("service" to "SHOP", "uid" to ownerUid, "shopId" to shopId, "status" to newStatus.name)
+            )
         }
     }
 }

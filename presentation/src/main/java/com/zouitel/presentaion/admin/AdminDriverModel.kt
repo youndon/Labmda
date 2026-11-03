@@ -9,6 +9,7 @@ import com.zouitel.presentaion.model.VehicleType
 import com.zouitel.presentaion.screens.ride.DriverAccountInfo
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import com.zouitel.presentaion.screens.trustedTransactionCallData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -87,7 +88,10 @@ class AdminDriverModel : ScreenModel {
 
     fun updateDriverStatus(uid: String, newStatus: Status) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("driverService").child("status").setValue(newStatus.name)
+            trustedTransactionCallData(
+                "adminUpdateProviderStatus",
+                mapOf("service" to "DRIVER", "uid" to uid, "status" to newStatus.name)
+            )
         }
     }
 }
