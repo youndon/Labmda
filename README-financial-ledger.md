@@ -208,3 +208,35 @@ All amounts remain integer PHP centavos. Firestore transactions read the idempot
 5. Deploy the Functions build from this branch, run the admin financial reconciliation and provider/cash balance checks, then resume financial writes.
 
 Do not deploy the new Functions before importing existing ledger data: the new writer intentionally does not fall back to RTDB. Keep the legacy RTDB `finance` data unchanged as a rollback archive until the new ledger has been reconciled and production sign-off is complete. The migration script is a one-time snapshot, not a live dual-write or automatic rollback mechanism. It is restartable while the same frozen RTDB source snapshot is retained: already-imported target documents are accepted only when their stored data exactly matches the source document, missing documents are created, and any conflicting target document stops the run without overwriting it. The script still requires the financial write freeze for the entire migration and final verification; do not resume writers until all collection counts and ledger reconciliation pass.
+
+
+## Phase 04 — payment lifecycle validation (BDO Checkout)
+
+### Success
+- The only production GCash success path currently available is an administrator verifying the exact successful transaction in the BDO merchant portal and calling `confirmBdoGcashPayment`.
+- The callable checks the BDO GCash payment, attached BDO-hosted checkout URL, exact PHP-centavo amount, unique provider reference, canonical payment ID, matching order/trip ID and the transaction's stored total before setting `SUCCEEDED`.
+- The payment status trigger projects the canonical result to the order/trip and posts the receipt only after persisted allocations exist. A redirect, client callback or screenshot is never proof of payment.
+
+### Cancellation and expiry
+- A customer can cancel an unpaid transaction before a BDO checkout link is attached. Once an active BDO link exists, customer cancellation is blocked because Labmda cannot revoke the external BDO request without a documented provider API.
+- `expireBdoGcashPayment` is an administrator-only, App Check-protected callable. It may be used only after an administrator verifies in the BDO merchant portal that the request is expired, voided or no longer payable. It records a unique closure reference and reason, checks the payment/order-or-trip association and exact transaction amount, marks the payment `EXPIRED`, closes the pending transaction and removes expired rides from active dispatch.
+- This is a manual evidence workflow, not an automatic time-based expiry or BDO webhook. Never expire a request merely because a local timer elapsed.
+
+### Refunds
+- Refund cases reserve the refundable amount so concurrent cases cannot over-refund one payment. Admin review can reject (releasing the reservation) or approve.
+- Completion is recorded only after the actual BDO/bank refund has been executed and verified outside Labmda. The admin supplies the provider/bank reference; the system posts an idempotent, centavo-balanced proportional reversal of the original journal and updates `refundedAmountMinor` and payment status.
+- Labmda does not initiate BDO refunds because the merchant-specific refund API contract is not available.
+
+### Commissions and provider fees
+- Server-generated PHP-centavo quotes determine merchant, courier and driver earnings, platform commissions, discount funding and the configured GCash checkout fee.
+- Merchant-funded discounts reduce merchant earnings; platform-funded discounts reduce platform proceeds. A customer-paid configured GCash fee is allocated to the platform; a platform-paid fee reduces platform net proceeds. Allocation builders reject totals that do not reconcile to the quote.
+- The configured GCash fee is Labmda's pricing/allocation rule. It must not be mistaken for BDO's actual merchant processing charge. Actual BDO charges and net settlement deductions must be verified from BDO statements and reconciled separately.
+
+### Settlement accounting
+- Successful GCash receipts first post to provider clearing and beneficiary/platform allocation accounts. BDO bank settlement is a separate event recorded from actual statement evidence.
+- Expected settlements match only by unique reference and exact amount. Actual inbound/outbound bank lines are recorded once; unmatched lines, unsettled expected credits, unreconciled payouts and statement closing-balance differences remain visible in the saved BDO reconciliation.
+- This manual workflow does not automatically import BDO statements or calculate a provider fee deduction unless the statement evidence and its gross/fee/net breakdown are explicitly recorded. A balanced internal ledger alone does not prove the BDO bank has settled the funds.
+
+### Production boundary
+- There is no production BDO checkout-creation API, authenticated BDO webhook, or BDO refund API integration in this repository. Do not enable an assumed wire protocol. Continue using the manual BDO portal link and administrator verification bridge until BDO supplies the merchant-specific Website Plug-in/API, callback authentication and refund specifications.
+- The development-only simulated GCash checkout/refund functions remain emulator-only and are not production payment evidence.
