@@ -36,7 +36,7 @@ class AdminFreightModel : ScreenModel {
 
     private fun listenToApplications() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").valueEvents.collect { snapshot ->
+            db.child("users").orderByChild("freightStatus").equalTo("PENDING").valueEvents.collect { snapshot ->
                 val pending = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
