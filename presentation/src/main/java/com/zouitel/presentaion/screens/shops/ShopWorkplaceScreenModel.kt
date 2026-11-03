@@ -50,7 +50,7 @@ class ShopWorkplaceScreenModel : ScreenModel {
         }
 
         screenModelScope.launch {
-            db.child("shops").valueEvents.collect { snapshot ->
+            db.child("shops").orderByChild("ownerUid").equalTo(uid).valueEvents.collect { snapshot ->
                 val myShop = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
