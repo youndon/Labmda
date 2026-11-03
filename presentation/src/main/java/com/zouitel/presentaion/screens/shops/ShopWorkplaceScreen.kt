@@ -26,6 +26,10 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.Status
+import com.zouitel.presentaion.common.AppCard
+import com.zouitel.presentaion.common.AppPrimaryButton
+import com.zouitel.presentaion.common.AppSectionTitle
+import com.zouitel.presentaion.common.AppSpacing
 import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.common.DriveTokenProvider
 import com.zouitel.presentaion.common.PickedImage
@@ -78,20 +82,13 @@ class ShopWorkplaceScreen : Screen {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(AppSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = "Choose your shop experience",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                    )
-                    Text(
-                        text = "Switch between shopping as a client and managing your own store.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                AppSectionTitle(
+                    title = "Choose your shop experience",
+                    subtitle = "Switch between shopping as a client and managing your own store."
+                )
 
                 SingleChoiceSegmentedButtonRow(
                     modifier = Modifier.fillMaxWidth()
@@ -121,8 +118,6 @@ class ShopWorkplaceScreen : Screen {
                     }
                 }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
                 when (selectedRoleMode) {
                     UserMode.CLIENT -> ClientRoleChoiceCard {
                         navigator?.push(ShopsScreen())
@@ -147,12 +142,11 @@ class ShopWorkplaceScreen : Screen {
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
-                                        Button(
+                                        AppPrimaryButton(
+                                            text = "Register Store & Set Location",
                                             onClick = { navigator?.push(ShopRegistrationScreen()) },
                                             modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Text("Register Store & Set Location")
-                                        }
+                                        )
                                     }
                                     else -> when (shop.status) {
                                         Status.PENDING -> PendingVerificationView(shop)
@@ -178,20 +172,18 @@ class ShopWorkplaceScreen : Screen {
 
     @Composable
     private fun ClientRoleChoiceCard(onExploreShops: () -> Unit) {
-        Card(
+        AppCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onExploreShops),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            shape = MaterialTheme.shapes.extraLarge
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(AppSpacing.xxl),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
             ) {
                 Box(
                     modifier = Modifier
@@ -214,13 +206,11 @@ class ShopWorkplaceScreen : Screen {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-                Button(
+                AppPrimaryButton(
+                    text = "Explore Verified Stores",
                     onClick = onExploreShops,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("Explore Verified Stores", fontWeight = FontWeight.Bold)
-                }
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -254,8 +244,8 @@ class ShopWorkplaceScreen : Screen {
 
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.lg),
+            contentPadding = PaddingValues(bottom = AppSpacing.xxl)
         ) {
             item {
                 Text("Register Store Business", style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold))
@@ -399,6 +389,13 @@ class ShopWorkplaceScreen : Screen {
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
             item {
+                AppSectionTitle(
+                    title = shop.name.ifBlank { "Store workspace" },
+                    subtitle = "Manage store visibility, catalog operations, and earnings."
+                )
+            }
+
+            item {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -464,25 +461,22 @@ class ShopWorkplaceScreen : Screen {
             }
 
             item {
-                OutlinedButton(
+                AppPrimaryButton(
+                    text = "Earnings & Payouts",
                     onClick = onOpenEarnings,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(50.dp)
-                ) {
-                    Text("Earnings & Payouts", fontWeight = FontWeight.Bold)
-                }
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             item {
-                Button(
+                AppPrimaryButton(
+                    text = "Open Store Manager Dashboard",
                     onClick = onOpenDashboard,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                ) {
-                    Icon(Icons.Default.Store, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Open Store Manager Dashboard", fontWeight = FontWeight.Bold)
-                }
+                    modifier = Modifier.fillMaxWidth(),
+                    content = {
+                        Icon(Icons.Default.Store, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                )
             }
         }
     }
