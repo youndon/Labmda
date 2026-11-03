@@ -36,18 +36,23 @@ function stable(value) {
 function sameValue(left, right) {
   return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
 }
+function childrenOf(snapshot) {
+  const children = [];
+  snapshot.forEach((child) => { children.push(child); });
+  return children;
+}
 
 async function migrateMerchantCatalog({ merchantRoot, legacyChild, targetRoot }) {
   const merchants = await rtdb.ref(merchantRoot).get();
   let migrated = 0;
-  for (const merchant of merchants.children) {
+  for (const merchant of childrenOf(merchants)) {
     const merchantId = safeKey(merchant.key, `${merchantRoot} merchant ID`);
     const legacyRef = rtdb.ref(`${merchantRoot}/${merchantId}/${legacyChild}`);
     const legacy = await legacyRef.get();
     if (!legacy.exists()) continue;
 
     const targetRef = rtdb.ref(`${targetRoot}/${merchantId}`);
-    for (const item of legacy.children) {
+    for (const item of childrenOf(legacy)) {
       const itemId = safeKey(item.key, `${legacyChild} item ID`);
       const destination = targetRef.child(itemId);
       const current = await destination.get();
