@@ -58,11 +58,11 @@ data class AdminPaymentServices(
 @Serializable
 data class AdminPaymentConfiguration(
     val version: Int = 1,
-    val provider: String = "BDO_CHECKOUT",
+    val provider: String = "XENDIT",
     val currency: String = "PHP",
     val enabledMethods: List<String> = listOf("GCASH", "CASH"),
     val services: AdminPaymentServices = AdminPaymentServices(),
-    val checkoutMode: String = "MANUAL_LINK",
+    val checkoutMode: String = "API",
     val payoutMode: String = "MANUAL"
 )
 
@@ -209,8 +209,8 @@ class AdminPaymentSettingsScreen : Screen {
                             ) {
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("Collection provider", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                    Text("BDO Checkout", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                    Text("Customer currency: PHP • Checkout: manual BDO payment request link", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Xendit", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                    Text("Customer currency: PHP • Checkout: Xendit GCash Payment Requests", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("Provider payouts: manual administrator transfers", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("Configuration version: ${current.version}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -218,7 +218,7 @@ class AdminPaymentSettingsScreen : Screen {
                         }
                         item { Text("Customer payment methods", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                         item {
-                            SettingsToggle("GCash", "Online collection through BDO Checkout", gcashEnabled, !saving) { gcashEnabled = it }
+                            SettingsToggle("GCash", "Online collection through Xendit", gcashEnabled, !saving) { gcashEnabled = it }
                         }
                         item {
                             SettingsToggle("Cash", "Cash collection by the assigned courier or driver", cashEnabled, !saving) { cashEnabled = it }
@@ -267,7 +267,7 @@ class AdminPaymentSettingsScreen : Screen {
                         }
                         item {
                             Text(
-                                "BDO API checkout and automated payouts are intentionally unavailable until BDO approves and documents those integrations.",
+                                "GCash collection uses Xendit API checkout. Provider payouts remain manual until Xendit approves Labmda’s direct payout arrangement.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
