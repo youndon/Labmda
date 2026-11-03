@@ -4,6 +4,19 @@ import { onValueWritten } from "firebase-functions/v2/database";
 const db = () => getDatabase();
 const activeRideStatuses = new Set(["REQUESTED", "ACCEPTED", "IN_PROGRESS"]);
 
+export function isActiveRideStatus(status: unknown): boolean {
+  return typeof status === "string" && activeRideStatuses.has(status);
+}
+
+export function hasValidDriverCoordinates(location: unknown): location is { latitude: number; longitude: number } {
+  if (!location || typeof location !== "object") return false;
+  const point = location as Record<string, unknown>;
+  return typeof point.latitude === "number" && Number.isFinite(point.latitude)
+    && point.latitude >= -90 && point.latitude <= 90
+    && typeof point.longitude === "number" && Number.isFinite(point.longitude)
+    && point.longitude >= -180 && point.longitude <= 180;
+}
+
 async function publishDriverPresence(uid: string): Promise<void> {
   const [profile, locationSnapshot] = await Promise.all([
     db().ref(`users/${uid}`).get(),
@@ -18,13 +31,11 @@ async function publishDriverPresence(uid: string): Promise<void> {
     return;
   }
 
-  const latitude = Number(location.latitude);
-  const longitude = Number(location.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
-    || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+  if (!hasValidDriverCoordinates(location)) {
     await presenceRef.remove();
     return;
   }
+  const { latitude, longitude } = location;
 
   const vehicle = driver.child("vehicleInfo");
   await presenceRef.set({
@@ -61,10 +72,10 @@ export const syncActiveRideRequest = onValueWritten(
     const tripId = event.params.tripId;
     const updates: Record<string, unknown> = {};
 
-    if (beforeUid && (beforeUid !== afterUid || !activeRideStatuses.has(String(after?.status ?? "")))) {
+    if (beforeUid && (beforeUid !== afterUid || !isActiveRideStatus(after?.status))) {
       updates[`activeRideRequests/${beforeUid}/${tripId}`] = null;
     }
-    if (afterUid && activeRideStatuses.has(String(after?.status ?? ""))) {
+    if (afterUid && isActiveRideStatus(after?.status)) {
       updates[`activeRideRequests/${afterUid}/${tripId}`] = {
         status: String(after.status),
         updatedAt: Date.now(),
