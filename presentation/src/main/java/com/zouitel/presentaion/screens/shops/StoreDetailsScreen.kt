@@ -141,7 +141,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    text = "$${"%.2f".format(grandTotal)}",
+                                    text = "₱${"%.2f".format(grandTotal)}",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -221,7 +221,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                         )
 
                                         Text(
-                                            text = "$${"%.2f".format(product.price)}",
+                                            text = "₱${"%.2f".format(product.price)}",
                                             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                             maxLines = 1,
                                             color = MaterialTheme.colorScheme.primary
@@ -283,7 +283,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(text = item.productName, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
-                                        Text(text = "$${"%.2f".format(item.price)} × ${item.quantity} = $${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(text = "₱${"%.2f".format(item.price)} × ${item.quantity} = ₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     IconButton(onClick = { cartItems.remove(item.productId) }) {
                                         Icon(Icons.Default.Delete, contentDescription = "Remove", tint = MaterialTheme.colorScheme.error)
@@ -353,7 +353,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Total Demand Price", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text("$${"%.2f".format(grandTotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                            Text("₱${"%.2f".format(grandTotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
 
                         Button(
