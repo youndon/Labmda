@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase, type Reference } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { isQuoteClaimable } from "./quote-guards.js";
+import { assertQuotePickupMatches, requireMerchantPickup } from "./merchant-location.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -61,16 +62,10 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
       || String(source.child("managerId").val() ?? "").trim()
       || sourceId;
     const request = quote.request ?? {};
-    const pickupLat = source.child("latitude").val();
-    const pickupLng = source.child("longitude").val();
-    if (typeof pickupLat !== "number" || typeof pickupLng !== "number"
-      || !Number.isFinite(pickupLat) || pickupLat < -90 || pickupLat > 90
-      || !Number.isFinite(pickupLng) || pickupLng < -180 || pickupLng > 180) {
-      throw new HttpsError("failed-precondition", "The merchant pickup location is missing or invalid. Ask the merchant to update it and request a new quote.");
-    }
-    if (request.pickup?.latitude !== pickupLat || request.pickup?.longitude !== pickupLng) {
-      throw new HttpsError("failed-precondition", "The merchant pickup location changed after this quote. Request a new delivery quote.");
-    }
+    const pickup = requireMerchantPickup(source.child("latitude").val(), source.child("longitude").val());
+    assertQuotePickupMatches(request.pickup, pickup);
+    const pickupLat = pickup.latitude;
+    const pickupLng = pickup.longitude;
     const items = Array.isArray(quote.items) ? quote.items : [];
     if (!items.length) throw new HttpsError("failed-precondition", "The quote contains no order items.");
     const breakdown = quote.breakdown ?? {};
