@@ -38,7 +38,7 @@ class LogInScreenModel(
         val result = DataOrException<UserProfile?, Exception>()
         try {
             val snapshot = usersRef.child("users").child(uid).get()
-            result.data = if (snapshot.exists) runCatching { snapshot.value<UserProfile>() }.getOrNull() else null
+            result.data = if (snapshot.exists) snapshot.value<UserProfile>() else null
         } catch (e: Exception) {
             result.e = Exception(e.message, e)
         }
