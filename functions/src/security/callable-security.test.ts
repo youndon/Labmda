@@ -41,6 +41,7 @@ describe("callable security baseline", () => {
       "finance/bdo-settlement.ts",
       "finance/cash-operations.ts",
       "finance/payouts.ts",
+      "operations/provider-approvals.ts",
     ];
 
     for (const modulePath of guardedModules) {
