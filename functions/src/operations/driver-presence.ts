@@ -8,7 +8,7 @@ export function isActiveRideStatus(status: unknown): boolean {
   return typeof status === "string" && activeRideStatuses.has(status);
 }
 
-export function hasValidDriverCoordinates(location: unknown): location is { latitude: number; longitude: number } {
+export function hasValidDriverCoordinates(location: unknown): location is { latitude: number; longitude: number; heading?: unknown } {
   if (!location || typeof location !== "object") return false;
   const point = location as Record<string, unknown>;
   return typeof point.latitude === "number" && Number.isFinite(point.latitude)
