@@ -51,4 +51,33 @@ describe.skipIf(!emulatorOnly)("Firestore emulator: financial ledger transaction
     expect(reconciliation.balanced).toBe(true);
     expect(reconciliation.discrepancies).toEqual([]);
   });
+  it("serializes many concurrent payout reservations against the same wallet", async () => {
+    const suffix = randomUUID().replace(/-/g, "");
+    const accountId = `wallet_driver_stress_${suffix}`;
+    const partyId = `driver_stress_${suffix}`;
+    const now = Date.now();
+    await postFinancialOperation(createFinancialTransfer({
+      operationId: `stress_seed_${suffix}`, eventType: "ADJUSTMENT", referenceType: "MANUAL",
+      referenceId: `stress_seed_${suffix}`, idempotencyKey: `stress_seed_${suffix}`,
+      createdAt: now, description: "Concurrent payout stress opening balance", amountMinor: 100,
+      source: { accountId: `stress_external_${suffix}`, bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "test" },
+      destination: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType: "DRIVER", partyId },
+    }));
+    const payouts = Array.from({ length: 10 }, (_, index) => createFinancialTransfer({
+      operationId: `stress_payout_${suffix}_${index}`, eventType: "PAYOUT", referenceType: "PAYOUT",
+      referenceId: `stress_payout_${suffix}_${index}`, idempotencyKey: `stress_payout_${suffix}_${index}`,
+      createdAt: now + index + 1, description: "Concurrent payout stress reservation", amountMinor: 15,
+      source: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType: "DRIVER", partyId },
+      destination: { accountId, bucket: "CLEARING", deltaMinor: 0, partyType: "DRIVER", partyId },
+    }));
+    const results = await Promise.allSettled(payouts.map(postFinancialOperation));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(6);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(4);
+    const account = await getFinancialAccount(accountId);
+    expect(account?.availableMinor).toBe(10);
+    expect(account?.clearingMinor).toBe(90);
+    const reconciliation = await reconcileFinancialLedger();
+    expect(reconciliation.balanced).toBe(true);
+  });
+
 });
