@@ -120,14 +120,20 @@ class DriverWorkplaceScreenModel : ScreenModel {
                 "serviceType" to "Ride"
             )
 
-            val driverMap = mapOf(
-                "id" to uid,
-                "vehicleInfo" to vehicleMap,
-                "status" to statusToSet.name,
-                "isOnline" to false
+            val driverRef = db.child("users").child(uid).child("driverService")
+            driverRef.updateChildren(
+                mapOf(
+                    "id" to uid,
+                    "vehicleInfo/type" to vehicleType.name,
+                    "vehicleInfo/make" to make,
+                    "vehicleInfo/model" to model,
+                    "vehicleInfo/color" to color,
+                    "vehicleInfo/licensePlate" to licensePlate,
+                    "vehicleInfo/serviceType" to "Ride",
+                    "status" to statusToSet.name,
+                    "isOnline" to false
+                )
             )
-
-            db.child("users").child(uid).child("driverService").setValue(driverMap)
             _isLoading.value = false
         }
     }
