@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -110,13 +112,23 @@ class DriverWorkplaceScreen : Screen {
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        item {
-                            Button(
-                                onClick = { navigator?.push(DriverDashboardScreen()) },
-                                modifier = Modifier.fillMaxWidth().height(52.dp),
-                                shape = RoundedCornerShape(14.dp)
-                            ) {
-                                Text("Open Driver Dashboard", fontWeight = FontWeight.Bold)
+                        if (driverAccount?.status == Status.APPROVED) {
+                            item {
+                                Button(
+                                    onClick = { navigator?.push(DriverDashboardScreen()) },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Text("Open Driver Dashboard", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            item {
+                                Text(
+                                    "Your driver dashboard becomes available after your service is approved.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
 
@@ -138,7 +150,7 @@ class DriverWorkplaceScreen : Screen {
                             ) {
                                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text(text = profile.fullName.ifBlank { "User Profile" }, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                                    Text(text = "Phone: ${profile.phoneNumber?.ifBlank { "N/A" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(text = "Phone: ${profile.phoneNumber?.takeIf { it.isNotBlank() } ?: "Not provided"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -239,8 +251,27 @@ class DriverWorkplaceScreen : Screen {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                 val v = account.vehicleInfo
-                Text(text = "Vehicle: ${v?.color ?: ""} ${v?.make ?: ""} ${v?.model ?: ""} (${v?.type?.name ?: ""})", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                Text(text = "License Plate: ${v?.licensePlate ?: "N/A"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                val vehicleName = listOfNotNull(v?.make, v?.model).filter { it.isNotBlank() }.joinToString(" ")
+                Text(
+                    text = "Vehicle: ${listOf(v?.color, vehicleName, v?.type?.name).filterNotNull().filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Details not provided" }}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "License plate: ${v?.licensePlate?.takeIf { it.isNotBlank() } ?: "Not provided"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Text(
+                    text = when (account.status) {
+                        Status.APPROVED -> "Your driver service is approved. You can manage availability from the dashboard."
+                        Status.PENDING -> "Your application is waiting for administrator review."
+                        Status.REJECTED -> "Your application was not approved. Review your vehicle details before contacting support."
+                        else -> "Your driver service is not currently active."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 if (account.status == Status.APPROVED) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -250,7 +281,7 @@ class DriverWorkplaceScreen : Screen {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (account.isOnline) "Online & Ready for Rides" else "Offline",
+                            text = if (account.isOnline) "Visible for ride requests" else "Not accepting ride requests",
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                             color = if (account.isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
                         )
@@ -284,9 +315,9 @@ class DriverWorkplaceScreen : Screen {
         onConfirm: (VehicleType, String, String, String, String) -> Unit
     ) {
         var selectedVehicleType by remember { mutableStateOf(account?.vehicleInfo?.type ?: VehicleType.CAR) }
-        var make by remember { mutableStateOf(account?.vehicleInfo?.make ?: "Toyota") }
-        var model by remember { mutableStateOf(account?.vehicleInfo?.model ?: "Corolla") }
-        var color by remember { mutableStateOf(account?.vehicleInfo?.color ?: "Silver") }
+        var make by remember { mutableStateOf(account?.vehicleInfo?.make ?: "") }
+        var model by remember { mutableStateOf(account?.vehicleInfo?.model ?: "") }
+        var color by remember { mutableStateOf(account?.vehicleInfo?.color ?: "") }
         var licensePlate by remember { mutableStateOf(account?.vehicleInfo?.licensePlate ?: "") }
         var expandedDropdown by remember { mutableStateOf(false) }
 
@@ -296,9 +327,17 @@ class DriverWorkplaceScreen : Screen {
             title = { Text(if (account == null) "Register Driver Service" else "Edit Driver Service", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    Text(
+                        "Enter the vehicle details that passengers and administrators can use to identify your ride service.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     ExposedDropdownMenuBox(
                         expanded = expandedDropdown,
                         onExpandedChange = { expandedDropdown = !expandedDropdown }
@@ -337,7 +376,8 @@ class DriverWorkplaceScreen : Screen {
                     OutlinedTextField(
                         value = make,
                         onValueChange = { make = it },
-                        label = { Text("Vehicle Make (e.g. Toyota)") },
+                        label = { Text("Vehicle Make") },
+                        placeholder = { Text("e.g. Toyota") },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -345,7 +385,8 @@ class DriverWorkplaceScreen : Screen {
                     OutlinedTextField(
                         value = model,
                         onValueChange = { model = it },
-                        label = { Text("Vehicle Model (e.g. Corolla)") },
+                        label = { Text("Vehicle Model") },
+                        placeholder = { Text("e.g. Corolla") },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -354,6 +395,7 @@ class DriverWorkplaceScreen : Screen {
                         value = color,
                         onValueChange = { color = it },
                         label = { Text("Vehicle Color") },
+                        placeholder = { Text("e.g. Silver") },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
