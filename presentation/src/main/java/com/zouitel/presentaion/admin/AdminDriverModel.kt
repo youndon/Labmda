@@ -28,7 +28,7 @@ class AdminDriverModel : ScreenModel {
 
     private fun listenToDriverApplications() {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").valueEvents.collect { snapshot ->
+            db.child("users").orderByChild("driverService/status").equalTo("PENDING").valueEvents.collect { snapshot ->
                 val profiles = snapshot.children.mapNotNull { child ->
                     try {
                         val uid = child.key ?: return@mapNotNull null
