@@ -39,7 +39,7 @@ class ShopsScreenModel : ScreenModel {
         screenModelScope.launch {
             if (uid != null) {
                 launch {
-                    db.child("user_profiles").child(uid).valueEvents.collect { snapshot ->
+                    db.child("users").child(uid).valueEvents.collect { snapshot ->
                         if (snapshot.exists) {
                             val shopModeStr = runCatching { snapshot.child("shopMode").value<String>() }.getOrDefault("CLIENT")
                             _userProfile.value = UserProfile(
