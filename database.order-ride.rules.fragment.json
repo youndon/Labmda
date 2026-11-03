@@ -32,6 +32,12 @@
       ".write": false
     },
     "users": {
+      ".indexOn": [
+        "driverService/status",
+        "deliveryServices/status",
+        "foodStatus",
+        "freightStatus"
+      ],
       "$uid": {
         "driverService": {
           "status": {
