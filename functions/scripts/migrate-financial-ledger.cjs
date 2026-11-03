@@ -92,7 +92,7 @@ async function main() {
 
   const idempotency = Object.entries(finance.idempotency || {}).map(([id, operationId]) => {
     safeId(id, "idempotency key");
-    return [id, { operationId, migratedAt: Date.now() }];
+    return [id, { operationId, migratedAt: Number(finance.operations?.[operationId]?.createdAt ?? 0) }];
   });
   const activity = [];
   for (const [uid, records] of Object.entries(finance.providerActivity || {})) {
