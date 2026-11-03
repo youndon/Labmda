@@ -99,7 +99,7 @@ Sensitive destination data is stored under `payoutProfiles/{uid}` and copied int
 2. `getMyEarnings` returns the provider's available, pending, cash-owed and clearing balances plus the latest 100 matching ledger operations.
 3. `requestMyPayout` requires a configured destination, a selected wallet owned by the authenticated user, and a positive PHP-centavo amount within the selected wallet’s available balance. It reserves funds by moving the amount from that wallet's `AVAILABLE` bucket to its `CLEARING` bucket.
 4. `getPendingPayoutRequests` is administrator-only and includes requests awaiting approval plus approved or interrupted processing states. `approvePayoutRequest` moves a request to approved.
-5. The administrator sends the money outside Labmda using GCash or BDO, then calls `markPayoutAsPaid` with the actual transfer reference. This moves the reserved amount out of the provider wallet's clearing balance and records an external payout-clearing posting.
+5. The administrator sends the money outside Labmda using GCash or BDO, then a different administrator calls `markPayoutAsPaid` with the actual transfer reference. The approval actor cannot confirm their own transfer. A server-only, case-insensitive SHA-256 reference index prevents the same bank/GCash reference from being reused for another payout. The transfer reference is immutable once processing starts. This moves the reserved amount out of the provider wallet's clearing balance and records an external payout-clearing posting.
 6. `rejectPayoutRequest` releases the reserved amount back to `AVAILABLE`.
 7. `getMyPayoutHistory` returns the provider's own payout records with account numbers masked.
 
