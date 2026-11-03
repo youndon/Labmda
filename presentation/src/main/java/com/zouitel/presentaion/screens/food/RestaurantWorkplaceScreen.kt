@@ -29,6 +29,11 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.screens.finance.ProviderEarningsScreen
 import com.zouitel.presentaion.common.Status
+import com.zouitel.presentaion.common.AppCard
+import com.zouitel.presentaion.common.AppCardContent
+import com.zouitel.presentaion.common.AppPrimaryButton
+import com.zouitel.presentaion.common.AppSectionTitle
+import com.zouitel.presentaion.common.AppSpacing
 import com.zouitel.presentaion.common.UserMode
 import androidx.compose.material.icons.filled.LocationOn
 import com.google.android.gms.maps.model.LatLng
@@ -81,14 +86,13 @@ class RestaurantWorkplaceScreen : Screen {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .padding(AppSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
             ) {
                 if (!isEditing) {
-                    Text(
-                        text = "Select Portal Mode",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
+                    AppSectionTitle(
+                        title = "Choose your workspace",
+                        subtitle = "Switch between ordering food and managing your restaurant."
                     )
 
                     SingleChoiceSegmentedButtonRow(
@@ -191,20 +195,18 @@ class RestaurantWorkplaceScreen : Screen {
 
     @Composable
     private fun ClientModeCard(onExploreFood: () -> Unit) {
-        Card(
+        AppCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onExploreFood),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            shape = MaterialTheme.shapes.extraLarge
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp),
+                    .padding(AppSpacing.xxl),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.lg)
             ) {
                 Box(
                     modifier = Modifier
@@ -227,13 +229,11 @@ class RestaurantWorkplaceScreen : Screen {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
-                Button(
+                AppPrimaryButton(
+                    text = "Explore Food Catalog",
                     onClick = onExploreFood,
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("Explore Food Catalog", fontWeight = FontWeight.Bold)
-                }
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
     }
@@ -427,17 +427,22 @@ class RestaurantWorkplaceScreen : Screen {
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 16.dp)
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.lg),
+            contentPadding = PaddingValues(bottom = AppSpacing.lg)
         ) {
             item {
-                OutlinedButton(
+                AppSectionTitle(
+                    title = restaurantInfo.name.ifBlank { "Restaurant workspace" },
+                    subtitle = "Manage availability, menu, and business performance."
+                )
+            }
+
+            item {
+                AppPrimaryButton(
+                    text = "Earnings & Payouts",
                     onClick = onOpenEarnings,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("Earnings & Payouts", fontWeight = FontWeight.Bold)
-                }
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             item {
