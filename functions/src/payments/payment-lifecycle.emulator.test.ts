@@ -37,7 +37,7 @@ describe.skipIf(!emulatorOnly)("RTDB emulator: end-to-end order and ride payment
     expect(saved.child("orders/delivery_order").val()).toMatchObject({ status: "OUT_FOR_DELIVERY", paymentStatus: "PAID" });
   });
 
-  it("activates a ride only after successful payment and removes it after expiry", async () => {
+  it("activates a ride only after successful payment", async () => {
     const { database, cleanup: dispose } = await createRtdbEmulatorContext({
       payments: {
         ride_payment: { id: "ride_payment", transactionType: "RIDE", tripId: "trip_1", method: "GCASH", provider: "BDO_CHECKOUT", status: "SUCCEEDED", updatedAt: 200 },
@@ -50,13 +50,26 @@ describe.skipIf(!emulatorOnly)("RTDB emulator: end-to-end order and ride payment
     cleanup = dispose;
 
     expect(await synchronizePaymentState(database, "ride_payment")).toBe(true);
-    let saved = await database.ref().get();
+    const saved = await database.ref().get();
     expect(saved.child("trips/trip_1").val()).toMatchObject({ status: "REQUESTED", paymentState: "PAID" });
     expect(saved.child("activeRideRequests/passenger_1/trip_1/status").val()).toBe("REQUESTED");
+  });
+
+  it("expires a still-pending ride payment and removes it from active dispatch", async () => {
+    const { database, cleanup: dispose } = await createRtdbEmulatorContext({
+      payments: {
+        ride_payment: { id: "ride_payment", transactionType: "RIDE", tripId: "trip_1", method: "GCASH", provider: "BDO_CHECKOUT", status: "PROCESSING", updatedAt: 200 },
+      },
+      trips: {
+        trip_1: { id: "trip_1", paymentId: "ride_payment", passengerId: "passenger_1", status: "PENDING_PAYMENT", paymentState: "PROCESSING" },
+      },
+      activeRideRequests: {},
+    });
+    cleanup = dispose;
 
     await database.ref("payments/ride_payment").update({ status: "EXPIRED", updatedAt: 201 });
     expect(await synchronizePaymentState(database, "ride_payment")).toBe(true);
-    saved = await database.ref().get();
+    const saved = await database.ref().get();
     expect(saved.child("trips/trip_1").val()).toMatchObject({ status: "CANCELLED", paymentState: "EXPIRED" });
     expect(saved.child("activeRideRequests/passenger_1/trip_1").exists()).toBe(false);
   });
