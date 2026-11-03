@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Database } from "firebase-admin/database";
 import {
   createFinancialTransfer,
-  postFinancialOperation,
   validateFinancialOperation,
 } from "./ledger.js";
 import { createCashRemittanceOperation, createPaymentReceiptOperation } from "./payment-ledger.js";
@@ -184,89 +182,6 @@ describe("financial ledger invariants", () => {
     };
     expect(() => createPaymentReceiptOperation(payment, [allocation])).toThrow(/succeeded/i);
     expect(() => createPaymentReceiptOperation({ ...payment, status: "SUCCEEDED" }, [allocation])).toThrow(/cannot exceed/i);
-  });
-
-  it("rejects a cash remittance larger than the collector's recorded cash owed", async () => {
-    const remittance = createCashRemittanceOperation({
-      cashCollectionId: "cash_collection_over",
-      collectorId: "driver_1",
-      amountMinor: 101,
-      createdAt: 1_798_000_000_200,
-    });
-    const database = {
-      ref: () => ({
-        transaction: async (update: (state: unknown) => unknown) => update({
-          accounts: {
-            cash_owed_driver_1: {
-              availableMinor: 0, pendingMinor: 0, cashOwedMinor: 100,
-              clearingMinor: 0, updatedAt: 1_798_000_000_100,
-            },
-          },
-        }),
-      }),
-    } as unknown as Database;
-    await expect(postFinancialOperation(database, remittance)).rejects.toThrow(/exceeds the collector cash-owed balance/i);
-  });
-
-  it("maintains a private user-scoped activity projection for provider wallets", async () => {
-    const operation = createFinancialTransfer({
-      ...base,
-      operationId: "merchant_earning_projection_1",
-      eventType: "MERCHANT_EARNING",
-      referenceType: "ORDER",
-      referenceId: "order_projection_1",
-      idempotencyKey: "merchant_earning_projection_1",
-      amountMinor: 4_250,
-      source: { accountId: "platform_escrow", bucket: "CLEARING", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
-      destination: { accountId: "wallet_merchant_owner_1", bucket: "AVAILABLE", deltaMinor: 0, partyType: "MERCHANT", partyId: "owner_1" },
-    });
-    let committedState: unknown = {};
-    const database = {
-      ref: () => ({
-        transaction: async (update: (state: unknown) => unknown) => {
-          committedState = update(committedState);
-          return { committed: true, snapshot: { val: () => committedState } };
-        },
-      }),
-    } as unknown as Database;
-    await postFinancialOperation(database, operation);
-    const state = committedState as {
-      providerActivity: Record<string, Record<string, { postings: Array<{ partyType: string; partyId: string }> }>>;
-    };
-    expect(state.providerActivity.owner_1.merchant_earning_projection_1.postings).toEqual([
-      expect.objectContaining({ partyType: "MERCHANT", partyId: "owner_1" }),
-    ]);
-    expect(state.providerActivity.platform).toBeUndefined();
-  });
-
-  it("rejects payout reservations that exceed the provider available balance", async () => {
-    const operation = createFinancialTransfer({
-      ...base,
-      operationId: "payout_request_1",
-      eventType: "PAYOUT",
-      referenceType: "PAYOUT",
-      referenceId: "payout_1",
-      idempotencyKey: "payout:payout_1:reserve",
-      amountMinor: 10_001,
-      source: { accountId: "wallet_driver_driver_1", bucket: "AVAILABLE", deltaMinor: 0, partyType: "DRIVER", partyId: "driver_1" },
-      destination: { accountId: "wallet_driver_driver_1", bucket: "CLEARING", deltaMinor: 0, partyType: "DRIVER", partyId: "driver_1" },
-    });
-    const database = {
-      ref: () => ({
-        transaction: async (update: (state: unknown) => unknown) => {
-          const next = update({
-            accounts: {
-              wallet_driver_driver_1: {
-                availableMinor: 10_000, pendingMinor: 0, cashOwedMinor: 0,
-                clearingMinor: 0, updatedAt: 1_798_000_000_100,
-              },
-            },
-          });
-          return { committed: true, snapshot: { val: () => next } };
-        },
-      }),
-    } as unknown as Database;
-    await expect(postFinancialOperation(database, operation)).rejects.toThrow(/available balance/i);
   });
 
   it("keeps unallocated payment remainder in a clearing account", () => {

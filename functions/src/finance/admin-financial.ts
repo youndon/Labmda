@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { reconcileFinancialLedger, createFinancialTransfer, postFinancialOperation, type BalanceBucket, type LedgerPosting } from "./ledger.js";
+import { reconcileFinancialLedger, createFinancialTransfer, postFinancialOperation, getFinancialOperation, listFinancialAccounts, type BalanceBucket, type LedgerPosting } from "./ledger.js";
 import { buildRefundReversal } from "./refund-ledger.js";
 
 const db = () => getDatabase();
@@ -76,8 +76,8 @@ export const getAdminPaymentMonitor = onCall({ enforceAppCheck: true }, async (c
 /** Itemized balances for platform, merchants, drivers and couriers. */
 export const getAdminFinancialBalances = onCall({ enforceAppCheck: true }, async (call) => {
   admin(call);
-  const snapshot = await db().ref("finance/accounts").get();
-  const accounts = Object.entries((snapshot.val() ?? {}) as Record<string, Record<string, unknown>>)
+  const accountRecords = await listFinancialAccounts();
+  const accounts = accountRecords.map((raw) => [raw.accountId, raw] as const)
     .map(([accountId, raw]) => {
       const kind = accountId.startsWith("wallet_merchant_") ? "MERCHANT"
         : accountId.startsWith("wallet_driver_") ? "DRIVER"
@@ -108,7 +108,7 @@ export const getAdminFinancialBalances = onCall({ enforceAppCheck: true }, async
 /** Rebuilds ledger projections and saves a durable reconciliation snapshot. */
 export const runAdminFinancialReconciliation = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = admin(call);
-  const result = await reconcileFinancialLedger(db());
+  const result = await reconcileFinancialLedger();
   const report = { id: randomUUID(), type: "FINANCIAL_LEDGER", currency: "PHP",
     createdAt: Date.now(), createdBy: uid, ...result };
   await db().ref(`financeReconciliations/${report.id}`).set(report);
@@ -165,7 +165,7 @@ export const resolveAdminFinancialDiscrepancy = onCall({ enforceAppCheck: true }
     createdAt: savedRequest.createdAt, description: savedRequest.note, amountMinor: savedRequest.amountMinor,
     source: savedRequest.source, destination: savedRequest.destination,
   });
-  const posted = await postFinancialOperation(db(), operation);
+  const posted = await postFinancialOperation(operation);
   if (!posted.duplicate) await recordAdminFinancialAudit({ uid, action: "FINANCIAL_DISCREPANCY_RESOLVED",
     targetType: "LEDGER_OPERATION", targetId: posted.operationId, after: operation, note });
   return { ...posted, amountMinor, currency: "PHP" };
@@ -283,9 +283,8 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   if (payment.currency !== "PHP" || !Number.isSafeInteger(payment.amountMinor)) {
     throw new HttpsError("failed-precondition", "Payment record is invalid.");
   }
-  const originalSnapshot = await db().ref(`finance/operations/payment_${refund.paymentId}_received`).get();
-  if (!originalSnapshot.exists()) throw new HttpsError("failed-precondition", "The original payment journal entry is missing; refund cannot be posted safely.");
-  const original = originalSnapshot.val() as { postings?: LedgerPosting[]; createdAt?: number };
+  const original = await getFinancialOperation(`payment_${refund.paymentId}_received`);
+  if (!original) throw new HttpsError("failed-precondition", "The original payment journal entry is missing; refund cannot be posted safely.");
   const postings = original.postings ?? [];
   if (!postings.length || !Number.isSafeInteger(original.createdAt)) {
     throw new HttpsError("failed-precondition", "The original payment journal entry is invalid.");
@@ -295,7 +294,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     refundAmountMinor: refund.amountMinor, createdAt: refund.processingAt ?? refund.updatedAt, reason: refund.reason,
     originalPostings: postings,
   });
-  const posted = await postFinancialOperation(db(), reversal);
+  const posted = await postFinancialOperation(reversal);
   const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const currentCase = root.refundCases?.[refundId] as RefundCase | undefined;

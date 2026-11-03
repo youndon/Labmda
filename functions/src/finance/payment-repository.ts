@@ -60,5 +60,5 @@ export async function postPaymentReceiptFromDatabase(
   }
 
   const operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
-  return postFinancialOperation(database, operation);
+  return postFinancialOperation(operation);
 }

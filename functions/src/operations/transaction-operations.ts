@@ -93,7 +93,7 @@ async function releaseSucceededOnlinePaymentAllocations(paymentId: string): Prom
       source: { accountId, bucket: "PENDING", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
       destination: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
     });
-    await postFinancialOperation(db(), operation);
+    await postFinancialOperation(operation);
     await db().ref("paymentAllocations/" + paymentId + "/" + allocationId).transaction((current: Record<string, any> | null) => {
       if (!current || current.status === "READY") return current;
       if (current.status !== "PENDING") return;

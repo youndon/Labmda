@@ -6,6 +6,9 @@ import { recordAdminFinancialAudit } from "./admin-financial.js";
 import {
   createFinancialTransfer,
   postFinancialOperation,
+  getFinancialAccount,
+  listCashOwedAccounts,
+  listProviderOperations,
   type FinancialOperation,
   type LedgerPosting,
 } from "./ledger.js";
@@ -141,22 +144,18 @@ export const getMyPayoutProfile = onCall({ enforceAppCheck: true }, async (call)
 export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidFrom(call);
   const accounts = await providerAccounts(uid);
-  const [finance, activity] = await Promise.all([
-    db().ref("finance/accounts").get(),
-    db().ref(`finance/providerActivity/${uid}`).get(),
+  const [accountBalances, activity, cashAccounts] = await Promise.all([
+    Promise.all(accounts.map((account) => getFinancialAccount(account.accountId))),
+    listProviderOperations(uid, 100),
+    listCashOwedAccounts(uid, true),
   ]);
   const accountIds = new Set(accounts.map((account) => account.accountId));
-  const balances = accounts.map((account) => {
-    const value = finance.child(account.accountId);
-    return {
-      ...account,
-      availableMinor: Number(value.child("availableMinor").val() ?? 0),
-      pendingMinor: Number(value.child("pendingMinor").val() ?? 0),
-      cashOwedMinor: Number(value.child("cashOwedMinor").val() ?? 0),
-      clearingMinor: Number(value.child("clearingMinor").val() ?? 0),
-    };
+  const balances = accounts.map((account, index) => {
+    const value = accountBalances[index];
+    return { ...account, availableMinor: value?.availableMinor ?? 0, pendingMinor: value?.pendingMinor ?? 0,
+      cashOwedMinor: value?.cashOwedMinor ?? 0, clearingMinor: value?.clearingMinor ?? 0 };
   });
-  const history = Object.values((activity.val() ?? {}) as Record<string, FinancialOperation>)
+  const history = activity
     .filter((operation) => operation.postings?.some((posting) => accountIds.has(posting.accountId)))
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 100)
@@ -166,14 +165,7 @@ export const getMyEarnings = onCall({ enforceAppCheck: true }, async (call) => {
       createdAt: operation.createdAt, description: operation.description,
       postings: operation.postings.filter((posting) => accountIds.has(posting.accountId)),
     }));
-  const financeValues = (finance.val() ?? {}) as Record<string, { cashOwedMinor?: number }>;
-  const collectorPrefix = `cash_owed_${uid}`;
-  const merchantSuffix = `_merchant_${uid}`;
-  const cashOwedMinor = Object.entries(financeValues)
-    .filter(([accountId]) => accountId === collectorPrefix
-      || accountId.startsWith(`${collectorPrefix}_merchant_`)
-      || accountId.endsWith(merchantSuffix))
-    .reduce((sum, [, value]) => sum + Number(value.cashOwedMinor ?? 0), 0);
+  const cashOwedMinor = cashAccounts.reduce((sum, account) => sum + account.cashOwedMinor, 0);
   return {
     currency: "PHP",
     totals: balances.reduce((sum, item) => ({
@@ -207,11 +199,11 @@ export const getMyEarningsAnalytics = onCall({ enforceAppCheck: true }, async (c
   }
   const [accounts, activity] = await Promise.all([
     providerAccounts(uid),
-    db().ref(`finance/providerActivity/${uid}`).get(),
+    listProviderOperations(uid, undefined, start),
   ]);
   const accountIds = new Set(accounts.map((account) => account.accountId));
   const earningEvents = new Set(["MERCHANT_EARNING", "DRIVER_EARNING", "COURIER_EARNING", "CUSTOMER_PAYMENT"]);
-  Object.values((activity.val() ?? {}) as Record<string, FinancialOperation>).forEach((operation) => {
+  activity.forEach((operation) => {
     if (!Number.isFinite(operation.createdAt)) return;
     const date = new Date(operation.createdAt + manilaOffsetMs).toISOString().slice(0, 10);
     const bucket = buckets.get(date);
@@ -251,8 +243,8 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
   if (!profileSnapshot.exists()) throw new HttpsError("failed-precondition", "Set up a GCash or BDO payout account first.");
   const profile = profileSnapshot.val() as { method: PayoutMethod; accountName: string; accountNumber: string };
   const eligible = await Promise.all(accounts.map(async (account) => {
-    const snapshot = await db().ref(`finance/accounts/${account.accountId}`).get();
-    return { ...account, availableMinor: Number(snapshot.child("availableMinor").val() ?? 0) };
+    const snapshot = await getFinancialAccount(account.accountId);
+    return { ...account, availableMinor: snapshot?.availableMinor ?? 0 };
   }));
   const requestedAccountId = typeof data.accountId === "string" ? data.accountId : "";
   const selected = eligible.find((account) => account.accountId === requestedAccountId);
@@ -262,7 +254,7 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
   }
   const payoutId = randomUUID();
   const createdAt = Date.now();
-  await postFinancialOperation(db(), payoutReservation({
+  await postFinancialOperation(payoutReservation({
     payoutId, uid, accountId: selected.accountId, providerKind: selected.providerKind,
     providerId: selected.providerId, amountMinor, createdAt,
   }));
@@ -275,7 +267,7 @@ export const requestMyPayout = onCall({ enforceAppCheck: true }, async (call) =>
   try {
     await db().ref(`payoutRequests/${payoutId}`).set(record);
   } catch (error) {
-    await postFinancialOperation(db(), payoutRelease({
+    await postFinancialOperation(payoutRelease({
       payoutId, accountId: selected.accountId, providerKind: selected.providerKind,
       providerId: selected.providerId, amountMinor, createdAt: Date.now(),
     }));
@@ -358,7 +350,7 @@ export const rejectPayoutRequest = onCall({ enforceAppCheck: true }, async (call
   if (payout.status !== "REJECTING") {
     await updatePayoutStatus(payoutId, ["REQUESTED", "APPROVED"], "REJECTING", { rejectedBy: call.auth!.uid });
   }
-  await postFinancialOperation(db(), payoutRelease({
+  await postFinancialOperation(payoutRelease({
     payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
     providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Number(payout.createdAt),
   }));
@@ -398,7 +390,7 @@ export const markPayoutAsPaid = onCall({ enforceAppCheck: true }, async (call) =
       paidBy: call.auth!.uid, transferReference: confirmedReference,
     });
   }
-  await postFinancialOperation(db(), payoutPaid({
+  await postFinancialOperation(payoutPaid({
     payoutId, accountId: String(payout.accountId), providerKind: payout.providerKind as ProviderKind,
     providerId: String(payout.providerId), amountMinor: Number(payout.amountMinor), createdAt: Number(payout.createdAt),
   }));

@@ -1,5 +1,6 @@
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { listFinancialAccounts, listFinancialOperations } from "./ledger.js";
 
 type FinanceAccount = {
   availableMinor?: number;
@@ -32,36 +33,33 @@ export const getAdminFinancialOverview = onCall({ enforceAppCheck: true }, async
   requireAdmin(call.auth.token as Record<string, unknown> | undefined);
 
   const database = getDatabase();
-  const [accountsSnapshot, operationsSnapshot, requested, approved, paying, paid] = await Promise.all([
-    database.ref("finance/accounts").get(),
-    database.ref("finance/operations").orderByChild("createdAt").limitToLast(1000).get(),
+  const [accounts, operations, requested, approved, paying, paid] = await Promise.all([
+    listFinancialAccounts(),
+    listFinancialOperations(1000),
     database.ref("payoutRequests").orderByChild("status").equalTo("REQUESTED").get(),
     database.ref("payoutRequests").orderByChild("status").equalTo("APPROVED").get(),
     database.ref("payoutRequests").orderByChild("status").equalTo("PAYING").get(),
     database.ref("payoutRequests").orderByChild("status").equalTo("PAID").get(),
   ]);
 
-  const accounts = (accountsSnapshot.val() ?? {}) as Record<string, FinanceAccount>;
-  // A bounded recent sample keeps dashboard reads independent of total journal size.
-  const operations = Object.values((operationsSnapshot.val() ?? {}) as Record<string, FinanceOperation>);
-  const platformAccounts = Object.entries(accounts).filter(([id]) => id === "platform_revenue" || id.startsWith("wallet_platform_"));
-  const platformAvailableMinor = platformAccounts.reduce((sum, [, account]) => sum + safeMinor(account.availableMinor), 0);
-  const platformClearingMinor = platformAccounts.reduce((sum, [, account]) => sum + safeMinor(account.clearingMinor), 0);
-  const providerAccounts = Object.entries(accounts).filter(([id]) =>
-    id.startsWith("wallet_merchant_")
-    || id.startsWith("wallet_driver_")
-    || id.startsWith("wallet_delivery_"),
+  // Firestore returns bounded recent journal operations; account projections are separate documents.
+  const platformAccounts = accounts.filter((account) => account.accountId === "platform_revenue" || account.accountId.startsWith("wallet_platform_"));
+  const platformAvailableMinor = platformAccounts.reduce((sum, account) => sum + safeMinor(account.availableMinor), 0);
+  const platformClearingMinor = platformAccounts.reduce((sum, account) => sum + safeMinor(account.clearingMinor), 0);
+  const providerAccounts = accounts.filter((account) =>
+    account.accountId.startsWith("wallet_merchant_")
+    || account.accountId.startsWith("wallet_driver_")
+    || account.accountId.startsWith("wallet_delivery_"),
   );
 
-  const providerBalances = providerAccounts.reduce((sum, [, account]) => ({
+  const providerBalances = providerAccounts.reduce((sum, account) => ({
     availableMinor: sum.availableMinor + safeMinor(account.availableMinor),
     pendingMinor: sum.pendingMinor + safeMinor(account.pendingMinor),
     clearingMinor: sum.clearingMinor + safeMinor(account.clearingMinor),
   }), { availableMinor: 0, pendingMinor: 0, clearingMinor: 0 });
 
-  const cashOutstandingMinor = Object.entries(accounts)
-    .filter(([id]) => id.startsWith("cash_owed_"))
-    .reduce((sum, [, account]) => sum + safeMinor(account.cashOwedMinor), 0);
+  const cashOutstandingMinor = accounts.filter((account) => account.accountId.startsWith("cash_owed_"))
+    .reduce((sum, account) => sum + safeMinor(account.cashOwedMinor), 0);
 
   const paymentOperations = operations.filter((operation) => operation.eventType === "CUSTOMER_PAYMENT");
   const paymentVolumeMinor = paymentOperations.reduce((sum, operation) => {
