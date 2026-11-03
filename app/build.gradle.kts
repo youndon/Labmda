@@ -17,6 +17,16 @@ android {
         version = release(37)
     }
 
+    flavorDimensions += "environment"
+    productFlavors {
+        create("development") {
+            dimension = "environment"
+        }
+        create("production") {
+            dimension = "environment"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.zouitel.labmda"
         minSdk = 28

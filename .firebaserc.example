@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "development": "YOUR_LABMDA_DEVELOPMENT_PROJECT_ID",
+    "production": "YOUR_LABMDA_PRODUCTION_PROJECT_ID"
+  }
+}

@@ -1,0 +1,72 @@
+name: Deploy Firebase Development
+
+on:
+  push:
+    branches: ["develop"]
+    paths:
+      - "functions/**"
+      - "firestore.rules"
+      - "firebase.json"
+      - ".github/workflows/deploy-firebase-development.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: firebase-development-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: development
+    env:
+      FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate development environment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$FIREBASE_PROJECT_ID" || { echo "Set development environment variable FIREBASE_PROJECT_ID"; exit 1; }
+          test -n "$GCP_WORKLOAD_IDENTITY_PROVIDER" || { echo "Set development environment variable GCP_WORKLOAD_IDENTITY_PROVIDER"; exit 1; }
+          test -n "$GCP_SERVICE_ACCOUNT" || { echo "Set development environment variable GCP_SERVICE_ACCOUNT"; exit 1; }
+
+      - id: auth
+        name: Authenticate to Google Cloud using GitHub OIDC
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ env.FIREBASE_PROJECT_ID }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: functions/package.json
+
+      - name: Install Functions dependencies
+        working-directory: functions
+        run: npm install --no-audit --no-fund
+
+      - name: Verify required Maps secret exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud secrets versions list GOOGLE_MAPS_ROUTES_API_KEY \
+            --project="$FIREBASE_PROJECT_ID" \
+            --filter="state=ENABLED" --limit=1 --format="value(name)" | grep -q .
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools
+
+      - name: Deploy development Functions and Firestore rules
+        run: firebase deploy --only functions,firestore:rules --project "$FIREBASE_PROJECT_ID" --non-interactive

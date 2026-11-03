@@ -6,11 +6,21 @@ on:
     paths:
       - "functions/**"
       - ".github/workflows/functions.yml"
+      - ".github/workflows/deploy-firebase-*.yml"
+      - "firebase.json"
+      - "firestore.rules"
+      - ".firebaserc.example"
+      - "infra/**"
   push:
     branches: [ "main", "master" ]
     paths:
       - "functions/**"
       - ".github/workflows/functions.yml"
+      - ".github/workflows/deploy-firebase-*.yml"
+      - "firebase.json"
+      - "firestore.rules"
+      - ".firebaserc.example"
+      - "infra/**"
 
 jobs:
   build-and-test:
