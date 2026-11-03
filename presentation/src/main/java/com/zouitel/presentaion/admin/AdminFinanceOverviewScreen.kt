@@ -52,6 +52,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @Serializable
@@ -184,6 +186,7 @@ class AdminFinanceOverviewScreen : Screen {
                             Text("LABMDA FINANCE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             Text("Your platform at a glance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Text("PHP ledger figures • server generated", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (data.generatedAt > 0) Text("Updated ${formatFinanceTimestamp(data.generatedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                         }
                     }
                     if (!message.isNullOrBlank()) {
@@ -232,9 +235,15 @@ class AdminFinanceOverviewScreen : Screen {
                             }
                         }
                         item {
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                FinanceMetricCard("Platform clearing", formatFinancePhp(data.platformRevenueClearingMinor), "Platform funds not yet cleared", Modifier.weight(1f))
+                                FinanceMetricCard("Provider clearing", formatFinancePhp(data.providerBalances.clearingMinor), "Provider funds in settlement", Modifier.weight(1f))
+                            }
+                        }
+                        item {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment volume", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                Text("Last 7 days • latest ${data.paymentSampleLimit} ledger operations only • PHP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Last 7 days • based on the latest ${data.paymentSampleLimit} ledger operations • PHP", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 FinanceVolumeChart(data.dailyPaymentVolume)
                             }
                         }
@@ -290,6 +299,7 @@ class AdminFinanceOverviewScreen : Screen {
                                             Text(operation.eventType.replace('_', ' '), fontWeight = FontWeight.SemiBold)
                                             Text(operation.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             Text(operation.referenceId, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                            if (operation.createdAt > 0) Text(formatFinanceTimestamp(operation.createdAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                                         }
                                         Text(formatFinancePhp(operation.amountMinor), fontWeight = FontWeight.Bold)
                                     }
@@ -375,3 +385,7 @@ private fun formatFinancePhp(minor: Long): String {
     }
     return "₱${formatter.format(minor / 100.0)}"
 }
+
+
+private fun formatFinanceTimestamp(timestamp: Long): String =
+    SimpleDateFormat("MMM d, yyyy • HH:mm", Locale.US).format(Date(timestamp))
