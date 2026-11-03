@@ -208,7 +208,18 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            RestaurantHero(restaurant = restaurant)
+                        }
                         groupedMeals.forEach { (category, list) ->
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "category-${category.name}") {
+                                Text(
+                                    text = category.name.lowercase().replaceFirstChar { it.uppercase() },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                             items(list, key = { it.id }) { meal ->
                                 MealCard(
                                     meal = meal,
@@ -423,6 +434,82 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
     }
 
     @Composable
+    private fun RestaurantHero(restaurant: Restaurant) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+        ) {
+            Column {
+                if (restaurant.imageUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = restaurant.imageUrl,
+                        contentDescription = "${restaurant.name} cover",
+                        modifier = Modifier.fillMaxWidth().height(188.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(132.dp)
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.ReceiptLong, contentDescription = null,
+                            modifier = Modifier.size(42.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(restaurant.name, modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Surface(
+                            color = if (restaurant.isOpen) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(if (restaurant.isOpen) "Open" else "Closed",
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                                color = if (restaurant.isOpen) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                    if (restaurant.address.isNotBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null,
+                                modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(6.dp))
+                            Text(restaurant.address, style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("Estimated time", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${restaurant.estimatedTimeMinutes} min", style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.End) {
+                            Text("Delivery fee", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("₱${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun MealCard(
         meal: Meal,
         quantity: Int,
@@ -437,7 +524,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
             onClick = onClick,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(if (hasImage) 260.dp else 160.dp),
+                .height(264.dp),
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -467,15 +554,14 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.primary
                     )
-
-//                    if (meal.description.isNotBlank()) {
-//                        Text(
-//                            text = meal.description,
-//                            style = MaterialTheme.typography.bodySmall,
-//                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-//                            maxLines = 2
-//                        )
-//                    }
+                    if (meal.description.isNotBlank()) {
+                        Text(
+                            text = meal.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2
+                        )
+                    }
                 }
 
                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
