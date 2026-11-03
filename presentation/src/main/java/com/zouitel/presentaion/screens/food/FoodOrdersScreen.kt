@@ -1,6 +1,8 @@
 package com.zouitel.presentaion.screens.food
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -9,8 +11,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -32,10 +36,32 @@ class FoodOrdersScreen : Screen {
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
 
+        var searchQuery by rememberSaveable { mutableStateOf("") }
+        var selectedFilter by rememberSaveable { mutableStateOf("All") }
+        val filteredOrders = remember(orders, searchQuery, selectedFilter) {
+            orders.filter { order ->
+                val query = searchQuery.trim()
+                val matchesQuery = query.isBlank() ||
+                    order.id.contains(query, ignoreCase = true) ||
+                    order.clientId.contains(query, ignoreCase = true) ||
+                    order.pickupLocation.contains(query, ignoreCase = true) ||
+                    order.dropoffLocation.contains(query, ignoreCase = true) ||
+                    order.deliveryName.contains(query, ignoreCase = true)
+                val matchesFilter = when (selectedFilter) {
+                    "New" -> order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT
+                    "In progress" -> order.status == OrderStatus.ACCEPTED ||
+                        order.status == OrderStatus.PREPARING || order.status == OrderStatus.OUT_FOR_DELIVERY
+                    "Finished" -> order.status == OrderStatus.DELIVERED || order.status == OrderStatus.CANCELLED
+                    else -> true
+                }
+                matchesQuery && matchesFilter
+            }
+        }
+
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Manager Orders Dashboard", fontWeight = FontWeight.Bold) },
+                    title = { Text("Restaurant Orders", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -44,37 +70,99 @@ class FoodOrdersScreen : Screen {
                 )
             }
         ) { paddingValues ->
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentAlignment = Alignment.Center
+            Column(
+                modifier = Modifier.fillMaxSize().padding(paddingValues)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    CircularProgressIndicator()
-                }
-            } else if (orders.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("No client orders received yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(orders, key = { it.id }) { order ->
-                        ClientOrderCard(
-                            order = order,
-                            onStatusChange = { newStatus -> screenModel.updateOrderStatus(order, newStatus) }
+                    Text(
+                        "Keep every order moving",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Review incoming requests and follow each order through preparation.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        placeholder = { Text("Search order, client or delivery address") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                                }
+                            }
+                        }
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("All", "New", "In progress", "Finished").forEach { filter ->
+                            FilterChip(
+                                selected = selectedFilter == filter,
+                                onClick = { selectedFilter = filter },
+                                label = { Text(filter) },
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                        }
+                    }
+                    if (!isLoading) {
+                        Text(
+                            "${filteredOrders.size} of ${orders.size} orders",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+
+                when {
+                    isLoading -> Box(
+                        modifier = Modifier.fillMaxSize().weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                    filteredOrders.isEmpty() -> Box(
+                        modifier = Modifier.fillMaxSize().weight(1f).padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                if (orders.isEmpty()) "No client orders yet" else "No matching orders",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (orders.isEmpty()) "New restaurant orders will appear here." else "Try a different search or status filter.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    else -> LazyColumn(
+                        modifier = Modifier.fillMaxSize().weight(1f),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(filteredOrders, key = { it.id }) { order ->
+                            ClientOrderCard(
+                                order = order,
+                                onStatusChange = { newStatus -> screenModel.updateOrderStatus(order, newStatus) }
+                            )
+                        }
                     }
                 }
             }
