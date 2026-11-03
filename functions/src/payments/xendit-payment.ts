@@ -35,6 +35,9 @@ type XenditWebhook = {
     failure_code?: string;
     captures?: Array<{ capture_id?: string; capture_amount?: number }>;
   };
+  paymentCapture?: { value?: XenditWebhook };
+  paymentFailure?: { value?: XenditWebhook };
+  paymentRequestExpiry?: { value?: XenditWebhook };
 };
 
 function safeId(value: unknown): value is string {
@@ -132,8 +135,10 @@ export async function processXenditPaymentWebhook(
   database: Database,
   event: XenditWebhook,
 ): Promise<{ accepted: boolean; duplicate: boolean; status?: string }> {
-  const eventName = String(event.event ?? "");
-  const data = event.data;
+  const normalized = event.event ? event
+    : event.paymentCapture?.value ?? event.paymentFailure?.value ?? event.paymentRequestExpiry?.value ?? event;
+  const eventName = String(normalized.event ?? "");
+  const data = normalized.data;
   if (!data || !["payment.capture", "payment.failure", "payment_request.expiry"].includes(eventName)) {
     return { accepted: true, duplicate: false };
   }
@@ -146,18 +151,27 @@ export async function processXenditPaymentWebhook(
     throw new Error("Xendit webhook channel does not match GCash.");
   }
   const amountMinor = data.request_amount === undefined ? null : amountPesosToMinor(data.request_amount);
+  if ((data.request_amount !== undefined && amountMinor === null)
+    || (data.currency !== undefined && data.currency !== "PHP")) {
+    throw new Error("Xendit webhook has an invalid amount or currency.");
+  }
   if (eventName === "payment.capture" && (amountMinor === null || data.currency !== "PHP" || !data.payment_id)) {
     throw new Error("Xendit capture webhook has an invalid amount, currency or payment reference.");
   }
-  const eventIdentity = data.capture_id ?? data.captures?.[0]?.capture_id ?? data.payment_id
-    ?? createHash("sha256").update(JSON.stringify(event)).digest("hex");
+  const eventIdentity = data.capture_id ?? data.captures?.[0]?.capture_id
+    ?? (eventName === "payment.capture" ? data.payment_id : createHash("sha256").update(JSON.stringify(normalized)).digest("hex"));
   const eventKey = createHash("sha256").update(`${eventName}:${eventIdentity}`).digest("hex");
   let rejected = false;
   const now = Date.now();
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const events = root.paymentWebhookEvents ?? {};
-    if (events[eventKey]) return root;
+    if (events[eventKey]) {
+      const prior = events[eventKey];
+      if (prior.paymentId !== paymentId || prior.paymentRequestId !== paymentRequestId
+        || prior.amountMinor !== amountMinor || prior.currency !== (data.currency ?? "PHP")) rejected = true;
+      return root;
+    }
     const payment = root.payments?.[paymentId] as Record<string, any> | undefined;
     if (!payment || payment.id !== paymentId || payment.method !== "GCASH" || payment.provider !== "XENDIT"
       || payment.currency !== "PHP" || payment.providerRequestId !== paymentRequestId
@@ -165,7 +179,7 @@ export async function processXenditPaymentWebhook(
       rejected = true;
       return root;
     }
-    const businessId = data.business_id ?? event.business_id ?? "";
+    const businessId = data.business_id ?? normalized.business_id ?? "";
     if (payment.providerBusinessId && businessId !== payment.providerBusinessId) {
       rejected = true;
       return root;
@@ -206,7 +220,7 @@ export async function processXenditPaymentWebhook(
 
   const root = result.snapshot.val() as Record<string, any> | null;
   const storedEvent = root?.paymentWebhookEvents?.[eventKey];
-  if (storedEvent) return { accepted: true, duplicate: !result.committed, status: storedEvent.status };
+  if (storedEvent) return { accepted: !rejected, duplicate: !result.committed, status: storedEvent.status };
   return { accepted: !rejected, duplicate: false };
 }
 
