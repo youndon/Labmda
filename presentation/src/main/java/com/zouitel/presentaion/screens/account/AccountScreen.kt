@@ -129,13 +129,17 @@ class AccountScreen : Screen {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = user?.displayName?.takeIf { it.isNotBlank() } ?: profile?.fullName ?: "Guest User",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
                                     text = user?.email ?: user?.phoneNumber ?: "Not signed in",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
                             }
 
@@ -293,8 +297,10 @@ private fun BusinessGridCard(
     }
 
     OutlinedCard(
-        modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp)
+        modifier = modifier
+            .heightIn(min = 116.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp)
     ) {
         Column(
             modifier = Modifier
