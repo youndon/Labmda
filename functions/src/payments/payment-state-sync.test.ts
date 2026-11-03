@@ -53,6 +53,7 @@ describe("payment state synchronization", () => {
     const db = fakeDatabase({
       payments: { p1: { id: "p1", transactionType: "RIDE", tripId: "t1", method: "GCASH", provider: "BDO_CHECKOUT", status: "CANCELLED", updatedAt: 40 } },
       trips: { t1: { id: "t1", passengerId: "passenger_1", paymentId: "p1", status: "PENDING_PAYMENT", paymentStatus: "PENDING" } },
+      activeRideRequests: { passenger_1: { t1: { status: "REQUESTED", updatedAt: 35 } } },
     });
     await synchronizePaymentState(db, "p1");
     expect(db.value().trips.t1.paymentStatus).toBe("CANCELLED");
