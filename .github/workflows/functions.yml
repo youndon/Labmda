@@ -27,5 +27,7 @@ jobs:
         run: npm install
       - name: Unit tests
         run: npm test
+      - name: RTDB transaction integration tests
+        run: npx --yes firebase-tools@14 emulators:exec --only database --project demo-labmda --config ../firebase.test.json "npm run test:emulator"
       - name: TypeScript build
         run: npm run build
