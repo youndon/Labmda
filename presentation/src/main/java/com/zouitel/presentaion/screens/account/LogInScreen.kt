@@ -206,7 +206,7 @@ class LogInScreen : Screen {
                     Spacer(Modifier.height(24.dp))
 
                     Text(
-                        text = "Get started with RideGo",
+                        text = "Get started with Labmda",
                         style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
                         textAlign = TextAlign.Center
                     )
