@@ -42,7 +42,7 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
     }
     private fun listenToStoreProducts() {
         screenModelScope.launch {
-            db.child("shops").child(shop.id).child("products").valueEvents.collect { snapshot ->
+            db.child("shopProducts").child(shop.id).valueEvents.collect { snapshot ->
                 val list = snapshot.children.mapNotNull { child ->
                     try {
                         val id = child.key ?: return@mapNotNull null
