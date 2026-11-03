@@ -183,7 +183,7 @@ class PassengerScreen : Screen {
             }
         }
 
-        LaunchedEffect(pickup, destination, pickupAddress, destinationAddress, paymentMethod) {
+        LaunchedEffect(pickup, destination, pickupAddress, destinationAddress, paymentMethod, vehicleType) {
             val p = pickup
             val d = destination
             if (p != null && d != null && pickupAddress.isNotBlank() && destinationAddress.isNotBlank()) {
@@ -194,7 +194,8 @@ class PassengerScreen : Screen {
                     dropoffAddress = destinationAddress,
                     dropoffLat = d.latitude,
                     dropoffLng = d.longitude,
-                    paymentMethod = paymentMethod
+                    paymentMethod = paymentMethod,
+                    rideType = vehicleType.name
                 )
             } else {
                 screenModel.clearRideQuote()

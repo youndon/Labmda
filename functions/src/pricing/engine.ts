@@ -16,6 +16,7 @@ export interface PricingConfig {
     perMinuteMinor: number;
     minimumFareMinor: number;
     platformCommissionBps: number;
+    vehicleMultipliersBps: Record<string, number>;
   };
   delivery: DeliveryRate;
   food: { commissionBps: number };
@@ -63,10 +64,20 @@ function assertMinor(value: number, field: string): void {
 function assertBps(value: number, field: string): void {
   if (!Number.isSafeInteger(value) || value < 0 || value > 10000) throw new Error(`${field} must be between 0 and 10000 basis points.`);
 }
+function assertVehicleMultiplierBps(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1000 || value > 30000) {
+    throw new Error("ride vehicle multiplier must be between 1000 and 30000 basis points.");
+  }
+}
 function roundBps(amountMinor: number, bps: number): number {
   assertMinor(amountMinor, "amountMinor");
   assertBps(bps, "basisPoints");
   return Number((BigInt(amountMinor) * BigInt(bps) + 5000n) / 10000n);
+}
+function roundVehicleMultiplierBps(amountMinor: number, multiplierBps: number): number {
+  assertMinor(amountMinor, "amountMinor");
+  assertVehicleMultiplierBps(multiplierBps);
+  return Number((BigInt(amountMinor) * BigInt(multiplierBps) + 5000n) / 10000n);
 }
 function proratePerKm(distanceMeters: number, perKmMinor: number): number {
   if (!Number.isSafeInteger(distanceMeters) || distanceMeters < 0) throw new Error("distanceMeters must be a non-negative integer.");
@@ -114,7 +125,7 @@ export function calculateDeliveryFee(config: DeliveryRate, route: RouteMetrics):
   const platformCommissionMinor = roundBps(feeMinor, config.platformCommissionBps);
   return { feeMinor, platformCommissionMinor, courierEarningsMinor: feeMinor - platformCommissionMinor };
 }
-export function calculateRideFare(config: PricingConfig["ride"], route: RouteMetrics): { fareMinor: number; platformCommissionMinor: number; driverEarningsMinor: number } {
+export function calculateRideFare(config: PricingConfig["ride"], route: RouteMetrics, vehicleMultiplierBps = 10000): { fareMinor: number; platformCommissionMinor: number; driverEarningsMinor: number } {
   assertMinor(config.baseFareMinor, "ride.baseFareMinor");
   assertMinor(config.minimumFareMinor, "ride.minimumFareMinor");
   assertMinor(config.perKmMinor, "ride.perKmMinor");
@@ -125,7 +136,9 @@ export function calculateRideFare(config: PricingConfig["ride"], route: RouteMet
   const minutes = Math.ceil(route.durationSeconds / 60);
   const timeCharge = minutes * config.perMinuteMinor;
   assertMinor(timeCharge, "ride.timeCharge");
-  const fareMinor = Math.max(config.minimumFareMinor, config.baseFareMinor + distanceCharge + timeCharge);
+  const standardFareMinor = Math.max(config.minimumFareMinor, config.baseFareMinor + distanceCharge + timeCharge);
+  assertVehicleMultiplierBps(vehicleMultiplierBps);
+  const fareMinor = roundVehicleMultiplierBps(standardFareMinor, vehicleMultiplierBps);
   assertMinor(fareMinor, "ride.fareMinor");
   const platformCommissionMinor = roundBps(fareMinor, config.platformCommissionBps);
   return { fareMinor, platformCommissionMinor, driverEarningsMinor: fareMinor - platformCommissionMinor };

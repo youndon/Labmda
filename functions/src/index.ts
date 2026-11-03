@@ -168,10 +168,16 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
 
 export const quoteRide = onCall({ secrets: [mapsApiKey], enforceAppCheck: true }, async (call) => {
   const uid = requireAuth(call.auth?.uid);
-  const rawData = call.data as QuoteRequest & { rideType?: string; pickupAddress?: unknown; dropoffAddress?: unknown };
-  const data = { ...rawData, pickupAddress: validateAddress(rawData.pickupAddress, "Pickup"), dropoffAddress: validateAddress(rawData.dropoffAddress, "Drop-off") };
+  const rawData = call.data as QuoteRequest & { rideType?: unknown; pickupAddress?: unknown; dropoffAddress?: unknown };
+  const vehicleTypes = ["CAR", "BIKE", "E_BIKE", "SCOOTER", "MOTORCYCLE", "TRUCK", "VAN", "OTHER"];
+  const rideType = rawData.rideType === undefined ? "CAR" : rawData.rideType;
+  if (typeof rideType !== "string" || !vehicleTypes.includes(rideType)) {
+    throw new HttpsError("invalid-argument", "Select a supported ride vehicle type.");
+  }
+  const data = { ...rawData, rideType, pickupAddress: validateAddress(rawData.pickupAddress, "Pickup"), dropoffAddress: validateAddress(rawData.dropoffAddress, "Drop-off") };
   const [config, route] = await Promise.all([loadConfig(), routeMetrics(uid, data)]);
-  const fare = calculateRideFare(config.ride, route);
+  const multiplierBps = config.ride.vehicleMultipliersBps?.[rideType] ?? 10000;
+  const fare = calculateRideFare(config.ride, route, multiplierBps);
   await assertPaymentServiceEnabled("RIDE");
   const method = await paymentMethod(data.paymentMethod);
   const fee = calculateProviderFee(config, method, fare.fareMinor);
@@ -181,7 +187,7 @@ export const quoteRide = onCall({ secrets: [mapsApiKey], enforceAppCheck: true }
     currency: "PHP", fareMinor: fare.fareMinor, providerFeeMinor, customerTotalMinor,
     platformCommissionMinor: fare.platformCommissionMinor, driverEarningsMinor: fare.driverEarningsMinor,
     platformNetBeforeOtherCostsMinor: fare.platformCommissionMinor - (method === "GCASH" && fee.payer === "PLATFORM" ? providerFeeMinor : 0),
-  }, { route, paymentMethod: method, rideType: data.rideType ?? "STANDARD" });
+  }, { route, paymentMethod: method, rideType });
 });
 
 export const quoteFoodOrder = onCall({ secrets: [mapsApiKey], enforceAppCheck: true }, async (call) => {

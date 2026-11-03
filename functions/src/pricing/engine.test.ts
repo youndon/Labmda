@@ -3,7 +3,7 @@ import { calculateDeliveryFee, calculateOrderBreakdown, calculateRideFare, decim
 
 const config = {
   version: 1, currency: "PHP" as const,
-  ride: { baseFareMinor: 5000, perKmMinor: 1200, perMinuteMinor: 200, minimumFareMinor: 8000, platformCommissionBps: 1500 },
+  ride: { baseFareMinor: 5000, perKmMinor: 1200, perMinuteMinor: 200, minimumFareMinor: 8000, platformCommissionBps: 1500, vehicleMultipliersBps: {} },
   delivery: { baseFeeMinor: 3000, perKmMinor: 1000, minimumFeeMinor: 3000, platformCommissionBps: 1000 },
   food: { commissionBps: 1200 }, shop: { commissionBps: 1000 },
   providerFees: { GCASH: { rateBps: 250, fixedFeeMinor: 1500, payer: "PLATFORM" as const } },
@@ -20,8 +20,13 @@ describe("PHP pricing engine", () => {
     });
   });
   it("calculates ride fare and driver earnings", () => {
-    expect(calculateRideFare(config.ride, { distanceMeters: 2100, durationSeconds: 601 })).toEqual({
+    expect(calculateRideFare({ ...config.ride, vehicleMultipliersBps: {} }, { distanceMeters: 2100, durationSeconds: 601 })).toEqual({
       fareMinor: 9720, platformCommissionMinor: 1458, driverEarningsMinor: 8262,
+    });
+  });
+  it("applies the selected vehicle multiplier before calculating the platform split", () => {
+    expect(calculateRideFare({ ...config.ride, vehicleMultipliersBps: {} }, { distanceMeters: 2100, durationSeconds: 601 }, 15000)).toEqual({
+      fareMinor: 14580, platformCommissionMinor: 2187, driverEarningsMinor: 12393,
     });
   });
   it("separates merchant-funded discount, platform commission and courier earnings", () => {

@@ -159,7 +159,8 @@ class PassengerScreenModel : ScreenModel {
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        paymentMethod: String
+        paymentMethod: String,
+        rideType: String
     ) {
         rideQuoteJob?.cancel()
         _rideFareQuote.value = null
@@ -176,7 +177,7 @@ class PassengerScreenModel : ScreenModel {
                         "pickupAddress" to pickupAddress,
                         "dropoffAddress" to dropoffAddress,
                         "paymentMethod" to method,
-                        "rideType" to "STANDARD"
+                        "rideType" to rideType
                     )
                 )
                 val quoteId = quote["quoteId"] as? String ?: error("The server did not return a fare quote.")
