@@ -9,7 +9,7 @@
     "build": "tsc",
     "test": "vitest run",
     "set-admin-claim": "node scripts/set-admin-claim.cjs",
-    "test:emulator": "vitest run src/operations/quote-claim.emulator.test.ts src/finance/cash-collection.emulator.test.ts src/payments/refund-transaction.emulator.test.ts"
+    "test:emulator": "vitest run --no-file-parallelism src/operations/quote-claim.emulator.test.ts src/finance/cash-collection.emulator.test.ts src/payments/refund-transaction.emulator.test.ts"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0",
