@@ -35,7 +35,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Track Order") },
+                    title = { Text("Order Tracking") },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -72,6 +72,47 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = when (currentOrder.status) {
+                                        OrderStatus.PENDING_PAYMENT -> "Payment required"
+                                        OrderStatus.PLACED -> "Order received"
+                                        OrderStatus.ACCEPTED -> "Order confirmed"
+                                        OrderStatus.PREPARING -> "Being prepared"
+                                        OrderStatus.OUT_FOR_DELIVERY -> "On the way"
+                                        OrderStatus.DELIVERED -> "Delivered"
+                                        OrderStatus.CANCELLED -> "Order cancelled"
+                                    },
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = when (currentOrder.status) {
+                                        OrderStatus.PENDING_PAYMENT -> "We are waiting for your payment confirmation."
+                                        OrderStatus.PLACED -> "Your order has been submitted and is waiting for the merchant."
+                                        OrderStatus.ACCEPTED -> "The merchant has confirmed your order."
+                                        OrderStatus.PREPARING -> "The merchant is preparing your order."
+                                        OrderStatus.OUT_FOR_DELIVERY -> if (currentOrder.deliveryId.isBlank()) "Your order is marked for delivery. Courier assignment details are not available yet." else "Your order is marked as out for delivery."
+                                        OrderStatus.DELIVERED -> "Your order has been marked as delivered."
+                                        OrderStatus.CANCELLED -> "This order is no longer active."
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "Order #" + currentOrder.id.takeLast(6).uppercase(),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+
                     // Pickup & drop-off
                     item {
                         Card(modifier = Modifier.fillMaxWidth()) {
@@ -153,7 +194,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
                                         )
                                         Text(
-                                            text = currentOrder.deliveryName.ifBlank { "Searching for nearby courier..." },
+                                            text = currentOrder.deliveryName.ifBlank { if (currentOrder.deliveryId.isBlank()) "Courier not assigned yet" else "Courier details unavailable" },
                                             style = MaterialTheme.typography.titleMedium,
                                             color = MaterialTheme.colorScheme.onSecondaryContainer
                                         )
@@ -186,16 +227,20 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                         }
                     }
 
-                    // Delivery Address Details
+                    // Keep the destination distinct from the merchant pickup address.
                     item {
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text("Delivery Address", style = MaterialTheme.typography.titleSmall)
-                                Spacer(modifier = Modifier.height(4.dp))
+                            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Drop-off address", style = MaterialTheme.typography.titleSmall)
                                 Text(
-                                    text = currentOrder.pickupLocation.ifBlank { "Address not provided" },
+                                    text = currentOrder.dropoffLocation.ifBlank { "Drop-off address not provided" },
                                     style = MaterialTheme.typography.bodyMedium
                                 )
+                                if (currentOrder.pickupLocation.isNotBlank()) {
+                                    HorizontalDivider()
+                                    Text("Pickup location", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(currentOrder.pickupLocation, style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }
