@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  payoutTransferReferenceIndexKey,
   PayoutTransferReferenceError,
   resolvePayoutTransferReference,
 } from "./payout-transfer-reference.js";
 
 describe("resolvePayoutTransferReference", () => {
+  it("creates a case-insensitive stable key for reference uniqueness", () => {
+    expect(payoutTransferReferenceIndexKey(" BDO-12345 ")).toBe(payoutTransferReferenceIndexKey("bdo-12345"));
+    expect(payoutTransferReferenceIndexKey("BDO-12345")).not.toBe(payoutTransferReferenceIndexKey("BDO-12346"));
+  });
   it("requires a reference before an approved payout enters processing", () => {
     expect(() => resolvePayoutTransferReference("APPROVED", undefined, " "))
       .toThrowError(PayoutTransferReferenceError);
@@ -30,6 +35,11 @@ describe("resolvePayoutTransferReference", () => {
   it("fails closed when an interrupted PAYING record has no reference", () => {
     expect(() => resolvePayoutTransferReference("PAYING", undefined, "BDO-12345"))
       .toThrowError(/without a saved transfer reference/);
+  });
+
+  it("rejects malformed and undersized references", () => {
+    expect(() => resolvePayoutTransferReference("APPROVED", undefined, "abc")).toThrowError(/valid transfer reference/);
+    expect(() => resolvePayoutTransferReference("APPROVED", undefined, "BDO 123")).toThrowError(/valid transfer reference/);
   });
 
   it("rejects oversized references", () => {
