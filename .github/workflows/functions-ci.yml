@@ -29,5 +29,7 @@ jobs:
         run: npm install
       - name: Run Firebase Functions tests
         run: npm test
+      - name: Run RTDB transaction tests against the emulator
+        run: npx --yes firebase-tools@14 emulators:exec --only database --project demo-labmda --config ../firebase.test.json "npm run test:emulator"
       - name: Build Firebase Functions
         run: npm run build

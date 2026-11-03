@@ -18,10 +18,12 @@ function pesos(minor: unknown, label: string): number {
   if (!Number.isSafeInteger(minor) || (minor as number) < 0) throw new HttpsError("failed-precondition", `The quoted ${label} is invalid.`);
   return (minor as number) / 100;
 }
-async function claimQuote(quoteId: string, uid: string, kind: string) {
-  if (!idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
-  const ref = db().ref(`pricing/quotes/${quoteId}`);
+export async function claimQuote(ref: Reference, uid: string, kind: string) {
+  const quoteId = ref.key;
+  if (!quoteId || !idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
   const result = await ref.transaction((quote: Record<string, any> | null) => {
+    // An initial null cache value must be preserved so RTDB retries with server data.
+    if (quote === null) return null;
     if (!isQuoteClaimable(quote, uid, kind, Date.now())) return;
     return { ...quote, status: "CREATING", creationStartedAt: Date.now() };
   }, undefined, false);
@@ -30,7 +32,8 @@ async function claimQuote(quoteId: string, uid: string, kind: string) {
 }
 async function restoreQuote(ref: Reference, quote: Record<string, any>) {
   await ref.transaction((current: Record<string, any> | null) => {
-    if (!current || current.status !== "CREATING" || current.creationStartedAt !== quote.creationStartedAt) return;
+    if (current === null) return null;
+    if (current.status !== "CREATING" || current.creationStartedAt !== quote.creationStartedAt) return;
     return { ...current, status: "QUOTED", creationStartedAt: null };
   }, undefined, false);
 }
@@ -40,7 +43,8 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
   const uid = uidOrThrow(call.auth?.uid);
   const quoteId = requiredText(call.data?.quoteId, "Quote ID");
   const kind = call.data?.kind === "SHOP" ? "SHOP" : "FOOD";
-  const { ref, quote } = await claimQuote(quoteId, uid, kind);
+  const ref = db().ref(`pricing/quotes/${quoteId}`);
+  const { quote } = await claimQuote(ref, uid, kind);
   try {
     const sourceId = requiredText(quote.sourceId, "Merchant");
     const root = kind === "FOOD" ? "restaurants" : "shops";
@@ -112,7 +116,8 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
 export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidOrThrow(call.auth?.uid);
   const quoteId = requiredText(call.data?.quoteId, "Quote ID");
-  const { ref, quote } = await claimQuote(quoteId, uid, "RIDE");
+  const ref = db().ref(`pricing/quotes/${quoteId}`);
+  const { quote } = await claimQuote(ref, uid, "RIDE");
   try {
     const request = quote.request ?? {};
     const breakdown = quote.breakdown ?? {};
@@ -173,7 +178,8 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
 export const createDeliveryFromQuote = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = uidOrThrow(call.auth?.uid);
   const quoteId = requiredText(call.data?.quoteId, "Quote ID");
-  const { ref, quote } = await claimQuote(quoteId, uid, "DELIVERY");
+  const ref = db().ref(`pricing/quotes/${quoteId}`);
+  const { quote } = await claimQuote(ref, uid, "DELIVERY");
   try {
     const request = quote.request ?? {};
     const breakdown = quote.breakdown ?? {};

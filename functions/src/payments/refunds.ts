@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { SimulatedPaymentRefundProvider, isSimulationRuntime } from "./provider.js";
+import { commitSimulatedRefund } from "./refund-transaction.js";
 
 function requireUser(uid?: string): string {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in to request a refund.");
@@ -43,23 +44,9 @@ export const createSimulatedGcashRefund = onCall({ enforceAppCheck: true }, asyn
     provider: providerRefund.provider, providerRefundId: providerRefund.providerRefundId,
     simulationOnly: true, createdAt: now, updatedAt: now, completedAt: now,
   };
-  const result = await db.ref().transaction((root: Record<string, any> | null) => {
-    if (!root) return;
-    const current = root.paymentSessions?.[sessionId];
-    if (!current || current.payerId !== uid || current.status !== "SUCCEEDED"
-      || current.provider !== "SIMULATED" || current.simulationOnly !== true) return;
-    const refunded = current.refundedAmountMinor ?? 0;
-    if (!Number.isSafeInteger(refunded) || refunded + amountMinor > current.amountMinor) return;
-    if (root.paymentRefunds?.[refundId]) return;
-    return {
-      ...root,
-      paymentSessions: {
-        ...root.paymentSessions,
-        [sessionId]: { ...current, refundedAmountMinor: refunded + amountMinor, updatedAt: now },
-      },
-      paymentRefunds: { ...(root.paymentRefunds ?? {}), [refundId]: refund },
-    };
-  }, undefined, false);
+  const result = await commitSimulatedRefund(db, {
+    sessionId, uid, amountMinor, now, refundId, refund,
+  });
   if (!result.committed) throw new HttpsError("failed-precondition", "The refund exceeds the remaining refundable amount or the session is no longer refundable.");
   return { refundId, status: refund.status, amountMinor, currency: "PHP", simulationOnly: true };
 });
