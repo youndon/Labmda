@@ -70,12 +70,19 @@ data class PaymentCheckoutUiModel(
     val status: PaymentUiStatus = PaymentUiStatus.READY,
     val checkoutUrl: String = "",
     val message: String = "",
-    val simulationOnly: Boolean = false
+    val simulationOnly: Boolean = false,
+    val availableMethods: Set<PaymentMethod> = setOf(PaymentMethod.GCASH, PaymentMethod.CASH),
+    val summaryLines: List<PaymentSummaryLine> = emptyList()
 ) {
     init {
         require(amountMinor >= 0L) { "Payment amount cannot be negative." }
     }
 }
+
+data class PaymentSummaryLine(
+    val label: String,
+    val amountMinor: Long
+)
 
 data class PaymentReceiptUiModel(
     val transactionId: String,
@@ -108,6 +115,7 @@ fun PaymentCheckoutScreen(
     val amount = remember(model.amountMinor) { formatPhpMinor(model.amountMinor) }
     val busy = model.status == PaymentUiStatus.CREATING_SESSION ||
         model.status == PaymentUiStatus.PROCESSING
+    val selectedMethodAvailable = model.paymentMethod in model.availableMethods
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -160,6 +168,21 @@ fun PaymentCheckoutScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    if (model.summaryLines.isNotEmpty()) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                        model.summaryLines.forEach { line ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(line.label, style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(formatPhpMinor(line.amountMinor), style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -192,7 +215,7 @@ fun PaymentCheckoutScreen(
                 title = "GCash",
                 description = "Pay online using your GCash account.",
                 selected = model.paymentMethod == PaymentMethod.GCASH,
-                enabled = model.status == PaymentUiStatus.READY,
+                enabled = model.status == PaymentUiStatus.READY && PaymentMethod.GCASH in model.availableMethods,
                 icon = {
                     Icon(
                         Icons.Default.Wallet,
@@ -206,7 +229,7 @@ fun PaymentCheckoutScreen(
                 title = "Cash",
                 description = "Pay the assigned courier or driver in person.",
                 selected = model.paymentMethod == PaymentMethod.CASH,
-                enabled = model.status == PaymentUiStatus.READY,
+                enabled = model.status == PaymentUiStatus.READY && PaymentMethod.CASH in model.availableMethods,
                 icon = {
                     Icon(
                         Icons.Default.AccountBalanceWallet,
@@ -217,13 +240,17 @@ fun PaymentCheckoutScreen(
                 onClick = { onPaymentMethodSelected(PaymentMethod.CASH) }
             )
 
-            if (model.paymentMethod == PaymentMethod.CASH) {
+            if (model.availableMethods.isEmpty()) {
+                InfoPanel("No payment methods are currently available for this transaction. Please return later.")
+            } else if (!selectedMethodAvailable) {
+                InfoPanel("The selected payment method is unavailable for this transaction. Choose another enabled method.")
+            } else if (model.paymentMethod == PaymentMethod.CASH) {
                 InfoPanel(
-                    text = "Your payment stays pending until the assigned courier or driver confirms that cash was collected."
+                    text = "Cash remains due until the assigned collector confirms collection. Do not treat order completion as a cash receipt."
                 )
             } else {
                 InfoPanel(
-                    text = "You'll continue to BDO Checkout. Select GCash on the payment page and wait for Labmda to show verified payment status."
+                    text = "Continue to the secure GCash payment page. Returning to Labmda does not confirm payment; wait for verified status."
                 )
             }
 
@@ -241,13 +268,13 @@ fun PaymentCheckoutScreen(
             when (model.status) {
                 PaymentUiStatus.READY -> Button(
                     onClick = onConfirmPayment,
-                    enabled = model.amountMinor > 0L,
+                    enabled = model.amountMinor > 0L && selectedMethodAvailable,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp)
                 ) {
                     Text(
-                        if (model.paymentMethod == PaymentMethod.GCASH) "Continue to BDO Checkout" else "Confirm cash order",
+                        if (model.paymentMethod == PaymentMethod.GCASH) "Continue to GCash payment" else "Confirm cash payment",
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -258,7 +285,7 @@ fun PaymentCheckoutScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(14.dp)
                         ) {
-                            Text("Open BDO Checkout", fontWeight = FontWeight.Bold)
+                            Text("Open GCash payment", fontWeight = FontWeight.Bold)
                         }
                     } else {
                         OutlinedButton(
@@ -285,7 +312,7 @@ fun PaymentCheckoutScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Text("Back to checkout")
+                    Text("Return to order")
                 }
                 PaymentUiStatus.CREATING_SESSION,
                 PaymentUiStatus.PROCESSING -> Button(
@@ -448,130 +475,6 @@ private data class StatusPresentation(
     val tint: Color
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PaymentReceiptScreen(
-    receipt: PaymentReceiptUiModel,
-    onBack: () -> Unit,
-    onDone: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val amount = remember(receipt.amountMinor) { formatPhpMinor(receipt.amountMinor) }
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Payment receipt", fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        }
-    ) { insets ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(insets)
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            Icon(
-                if (receipt.status == PaymentUiStatus.SUCCEEDED) Icons.Default.CheckCircle else Icons.Default.ReceiptLong,
-                contentDescription = null,
-                modifier = Modifier.size(56.dp),
-                tint = if (receipt.status == PaymentUiStatus.SUCCEEDED) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                if (receipt.status == PaymentUiStatus.SUCCEEDED) "Payment confirmed" else "Payment details",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                amount,
-                style = MaterialTheme.typography.headlineLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(13.dp)
-                ) {
-                    ReceiptRow("Status", receipt.status.toReceiptLabel())
-                    ReceiptRow("Payment method", receipt.paymentMethod.toReceiptLabel())
-                    ReceiptRow("Description", receipt.description)
-                    ReceiptRow("Reference", receipt.reference)
-                    ReceiptRow("Transaction ID", receipt.transactionId)
-                    if (receipt.providerReference.isNotBlank()) {
-                        ReceiptRow("Provider reference", receipt.providerReference)
-                    }
-                    ReceiptRow("Date", receipt.dateLabel)
-                }
-            }
-            Text(
-                "Keep this receipt for your records.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            Button(
-                onClick = onDone,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Text("Done", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReceiptRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top
-    ) {
-        Text(
-            label,
-            modifier = Modifier.weight(0.8f),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            value.ifBlank { "—" },
-            modifier = Modifier.weight(1.2f),
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.End
-        )
-    }
-}
-
-private fun PaymentUiStatus.toReceiptLabel(): String = when (this) {
-    PaymentUiStatus.READY -> "Not paid"
-    PaymentUiStatus.CREATING_SESSION -> "Preparing"
-    PaymentUiStatus.PENDING -> "Pending"
-    PaymentUiStatus.PROCESSING -> "Processing"
-    PaymentUiStatus.SUCCEEDED -> "Paid"
-    PaymentUiStatus.FAILED -> "Failed"
-    PaymentUiStatus.CANCELLED -> "Cancelled"
-    PaymentUiStatus.EXPIRED -> "Expired"
-}
-
-private fun PaymentMethod.toReceiptLabel(): String = when (this) {
-    PaymentMethod.GCASH -> "GCash"
-    PaymentMethod.CASH -> "Cash"
-}
 
 private fun formatPhpMinor(amountMinor: Long): String {
     val formatter = NumberFormat.getCurrencyInstance(Locale("en", "PH"))
