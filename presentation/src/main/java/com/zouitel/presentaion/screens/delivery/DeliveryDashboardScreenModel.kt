@@ -11,6 +11,7 @@ import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,7 +45,9 @@ class DeliveryDashboardScreenModel : ScreenModel {
         screenModelScope.launch(Dispatchers.IO) {
             val uid = currentUid ?: run { _isLoading.value = false; return@launch }
             val openOrders = db.child("orders").orderByChild("status").equalTo("OUT_FOR_DELIVERY").valueEvents
+                .catch { _isLoading.value = false }
             val assignedOrders = db.child("orders").orderByChild("deliveryId").equalTo(uid).valueEvents
+                .catch { _isLoading.value = false }
             combine(openOrders, assignedOrders) { open, assigned ->
                 (open.children + assigned.children).associateBy { it.key }.values.toList()
             }.collect { children ->

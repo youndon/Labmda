@@ -7,6 +7,7 @@ import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.auth.auth
 import dev.gitlive.firebase.database.database
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,7 +38,9 @@ class DriverDashboardScreenModel : ScreenModel {
     private fun listenToOnlineState() {
         val uid = currentUser?.uid ?: return
         screenModelScope.launch {
-            db.child("users").child(uid).child("driverService").child("isOnline").valueEvents.collect { snap ->
+            db.child("users").child(uid).child("driverService").child("isOnline").valueEvents
+                .catch { _isOnline.value = false }
+                .collect { snap ->
                 _isOnline.value = runCatching { snap.value<Boolean>() }.getOrDefault(false)
             }
         }
@@ -67,7 +70,9 @@ class DriverDashboardScreenModel : ScreenModel {
 
         screenModelScope.launch {
             val requestedTrips = db.child("trips").orderByChild("status").equalTo("REQUESTED").valueEvents
+                .catch { _isLoading.value = false }
             val assignedTrips = db.child("trips").orderByChild("driverId").equalTo(uid).valueEvents
+                .catch { _isLoading.value = false }
             combine(requestedTrips, assignedTrips) { requested, assigned ->
                 (requested.children + assigned.children).associateBy { it.key }.values.toList()
             }.collect { children ->
