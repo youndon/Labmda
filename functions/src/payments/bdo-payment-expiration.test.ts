@@ -34,7 +34,7 @@ describe("expireBdoGcashPaymentRecord", () => {
   it("expires a portal-verified unpaid BDO order and closes its customer transaction", async () => {
     const fake = fakeDatabase({
       payments: { pay_1: { ...payment } },
-      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT" } },
+      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT", amountMinor: 12500 } },
     });
     const result = await expireBdoGcashPaymentRecord(fake.database, input);
     expect(result).toMatchObject({ paymentId: "pay_1", status: "EXPIRED", duplicate: false });
@@ -46,7 +46,7 @@ describe("expireBdoGcashPaymentRecord", () => {
   it("expires a pending ride and removes its active dispatch request", async () => {
     const fake = fakeDatabase({
       payments: { pay_1: { ...payment, transactionType: "RIDE", orderId: "", tripId: "trip_1" } },
-      trips: { trip_1: { id: "trip_1", paymentId: "pay_1", passengerId: "passenger_1", status: "PENDING_PAYMENT" } },
+      trips: { trip_1: { id: "trip_1", paymentId: "pay_1", passengerId: "passenger_1", status: "PENDING_PAYMENT", customerTotalMinor: 12500 } },
       activeRideRequests: { passenger_1: { trip_1: { status: "REQUESTED" } } },
     });
     await expireBdoGcashPaymentRecord(fake.database, input);
@@ -76,7 +76,7 @@ describe("expireBdoGcashPaymentRecord", () => {
   it("refuses mismatched order references and reused closure references", async () => {
     const mismatched = fakeDatabase({
       payments: { pay_1: { ...payment } },
-      orders: { order_1: { id: "order_1", paymentId: "other_payment", status: "PENDING_PAYMENT" } },
+      orders: { order_1: { id: "order_1", paymentId: "other_payment", status: "PENDING_PAYMENT", amountMinor: 12500 } },
     });
     await expect(expireBdoGcashPaymentRecord(mismatched.database, input)).rejects.toThrow(/could not be safely expired/i);
     const key = createHash("sha256").update(input.closureReference.toUpperCase()).digest("hex");
@@ -88,8 +88,17 @@ describe("expireBdoGcashPaymentRecord", () => {
     await expect(expireBdoGcashPaymentRecord(duplicateReference.database, input)).rejects.toThrow(/could not be safely expired/i);
   });
 
+  it("rejects an order whose stored total differs from the BDO payment", async () => {
+    const fake = fakeDatabase({
+      payments: { pay_1: { ...payment } },
+      orders: { order_1: { id: "order_1", paymentId: "pay_1", status: "PENDING_PAYMENT", amountMinor: 12499 } },
+    });
+    await expect(expireBdoGcashPaymentRecord(fake.database, input)).rejects.toThrow(/could not be safely expired/i);
+    expect(fake.value().payments.pay_1.status).toBe("PENDING");
+  });
+
   it("rejects malformed expiry evidence", async () => {
-    const fake = fakeDatabase({ payments: { pay_1: { ...payment } }, orders: { order_1: { paymentId: "pay_1", status: "PENDING_PAYMENT" } } });
+    const fake = fakeDatabase({ payments: { pay_1: { ...payment } }, orders: { order_1: { paymentId: "pay_1", status: "PENDING_PAYMENT", amountMinor: 12500 } } });
     await expect(expireBdoGcashPaymentRecord(fake.database, { ...input, reason: "bad" })).rejects.toThrow(/details are invalid/i);
   });
 });
