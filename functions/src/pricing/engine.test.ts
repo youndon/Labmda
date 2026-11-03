@@ -20,8 +20,13 @@ describe("PHP pricing engine", () => {
     });
   });
   it("calculates ride fare and driver earnings", () => {
-    expect(calculateRideFare(config.ride, { distanceMeters: 2100, durationSeconds: 601 })).toEqual({
+    expect(calculateRideFare({ ...config.ride, vehicleMultipliersBps: {} }, { distanceMeters: 2100, durationSeconds: 601 })).toEqual({
       fareMinor: 9720, platformCommissionMinor: 1458, driverEarningsMinor: 8262,
+    });
+  });
+  it("applies the selected vehicle multiplier before calculating the platform split", () => {
+    expect(calculateRideFare({ ...config.ride, vehicleMultipliersBps: {} }, { distanceMeters: 2100, durationSeconds: 601 }, 15000)).toEqual({
+      fareMinor: 14580, platformCommissionMinor: 2187, driverEarningsMinor: 12393,
     });
   });
   it("separates merchant-funded discount, platform commission and courier earnings", () => {
