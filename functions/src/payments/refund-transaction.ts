@@ -3,7 +3,7 @@ import type { Database } from "firebase-admin/database";
 export interface SimulatedRefundRecord {
   id: string; sessionId: string; paymentId: string; requestedBy: string;
   amountMinor: number; currency: "PHP"; reason: string; status: string;
-  provider: string; providerRefundId: string; simulationOnly: true;
+  provider: string; providerRefundId: string; simulationOnly: boolean;
   createdAt: number; updatedAt: number; completedAt: number;
 }
 

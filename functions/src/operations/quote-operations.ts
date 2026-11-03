@@ -14,6 +14,10 @@ function requiredText(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) throw new HttpsError("invalid-argument", `${label} is required.`);
   return value.trim();
 }
+function quoteReference(quoteId: string): Reference {
+  if (!idPattern.test(quoteId)) throw new HttpsError("invalid-argument", "Quote ID is invalid.");
+  return db().ref(`pricing/quotes/${quoteId}`);
+}
 function pesos(minor: unknown, label: string): number {
   if (!Number.isSafeInteger(minor) || (minor as number) < 0) throw new HttpsError("failed-precondition", `The quoted ${label} is invalid.`);
   return (minor as number) / 100;
@@ -43,7 +47,7 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
   const uid = uidOrThrow(call.auth?.uid);
   const quoteId = requiredText(call.data?.quoteId, "Quote ID");
   const kind = call.data?.kind === "SHOP" ? "SHOP" : "FOOD";
-  const ref = db().ref(`pricing/quotes/${quoteId}`);
+  const ref = quoteReference(quoteId);
   const { quote } = await claimQuote(ref, uid, kind);
   try {
     const sourceId = requiredText(quote.sourceId, "Merchant");
