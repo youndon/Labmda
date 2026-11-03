@@ -65,6 +65,8 @@ class ShopsScreenModel : ScreenModel {
                             val category: String = child.child("category").value()
                             val phone: String = child.child("phone").value()
                             val address: String = child.child("address").value()
+                            val latitude = runCatching { child.child("latitude").value<Double>() }.getOrDefault(0.0)
+                            val longitude = runCatching { child.child("longitude").value<Double>() }.getOrDefault(0.0)
                             val imageUrl: String = child.child("imageUrl").value()
                             val statusStr: String = child.child("status").value()
                             val createdAtTimestamp: Long = child.child("createdAtTimestamp").value()
@@ -82,6 +84,8 @@ class ShopsScreenModel : ScreenModel {
                                 category = category,
                                 phone = phone,
                                 address = address,
+                                latitude = latitude,
+                                longitude = longitude,
                                 imageUrl = imageUrl,
                                 status = status,
                                 createdAtTimestamp = createdAtTimestamp,

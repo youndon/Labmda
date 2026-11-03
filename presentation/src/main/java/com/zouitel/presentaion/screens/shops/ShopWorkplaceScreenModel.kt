@@ -76,6 +76,8 @@ class ShopWorkplaceScreenModel : ScreenModel {
                             category = category,
                             phone = phone,
                             address = address,
+                            latitude = runCatching { child.child("latitude").value<Double>() }.getOrDefault(0.0),
+                            longitude = runCatching { child.child("longitude").value<Double>() }.getOrDefault(0.0),
                             imageUrl = imageUrl,
                             status = status,
                             createdAtTimestamp = createdAtTimestamp,
@@ -160,7 +162,9 @@ class ShopWorkplaceScreenModel : ScreenModel {
         phone: String,
         address: String,
         imageUrl: String,
-        isOnline: Boolean
+        isOnline: Boolean,
+        latitude: Double,
+        longitude: Double
     ) {
         if (auth.currentUser?.uid == null) return
         _isLoading.value = true
@@ -176,6 +180,8 @@ class ShopWorkplaceScreenModel : ScreenModel {
                         "phone" to phone,
                         "address" to address,
                         "imageUrl" to imageUrl,
+                        "latitude" to latitude,
+                        "longitude" to longitude,
                         "isOnline" to false
                     )
                 )
@@ -192,7 +198,9 @@ class ShopWorkplaceScreenModel : ScreenModel {
         category: String,
         phone: String,
         address: String,
-        imageUrl: String
+        imageUrl: String,
+        latitude: Double,
+        longitude: Double
     ) {
         _isLoading.value = true
         screenModelScope.launch {
@@ -202,7 +210,9 @@ class ShopWorkplaceScreenModel : ScreenModel {
                 "category" to category,
                 "phone" to phone,
                 "address" to address,
-                "imageUrl" to imageUrl
+                "imageUrl" to imageUrl,
+                "latitude" to latitude,
+                "longitude" to longitude
             )
             db.child("shops").child(shopId).updateChildren(updates)
             _isLoading.value = false

@@ -51,8 +51,8 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
         var imageUrl by remember { mutableStateOf(existingShop?.imageUrl ?: "") }
         var isOnline by remember { mutableStateOf(existingShop?.isOnline ?: false) }
 
-        var storeLat by remember { mutableStateOf<Double?>(null) }
-        var storeLng by remember { mutableStateOf<Double?>(null) }
+        var storeLat by remember { mutableStateOf(existingShop?.latitude?.takeIf { it != 0.0 }) }
+        var storeLng by remember { mutableStateOf(existingShop?.longitude?.takeIf { it != 0.0 }) }
         var showMapPicker by remember { mutableStateOf(false) }
 
         val imageUpload by screenModel.imageUpload.collectAsState()
@@ -176,7 +176,9 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                                     category = category,
                                     phone = phone,
                                     address = address,
-                                    imageUrl = imageUrl
+                                    imageUrl = imageUrl,
+                                    latitude = storeLat ?: existingShop.latitude,
+                                    longitude = storeLng ?: existingShop.longitude
                                 )
                             } else {
                                 screenModel.submitShopApplication(
@@ -186,12 +188,14 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
                                     phone = phone,
                                     address = address,
                                     imageUrl = imageUrl,
-                                    isOnline = isOnline
+                                    isOnline = isOnline,
+                                    latitude = storeLat ?: Double.NaN,
+                                    longitude = storeLng ?: Double.NaN
                                 )
                             }
                             navigator?.pop()
                         },
-                        enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank() && !isUploading,
+                        enabled = name.isNotBlank() && phone.isNotBlank() && address.isNotBlank() && storeLat != null && storeLng != null && !isUploading,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().height(52.dp)
                     ) {

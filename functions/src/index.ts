@@ -4,6 +4,7 @@ import { getDatabase } from "firebase-admin/database";
 import { defineSecret } from "firebase-functions/params";
 import { assertPaymentMethodEnabled, assertPaymentServiceEnabled } from "./payments/payment-config.js";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { requireMerchantPickup } from "./operations/merchant-location.js";
 import {
   calculateDeliveryOnlyBreakdown, calculateOrderBreakdown, calculateRideFare, calculateProviderFee,
   decimalPesosToMinor, type DiscountRule, type PaymentMethod, type PricingConfig,
@@ -97,13 +98,21 @@ async function quoteOrder(kind: "FOOD" | "SHOP", uid: string, data: Record<strin
   if (!sourceId || !Array.isArray(items) || items.length === 0 || items.length > 50) {
     throw new HttpsError("invalid-argument", "A source and 1–50 order items are required.");
   }
-  const request = data as unknown as QuoteRequest;
-  const [config, route, discount] = await Promise.all([loadConfig(), routeMetrics(request), loadDiscount(data.discountCode as string | undefined)]);
+  const clientRequest = data as unknown as QuoteRequest;
+  validatePoint(clientRequest.dropoff, "Drop-off");
   const root = kind === "FOOD" ? "restaurants" : "shops";
   const collection = kind === "FOOD" ? "meals" : "products";
   const sourceSnapshot = await database.ref(`${root}/${sourceId}`).get();
   if (!sourceSnapshot.exists()) throw new HttpsError("not-found", "The selected merchant was not found.");
   if (kind === "FOOD" && sourceSnapshot.child("isOpen").val() === false) throw new HttpsError("failed-precondition", "This restaurant is currently closed.");
+  const storedLatitude = sourceSnapshot.child("latitude").val();
+  const storedLongitude = sourceSnapshot.child("longitude").val();
+  if (typeof storedLatitude !== "number" || typeof storedLongitude !== "number") {
+    throw new HttpsError("failed-precondition", "This merchant has no verified pickup location. Contact the merchant before ordering.");
+  }
+  const pickup = requireMerchantPickup(storedLatitude, storedLongitude);
+  const request: QuoteRequest = { ...clientRequest, pickup };
+  const [config, route, discount] = await Promise.all([loadConfig(), routeMetrics(request), loadDiscount(data.discountCode as string | undefined)]);
   let subtotalMinor = 0;
   const pricedItems: Array<{ itemId: string; name: string; quantity: number; unitPriceMinor: number; lineTotalMinor: number }> = [];
   for (const line of items) {

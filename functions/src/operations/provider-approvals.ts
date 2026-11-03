@@ -84,9 +84,13 @@ export const submitShopApplication = onCall({ enforceAppCheck: true }, async (ca
   const phone = typeof data.phone === "string" ? data.phone.trim() : "";
   const address = typeof data.address === "string" ? data.address.trim() : "";
   const imageUrl = typeof data.imageUrl === "string" ? data.imageUrl.trim() : "";
+  const latitude = data.latitude;
+  const longitude = data.longitude;
   if (name.length < 2 || name.length > 100 || description.length > 1000
     || category.length < 2 || category.length > 60 || phone.length < 5 || phone.length > 30
     || address.length < 5 || address.length > 300
+    || typeof latitude !== "number" || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
+    || typeof longitude !== "number" || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
     || (imageUrl && !/^https:\/\//i.test(imageUrl))) {
     throw new HttpsError("invalid-argument", "Shop application details are invalid.");
   }
@@ -102,6 +106,7 @@ export const submitShopApplication = onCall({ enforceAppCheck: true }, async (ca
   const shopId = randomUUID();
   await db().ref(`shops/${shopId}`).set({
     id: shopId, ownerUid: uid, name, description, category, phone, address, imageUrl,
+    latitude, longitude,
     status: "PENDING", createdAtTimestamp: Date.now(), isOnline: false,
   });
   await db().ref(`users/${uid}`).update({ shopStatus: "PENDING", shopMode: "CLIENT" });

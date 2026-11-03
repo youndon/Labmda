@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase, type Reference } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { isQuoteClaimable } from "./quote-guards.js";
+import { assertQuotePickupMatches, requireMerchantPickup } from "./merchant-location.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -61,6 +62,10 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
       || String(source.child("managerId").val() ?? "").trim()
       || sourceId;
     const request = quote.request ?? {};
+    const pickup = requireMerchantPickup(source.child("latitude").val(), source.child("longitude").val());
+    assertQuotePickupMatches(request.pickup, pickup);
+    const pickupLat = pickup.latitude;
+    const pickupLng = pickup.longitude;
     const items = Array.isArray(quote.items) ? quote.items : [];
     if (!items.length) throw new HttpsError("failed-precondition", "The quote contains no order items.");
     const breakdown = quote.breakdown ?? {};
@@ -87,9 +92,9 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
       providerFeePayer: method === "GCASH" ? String((await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() ?? "PLATFORM") : "PLATFORM",
       paymentStatus: method === "GCASH" ? "PENDING" : "CASH_DUE",
       paymentMethod: method, paymentProvider: method === "GCASH" ? "BDO_CHECKOUT" : "CASH", quoteId,
-      pickupLocation: String(request.pickupAddress ?? source.child("address").val() ?? ""),
-      pickupLat: Number(request.pickup?.latitude ?? source.child("latitude").val() ?? 0),
-      pickupLng: Number(request.pickup?.longitude ?? source.child("longitude").val() ?? 0),
+      pickupLocation: String(source.child("address").val() ?? ""),
+      pickupLat,
+      pickupLng,
       dropoffLocation: String(request.dropoffAddress ?? ""),
       dropoffLat: Number(request.dropoff?.latitude ?? 0),
       dropoffLng: Number(request.dropoff?.longitude ?? 0),
