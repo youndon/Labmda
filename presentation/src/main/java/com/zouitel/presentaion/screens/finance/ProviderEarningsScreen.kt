@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.finance
 
+import com.zouitel.presentaion.common.LabmdaAlertDialog
+
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
@@ -21,7 +23,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Wallet
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -368,7 +369,7 @@ class ProviderEarningsScreen : Screen {
         }
 
         selectedTransaction?.let { transaction ->
-            AlertDialog(
+            LabmdaAlertDialog(
                 onDismissRequest = { selectedTransaction = null },
                 title = { Text(transaction.eventType.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }) },
                 text = {
@@ -423,7 +424,7 @@ private fun PayoutProfileDialog(
     var accountName by remember { mutableStateOf(initialName) }
     var accountNumber by remember { mutableStateOf("") }
 
-    AlertDialog(
+    LabmdaAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Payout destination") },
         text = {
