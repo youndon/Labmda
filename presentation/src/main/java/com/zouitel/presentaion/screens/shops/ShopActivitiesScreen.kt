@@ -1,13 +1,16 @@
 package com.zouitel.presentaion.screens.shops
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,11 +34,39 @@ class ShopActivitiesScreen : Screen {
         val screenModel = rememberScreenModel { ShopActivitiesScreenModel() }
         val activities by screenModel.activities.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        var searchQuery by remember { mutableStateOf("") }
+        var selectedFilter by remember { mutableStateOf("All") }
+
+        val filters = listOf("All", "Active", "Completed", "Cancelled")
+        val filteredActivities = remember(activities, searchQuery, selectedFilter) {
+            val query = searchQuery.trim().lowercase()
+            activities.filter { order ->
+                val matchesSearch = query.isBlank() || listOf(
+                    order.id,
+                    order.sourceName,
+                    order.paymentMethod,
+                    order.items.joinToString(" ") { it.name }
+                ).any { it.lowercase().contains(query) }
+                val matchesStatus = when (selectedFilter) {
+                    "Active" -> order.status in setOf(
+                        OrderStatus.PENDING_PAYMENT,
+                        OrderStatus.PLACED,
+                        OrderStatus.ACCEPTED,
+                        OrderStatus.PREPARING,
+                        OrderStatus.OUT_FOR_DELIVERY
+                    )
+                    "Completed" -> order.status == OrderStatus.DELIVERED
+                    "Cancelled" -> order.status == OrderStatus.CANCELLED
+                    else -> true
+                }
+                matchesSearch && matchesStatus
+            }
+        }
 
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("My Store Order Activities", fontWeight = FontWeight.Bold) },
+                    title = { Text("My shop orders", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -44,33 +75,98 @@ class ShopActivitiesScreen : Screen {
                 )
             }
         ) { paddingValues ->
-            if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            } else if (activities.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "You have no active store orders right now.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                }
-            } else {
-                LazyColumn(
+            when {
+                isLoading -> Box(
                     modifier = Modifier.fillMaxSize().padding(paddingValues),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    contentAlignment = Alignment.Center
+                ) { CircularProgressIndicator() }
+                activities.isEmpty() -> EmptyActivitiesState(
+                    title = "No shop orders yet",
+                    message = "Orders you place with shops will appear here.",
+                    modifier = Modifier.fillMaxSize().padding(paddingValues)
+                )
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(paddingValues),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(activities, key = { it.id }) { order ->
-                        ClientActivityCard(
-                            order = order,
-                            onTrackOrder = { navigator?.push(LiveOrderTrackingScreen(order.id)) },
-                            onCancelOrder = { screenModel.cancelShopOrder(order.id) }
-                        )
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                "Your shopping activity",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "${filteredActivities.size} of ${activities.size} orders",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(14.dp),
+                                placeholder = { Text("Search shop, order or product") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        TextButton(onClick = { searchQuery = "" }) { Text("Clear") }
+                                    }
+                                }
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                filters.forEach { filter ->
+                                    FilterChip(
+                                        selected = selectedFilter == filter,
+                                        onClick = { selectedFilter = filter },
+                                        label = { Text(filter) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (filteredActivities.isEmpty()) {
+                        item {
+                            EmptyActivitiesState(
+                                title = "No matching orders",
+                                message = "Try another search or select a different order filter.",
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp)
+                            )
+                        }
+                    } else {
+                        items(filteredActivities, key = { it.id }) { order ->
+                            ClientActivityCard(
+                                order = order,
+                                onTrackOrder = { navigator?.push(LiveOrderTrackingScreen(order.id)) },
+                                onCancelOrder = { screenModel.cancelShopOrder(order.id) }
+                            )
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun EmptyActivitiesState(title: String, message: String, modifier: Modifier = Modifier) {
+        Box(modifier = modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
             }
         }
     }
@@ -84,51 +180,68 @@ class ShopActivitiesScreen : Screen {
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(order.sourceName.ifBlank { "Store" }, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(order.sourceName.ifBlank { "Shop" }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Order #${order.id.takeLast(6).uppercase()}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Text(formattedDate, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-
-                Text("Demand #${order.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 StatusChip(order.status)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Text("Delivery Address: ${order.pickupLocation}", style = MaterialTheme.typography.bodyMedium)
-                Text("Payment Method: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "Payment · ${order.paymentMethod.ifBlank { "Cash on Delivery" }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text("Products (${order.items.sumOf { it.quantity }})", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                Text(
+                    "ITEMS · ${order.items.sumOf { it.quantity }}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 order.items.forEach { item ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
+                        Text("${item.quantity} × ${item.name}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                         Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                     }
                 }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Total Price", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                    Text("₱${"%.2f".format(order.totalPrice)}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Order total", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "₱${"%.2f".format(order.totalPrice)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = onTrackOrder,
                         shape = RoundedCornerShape(12.dp),
@@ -136,7 +249,7 @@ class ShopActivitiesScreen : Screen {
                     ) {
                         Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Track Status", fontWeight = FontWeight.Bold)
+                        Text("Track order", fontWeight = FontWeight.Bold)
                     }
 
                     if ((order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT) && order.paymentStatus != "PAID") {
@@ -161,20 +274,18 @@ class ShopActivitiesScreen : Screen {
         val (color, text) = when (status) {
             OrderStatus.PENDING_PAYMENT -> MaterialTheme.colorScheme.tertiary to "PAYMENT PENDING"
             OrderStatus.PLACED -> MaterialTheme.colorScheme.tertiary to "ORDER PLACED"
-            OrderStatus.ACCEPTED -> MaterialTheme.colorScheme.secondary to "CONFIRMED BY STORE"
-            OrderStatus.PREPARING -> MaterialTheme.colorScheme.primary to "IN PACKAGING"
-            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR COURIER"
+            OrderStatus.ACCEPTED -> MaterialTheme.colorScheme.secondary to "CONFIRMED BY SHOP"
+            OrderStatus.PREPARING -> MaterialTheme.colorScheme.primary to "BEING PREPARED"
+            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR DELIVERY"
             OrderStatus.DELIVERED -> MaterialTheme.colorScheme.outline to "DELIVERED"
             OrderStatus.CANCELLED -> MaterialTheme.colorScheme.error to "CANCELLED"
         }
-        Surface(
-            color = color.copy(alpha = 0.15f),
-            shape = RoundedCornerShape(8.dp)
-        ) {
+        Surface(color = color.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
             Text(
                 text = text,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
                 color = color
             )
         }
