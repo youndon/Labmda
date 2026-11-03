@@ -1,6 +1,12 @@
 package com.zouitel.presentaion.screens.finance
 
 import com.zouitel.presentaion.common.LabmdaAlertDialog
+import com.zouitel.presentaion.common.AppCard
+import com.zouitel.presentaion.common.AppCardContent
+import com.zouitel.presentaion.common.AppSectionTitle
+import com.zouitel.presentaion.common.AppSpacing
+import com.zouitel.presentaion.common.AppPrimaryButton
+import com.zouitel.presentaion.common.AppOutlinedButton
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -115,8 +121,8 @@ class ProviderEarningsScreen : Screen {
                 ) { CircularProgressIndicator() }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = AppSpacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
                 ) {
                     item {
                         Card(
@@ -124,7 +130,7 @@ class ProviderEarningsScreen : Screen {
                             shape = RoundedCornerShape(22.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                         ) {
-                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Column(Modifier.padding(AppSpacing.xl), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("Available to withdraw", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                 Text(
                                     formatPhp(earnings.totals.availableMinor),
@@ -148,12 +154,12 @@ class ProviderEarningsScreen : Screen {
                     }
 
                     item {
-                        Card(
+                        AppCard(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(18.dp),
+                            shape = MaterialTheme.shapes.extraLarge,
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.padding(AppSpacing.lg), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                         Text("Earnings analytics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -181,7 +187,7 @@ class ProviderEarningsScreen : Screen {
                     }
 
                     item {
-                        Card(
+                        AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
@@ -199,16 +205,14 @@ class ProviderEarningsScreen : Screen {
                                 } else {
                                     Text("Add a GCash wallet or BDO bank account to request a payout.", style = MaterialTheme.typography.bodyMedium)
                                 }
-                                OutlinedButton(onClick = { showProfileDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                                    Text(if (profile.configured) "Update payout destination" else "Set up payout destination")
-                                }
+                                AppOutlinedButton(text = if (profile.configured) "Update payout destination" else "Set up payout destination", onClick = { showProfileDialog = true }, modifier = Modifier.fillMaxWidth())
                             }
                         }
                     }
 
                     if (earnings.accounts.size > 1) {
                         item {
-                            Card(
+                            AppCard(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(18.dp),
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
@@ -233,7 +237,7 @@ class ProviderEarningsScreen : Screen {
                     }
 
                     item {
-                        Card(
+                        AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
@@ -249,13 +253,12 @@ class ProviderEarningsScreen : Screen {
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                                 )
-                                Button(
+                                AppPrimaryButton(
+                                    text = if (submitting) "Submitting…" else "Submit payout request",
                                     onClick = { model.requestPayout(payoutAmount, selectedAccountId) },
                                     enabled = profile.configured && selectedAccountId.isNotBlank() && !submitting && earnings.accounts.any { it.accountId == selectedAccountId && it.availableMinor > 0 },
                                     modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(if (submitting) "Submitting…" else "Submit payout request")
-                                }
+                                )
                             }
                         }
                     }
@@ -267,7 +270,7 @@ class ProviderEarningsScreen : Screen {
                     }
 
                     item {
-                        Text("Payout history", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        AppSectionTitle("Payout history", subtitle = "Track requests and transfer updates")
                     }
                     if (payouts.isEmpty()) {
                         item {
@@ -275,12 +278,12 @@ class ProviderEarningsScreen : Screen {
                         }
                     } else {
                         items(payouts, key = { it.payoutId }) { payout ->
-                            Card(
+                            AppCard(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
+                                shape = MaterialTheme.shapes.large,
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                             ) {
-                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Column(Modifier.padding(AppSpacing.md), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text(formatPhp(payout.amountMinor), fontWeight = FontWeight.Bold)
                                         Text(payout.status, color = when (payout.status) {
@@ -303,7 +306,7 @@ class ProviderEarningsScreen : Screen {
 
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Transaction history", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            AppSectionTitle("Transaction history", subtitle = "A detailed record of your provider activity")
                             Row(
                                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -401,9 +404,9 @@ class ProviderEarningsScreen : Screen {
 
 @Composable
 private fun BalanceTile(label: String, amountMinor: Long, modifier: Modifier = Modifier) {
-    Card(
+    AppCard(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
