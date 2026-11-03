@@ -3,6 +3,7 @@ import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations } from "../finance/payment-allocations.js";
 import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js";
+import { hasActiveBdoCheckoutRequest } from "../payments/payment-lifecycle-guards.js";
 import { createFinancialTransfer, getFinancialAccount, getFinancialOperation, postFinancialOperation } from "../finance/ledger.js";
 
 const db = () => getDatabase();
@@ -502,10 +503,13 @@ export const cancelPassengerTrip = onCall({ enforceAppCheck: true }, async (call
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const trip = root.trips?.[tripId] as Record<string, any> | undefined;
-    if (!trip || trip.passengerId !== uid || !["REQUESTED", "ACCEPTED"].includes(readString(trip.status))) return;
+    if (!trip || trip.passengerId !== uid || !["PENDING_PAYMENT", "REQUESTED", "ACCEPTED"].includes(readString(trip.status))) return;
     const paymentId = readString(trip.paymentId);
     const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
     if (payment && payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
+    // A BDO Checkout link may remain payable after the customer leaves Labmda.
+    // Require portal-verified expiry before allowing local cancellation.
+    if (hasActiveBdoCheckoutRequest(payment)) return;
     const now = Date.now();
     const nextRoot: Record<string, any> = {
       ...root,
@@ -534,6 +538,9 @@ export const cancelCustomerOrder = onCall({ enforceAppCheck: true }, async (call
     const paymentId = readString(order.paymentId);
     const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
     if (payment && payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
+    // A BDO Checkout link may remain payable after the customer leaves Labmda.
+    // Require portal-verified expiry before allowing local cancellation.
+    if (hasActiveBdoCheckoutRequest(payment)) return;
     const now = Date.now();
     const nextOrder = { ...order, status: "CANCELLED", paymentStatus: payment ? "CANCELLED" : order.paymentStatus, updatedAtTimestamp: now, cancelledAt: now };
     const nextRoot: Record<string, any> = { ...root, orders: { ...root.orders, [orderId]: nextOrder } };
