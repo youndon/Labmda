@@ -161,7 +161,7 @@ data class RestaurantDashboardScreen(val restaurantId: String) : Screen {
                 }
 
                 Text(
-                    text = "$${"%.2f".format(meal.basePrice)}",
+                    text = "₱${"%.2f".format(meal.basePrice)}",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary
                 )

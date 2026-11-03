@@ -105,7 +105,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     }
                                 ) {
                                     Text(
-                                        "Fee: $${"%.2f".format(restaurant.deliveryFee)}",
+                                        "Fee: ₱${"%.2f".format(restaurant.deliveryFee)}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -170,7 +170,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    "$${"%.2f".format(grandTotal)}",
+                                    "₱${"%.2f".format(grandTotal)}",
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -255,7 +255,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(meal.name, style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
                                 Text(
-                                    "$${"%.2f".format(meal.basePrice)} × $qty = $${"%.2f".format(meal.basePrice * qty)}",
+                                    "₱${"%.2f".format(meal.basePrice)} × $qty = ₱${"%.2f".format(meal.basePrice * qty)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -347,16 +347,16 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("$${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("$${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("Total Amount", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
                             Text(
-                                "$${"%.2f".format(grandTotal)}",
+                                "₱${"%.2f".format(grandTotal)}",
                                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -463,7 +463,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         maxLines = 1
                     )
                     Text(
-                        text = "$${"%.2f".format(meal.basePrice)}",
+                        text = "₱${"%.2f".format(meal.basePrice)}",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.primary
                     )

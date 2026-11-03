@@ -389,7 +389,7 @@ class DeliveryDashboardScreen : Screen {
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text(
-                            "+$${"%.2f".format(order.deliveryFee)}",
+                            "+₱${"%.2f".format(order.deliveryFee)}",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.primary
@@ -459,7 +459,7 @@ class DeliveryDashboardScreen : Screen {
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(text = "${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                    Text(text = "$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(text = "₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }

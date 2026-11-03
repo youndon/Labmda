@@ -192,7 +192,7 @@ class FoodActivitiesScreen : Screen {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
-                                Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -207,7 +207,7 @@ class FoodActivitiesScreen : Screen {
                 ) {
                     Text("Total Amount", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(order.totalPrice)}",
+                        "₱${"%.2f".format(order.totalPrice)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )

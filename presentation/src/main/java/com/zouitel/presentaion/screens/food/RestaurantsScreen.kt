@@ -159,7 +159,7 @@ private fun RestaurantCardItem(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Delivery Fee: $${"%.2f".format(restaurant.deliveryFee)}",
+                        text = "Delivery Fee: ₱${"%.2f".format(restaurant.deliveryFee)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

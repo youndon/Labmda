@@ -213,7 +213,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodyMedium)
-                            Text("$${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodyMedium)
                         }
                     }
 
@@ -224,7 +224,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium)
-                            Text("$${"%.2f".format(currentOrder.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
+                            Text("₱${"%.2f".format(currentOrder.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(
@@ -233,7 +233,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                         ) {
                             Text("Total", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "$${"%.2f".format(currentOrder.totalPrice)}",
+                                "₱${"%.2f".format(currentOrder.totalPrice)}",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.primary
                             )
