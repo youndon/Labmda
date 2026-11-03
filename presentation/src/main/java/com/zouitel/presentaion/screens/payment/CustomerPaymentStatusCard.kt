@@ -10,10 +10,19 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.functions.functions
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import java.net.URI
 
 /**
@@ -23,8 +32,19 @@ import java.net.URI
  * Opening a checkout URL never changes the payment state.
  */
 @Composable
+@Serializable
+private data class XenditCheckoutResponse(
+    val paymentId: String = "",
+    val status: String = "",
+    val amountMinor: Long = 0,
+    val currency: String = "PHP",
+    val checkoutUrl: String = "",
+    val providerRequestId: String = ""
+)
+
 fun CustomerPaymentStatusCard(
     paymentMethod: String,
+    paymentId: String = "",
     paymentStatus: String,
     checkoutUrl: String,
     modifier: Modifier = Modifier
@@ -32,7 +52,11 @@ fun CustomerPaymentStatusCard(
     val method = paymentMethod.trim().uppercase()
     val status = paymentStatus.trim().uppercase()
     val uriHandler = LocalUriHandler.current
-    val validBdoLink = isTrustedBdoCheckoutUrl(checkoutUrl)
+    val scope = rememberCoroutineScope()
+    var activeCheckoutUrl by remember(checkoutUrl) { mutableStateOf(checkoutUrl) }
+    var startingCheckout by remember(paymentId) { mutableStateOf(false) }
+    var checkoutError by remember(paymentId) { mutableStateOf<String?>(null) }
+    val validCheckoutLink = isSecureCheckoutUrl(activeCheckoutUrl)
 
     val presentation = when (status) {
         "PAID", "SUCCEEDED", "COLLECTED" -> PaymentStatusPresentation(
@@ -125,24 +149,52 @@ fun CustomerPaymentStatusCard(
             )
 
             if (method == "GCASH" && status in setOf("PENDING", "PENDING_PAYMENT", "PROCESSING")) {
-                if (validBdoLink) {
-                    Button(
-                        onClick = { uriHandler.openUri(checkoutUrl) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Continue to GCash checkout")
-                    }
+                Button(
+                    enabled = !startingCheckout && (validCheckoutLink || paymentId.isNotBlank()),
+                    onClick = {
+                        if (validCheckoutLink) {
+                            uriHandler.openUri(activeCheckoutUrl)
+                        } else {
+                            scope.launch {
+                                startingCheckout = true
+                                checkoutError = null
+                                runCatching {
+                                    Firebase.functions.httpsCallable("createXenditGcashCheckout")(
+                                        mapOf("paymentId" to paymentId)
+                                    ).data<XenditCheckoutResponse>()
+                                }.onSuccess { result ->
+                                    if (result.status == "SUCCEEDED") {
+                                        checkoutError = "Payment is already confirmed. Refresh this screen."
+                                    } else if (isSecureCheckoutUrl(result.checkoutUrl)) {
+                                        activeCheckoutUrl = result.checkoutUrl
+                                        uriHandler.openUri(result.checkoutUrl)
+                                    } else {
+                                        checkoutError = "Xendit has not returned a checkout link. Refresh payment status before trying again."
+                                    }
+                                }.onFailure { error ->
+                                    checkoutError = error.message ?: "Could not start GCash checkout."
+                                }
+                                startingCheckout = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(
-                        "After paying, return to Labmda. This link is not proof of payment.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = presentation.content
+                        when {
+                            startingCheckout -> "Starting checkout…"
+                            validCheckoutLink -> "Continue to GCash checkout"
+                            else -> "Start GCash checkout"
+                        }
                     )
-                } else {
-                    Text(
-                        "The payment request link has not been added yet. Your order or ride remains pending.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = presentation.content
-                    )
+                }
+                Text(
+                    "After paying, return to Labmda. The authenticated Xendit notification confirms payment; returning from checkout does not.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = presentation.content
+                )
+                checkoutError?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -156,8 +208,8 @@ private data class PaymentStatusPresentation(
     val content: androidx.compose.ui.graphics.Color
 )
 
-private fun isTrustedBdoCheckoutUrl(value: String): Boolean = runCatching {
+private fun isSecureCheckoutUrl(value: String): Boolean = runCatching {
     val uri = URI(value)
-    uri.scheme == "https" && uri.host.equals("checkout.bdo.com.ph", ignoreCase = true) &&
+    uri.scheme == "https" && !uri.host.isNullOrBlank() &&
         !uri.path.isNullOrBlank() && uri.userInfo == null
 }.getOrDefault(false)
