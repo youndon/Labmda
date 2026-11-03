@@ -78,7 +78,8 @@ export async function confirmBdoGcashPaymentRecord(
 
     if (payment.transactionType === "ORDER" && payment.orderId) {
       const order = root.orders?.[payment.orderId];
-      if (!order || order.paymentId !== paymentId || order.status !== "PENDING_PAYMENT") return;
+      if (!order || order.paymentId !== paymentId || order.status !== "PENDING_PAYMENT"
+        || order.amountMinor !== payment.amountMinor) return;
       updates.orders = {
         ...root.orders,
         [payment.orderId]: {
@@ -90,7 +91,8 @@ export async function confirmBdoGcashPaymentRecord(
       };
     } else if (payment.transactionType === "RIDE" && payment.tripId) {
       const trip = root.trips?.[payment.tripId];
-      if (!trip || trip.paymentId !== paymentId || trip.status !== "PENDING_PAYMENT") return;
+      if (!trip || trip.paymentId !== paymentId || trip.status !== "PENDING_PAYMENT"
+        || trip.customerTotalMinor !== payment.amountMinor) return;
       updates.trips = {
         ...root.trips,
         [payment.tripId]: {
