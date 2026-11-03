@@ -50,13 +50,17 @@ export function amountPesosToMinor(value: unknown): number | null {
   return Number.isSafeInteger(minor) && Math.abs(value * 100 - minor) < 0.000001 ? minor : null;
 }
 
-export function isValidXenditCheckoutUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false;
+export function normalizeXenditCheckoutUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
   try {
-    const url = new URL(value);
-    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password;
+    const raw = value.trim();
+    const normalized = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const url = new URL(normalized);
+    return url.protocol === "https:" && Boolean(url.hostname) && !url.username && !url.password
+      ? url.toString()
+      : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -118,8 +122,8 @@ export async function createXenditGcashPaymentRequest(input: {
     || amountPesosToMinor(body.request_amount) !== input.amountMinor || !businessId) {
     throw new Error("Xendit returned a payment request that does not match Labmda's reference, amount or currency.");
   }
-  const action = (body.actions ?? []).find((item) => item.type === "REDIRECT_CUSTOMER" && isValidXenditCheckoutUrl(item.value));
-  const checkoutUrl = action?.value ?? "";
+  const action = (body.actions ?? []).find((item) => item.type === "REDIRECT_CUSTOMER" && normalizeXenditCheckoutUrl(item.value));
+  const checkoutUrl = normalizeXenditCheckoutUrl(action?.value) ?? "";
   const status = String(body.status ?? "").toUpperCase();
   if (status === "REQUIRES_ACTION" && !checkoutUrl) {
     throw new Error("Xendit requires customer action but did not return a valid HTTPS checkout URL.");
