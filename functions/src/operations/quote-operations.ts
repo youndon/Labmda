@@ -80,7 +80,7 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
       merchantOwnerId: ownerUid,
       items: items.map((item: Record<string, any>) => ({
         id: String(item.itemId), name: String(item.name ?? ""), basePrice: pesos(item.unitPriceMinor, "item price"),
-        quantity: item.quantity, specialInstructions: "",
+        quantity: item.quantity, specialInstructions: String(item.specialInstructions ?? "").slice(0, 500),
       })),
       subtotal: pesos(breakdown.subtotalMinor, "subtotal"),
       deliveryFee: pesos(breakdown.deliveryFeeMinor, "delivery fee"),
