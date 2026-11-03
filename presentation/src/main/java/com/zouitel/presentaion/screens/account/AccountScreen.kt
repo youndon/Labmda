@@ -297,9 +297,7 @@ private fun BusinessGridCard(
             .clickable(onClick = onClick),
         shape = MaterialTheme.shapes.large
     ) {
-        AppCardContent(
-            modifier = Modifier.padding(0.dp)
-        ) {
+        AppCardContent {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
