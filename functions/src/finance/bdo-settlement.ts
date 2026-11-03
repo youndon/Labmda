@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { recordAdminFinancialAudit } from "./admin-financial.js";
-import { createFinancialTransfer, postFinancialOperation } from "./ledger.js";
+import { createFinancialTransfer, postFinancialOperation, listEntriesForAccount } from "./ledger.js";
 
 const db = () => getDatabase();
 type Direction = "INBOUND" | "OUTBOUND";
@@ -110,7 +110,7 @@ export const recordBdoBankTransfer = onCall({ enforceAppCheck: true }, async (ca
       ? { accountId: "bdo_bank", bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "bdo" }
       : { accountId: `bdo_external_outbound_${id}`, bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "bdo_external" },
   });
-  const ledger = await postFinancialOperation(db(), movement);
+  const ledger = await postFinancialOperation(movement);
   if (result.committed) await recordAdminFinancialAudit({ uid, action: "BDO_BANK_TRANSFER_RECORDED", targetType: "BDO_TRANSFER", targetId: id, after: saved });
   return { transferId: id, status: saved.status, matchedType: saved.matchedType, matchedId: saved.matchedId, ledgerOperationId: ledger.operationId, duplicate: !result.committed };
 });
@@ -127,9 +127,9 @@ export const reconcileBdoSettlements = onCall({ enforceAppCheck: true }, async (
     || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || (start as number) <= 0 || (end as number) <= (start as number)) {
     throw new HttpsError("invalid-argument", "Provide non-negative PHP-centavo opening/closing balances and a valid statement period.");
   }
-  const [bankSnapshot, expectedSnapshot, payoutsSnapshot, financeSnapshot] = await Promise.all([
+  const [bankSnapshot, expectedSnapshot, payoutsSnapshot, entries] = await Promise.all([
     db().ref("bdoBankTransfers").get(), db().ref("expectedBdoSettlements").get(),
-    db().ref("payoutRequests").get(), db().ref("finance/entries").get(),
+    db().ref("payoutRequests").get(), listEntriesForAccount("bdo_bank"),
   ]);
   const bank = Object.values((bankSnapshot.val() ?? {}) as Record<string, Transfer>);
   const expected = Object.values((expectedSnapshot.val() ?? {}) as Record<string, Expected>);
@@ -140,8 +140,7 @@ export const reconcileBdoSettlements = onCall({ enforceAppCheck: true }, async (
   const unreconciled = paid.filter((item) => !item.bdoReconciledAt);
   const inboundMinor = bank.filter((item) => item.direction === "INBOUND").reduce((sum, item) => sum + item.amountMinor, 0);
   const outboundMinor = bank.filter((item) => item.direction === "OUTBOUND").reduce((sum, item) => sum + item.amountMinor, 0);
-  const entries = Object.values((financeSnapshot.val() ?? {}) as Record<string, { accountId?: string; bucket?: string; deltaMinor?: number; createdAt?: number }>);
-  const ledgerMovementMinor = entries.filter((entry) => entry.accountId === "bdo_bank" && entry.bucket === "CLEARING"
+  const ledgerMovementMinor = entries.filter((entry) => entry.bucket === "CLEARING"
     && Number.isSafeInteger(entry.deltaMinor) && Number.isSafeInteger(entry.createdAt)
     && entry.createdAt! >= (start as number) && entry.createdAt! <= (end as number))
     .reduce((sum, entry) => sum + Number(entry.deltaMinor), 0);

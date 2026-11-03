@@ -2,7 +2,7 @@
 
 ## Accounting contract
 
-- The immutable journal under `finance/entries` is the source of truth. Wallet balances under `finance/accounts` are cached projections only.
+- The immutable journal in Firestore `financialEntries` is the source of truth. Account balances in `financialAccounts` are transactional projections only.
 - All values are integer PHP centavos. Never use floating-point values for ledger arithmetic.
 - Every operation must balance to zero across all postings. Negative deltas debit the source; positive deltas credit the destination.
 - Every posting names an account, balance bucket, party type, and party ID. Every operation names its event type, business reference, and stable idempotency key.
@@ -55,7 +55,7 @@ It verifies record IDs against their database paths, then passes the records to 
 
 `functions/src/finance/payment-allocations.ts` now provides tested, quote-backed allocation builders for orders and rides. It accounts for merchant-funded discounts by reducing merchant earnings, platform-funded discounts by reducing platform proceeds, customer-paid provider fees by allocating that fee to the platform, and driver/courier earnings. These builders are deliberately pure and backend-only: they must be called by the trusted order/trip payment creator after it has verified the actual merchant owner, assigned courier/driver, and transaction IDs. The trusted `createOrderFromQuote`, `createRideFromQuote`, and `createDeliveryFromQuote` callables now persist a payment record alongside each quote-created resource. Courier/driver assignment verifies the actual beneficiary and then persists the matching allocation set. The ledger trigger posts only after the payment reaches `SUCCEEDED`; if allocations are not yet available, trigger retries continue, and the assignment operation retries the idempotent posting once the allocations exist. Refund processing, payout execution, and admin-authorized reconciliation remain separate integration work.
 
-The `finance` root transaction is a correctness-first foundation and serializes financial writes. Before high-volume production, shard the journal/projections by account and add a durable outbox/settlement workflow while preserving the immutable operation contract.
+The authoritative journal, account balances, idempotency records and provider activity are stored in Firestore. A single Firestore transaction updates the operation, all postings, affected accounts and provider-scoped activity together. RTDB remains the operational store for orders, trips, payment state and cash evidence.
 
 
 ## Financial Realtime Database security policy
@@ -76,7 +76,7 @@ This fragment intentionally does not grant an admin bypass: the repository does 
 
 ## Phase 06 — provider earnings and manual payouts
 
-Provider balances continue to come from the immutable `finance/entries` journal and the cached `finance/accounts` projection. The ledger transaction also maintains a private `finance/providerActivity/{uid}` projection so the earnings callable does not need to scan every operation in the central journal. All payout amounts are integer PHP centavos.
+Provider balances come from Firestore `financialAccounts`; the ledger maintains private `financialProviderActivity/{uid}/operations` documents so provider earnings and analytics do not scan the global journal. All payout amounts are integer PHP centavos.
 
 ### Provider identity and wallet accounts
 
@@ -134,7 +134,7 @@ Provider payouts remain manual until an approved transfer API is integrated. An 
 4. For an outbound provider payout, record the actual BDO debit as `OUTBOUND`. It matches only a payout already marked `PAID` with the same transfer reference and amount.
 5. `reconcileBdoSettlements` saves an auditable reconciliation snapshot listing unmatched bank transfers, expected settlements not yet received, and paid payouts without a matching BDO debit.
 
-The BDO workflow does not connect to BDO APIs or parse statement files automatically; an administrator records each actual statement line. Customer GCash collection uses BDO Checkout as the processor; the payment method stored in Labmda remains `GCASH`, not `BDO`. The current interim flow uses BDO Checkout Payment Requests: an administrator creates a one-time payment request in the BDO portal, attaches its `checkout.bdo.com.ph` link through `attachBdoCheckoutLink`, and the customer opens it from order/ride tracking. The link is not treated as proof of payment. An administrator must verify the exact successful transaction in BDO and call `confirmBdoGcashPayment` with the reference and exact PHP-centavo amount before the payment is marked `SUCCEEDED`. It is not an automated webhook. BDO's public page confirms GCash acceptance and one-time payment links, but also describes multiple available payment options; confirm with the assigned BDO account officer whether other options can be disabled so the BDO page exposes only GCash. BDO states that Checkout sales are credited to the nominated BDO account in four banking days, so payment success and bank settlement remain separate reconciliation events. The fully automated Website Plug-in API/webhook integration still requires the merchant-specific technical contract from BDO. Its `balanced` flag is true only when transfer references match expected settlements/paid payouts, no expected inbound settlement or paid payout remains unmatched, and the BDO statement closing balance equals the opening balance plus the period movements posted to `finance/accounts/bdo_bank` from the immutable journal. The statement period must cover all bank lines being reconciled, and every line must be recorded once. The current workflow does not yet automatically ingest BDO files or fetch balances from the bank.
+The BDO workflow does not connect to BDO APIs or parse statement files automatically; an administrator records each actual statement line. Customer GCash collection uses BDO Checkout as the processor; the payment method stored in Labmda remains `GCASH`, not `BDO`. The current interim flow uses BDO Checkout Payment Requests: an administrator creates a one-time payment request in the BDO portal, attaches its `checkout.bdo.com.ph` link through `attachBdoCheckoutLink`, and the customer opens it from order/ride tracking. The link is not treated as proof of payment. An administrator must verify the exact successful transaction in BDO and call `confirmBdoGcashPayment` with the reference and exact PHP-centavo amount before the payment is marked `SUCCEEDED`. It is not an automated webhook. BDO's public page confirms GCash acceptance and one-time payment links, but also describes multiple available payment options; confirm with the assigned BDO account officer whether other options can be disabled so the BDO page exposes only GCash. BDO states that Checkout sales are credited to the nominated BDO account in four banking days, so payment success and bank settlement remain separate reconciliation events. The fully automated Website Plug-in API/webhook integration still requires the merchant-specific technical contract from BDO. Its `balanced` flag is true only when transfer references match expected settlements/paid payouts, no expected inbound settlement or paid payout remains unmatched, and the BDO statement closing balance equals the opening balance plus the period movements posted to the `bdo_bank` account in the immutable Firestore journal. The statement period must cover all bank lines being reconciled, and every line must be recorded once. The current workflow does not yet automatically ingest BDO files or fetch balances from the bank.
 
 ### BDO callable exports
 
@@ -183,3 +183,26 @@ Completion is serialized per payment so two partial refunds cannot complete conc
 Refund recording does not call BDO or GCash and does not prove that money was sent. The admin must verify the external refund before recording completion. Development-only simulated refunds remain isolated from the production financial journal.
 
 Refunds that would violate a ledger invariant (for example, reversing a cash-owed balance that has already been remitted) must fail closed and be reviewed as a manual accounting exception. Do not force a negative cash-owed balance or edit/delete existing journal entries; resolve such cases through a documented, balanced compensating operation after confirming the real cash movement.
+
+
+## Firestore financial-ledger deployment and migration
+
+The financial journal has moved from the RTDB `finance` root to server-only Firestore collections:
+
+- `financialOperations/{operationId}`: immutable balanced operation and its postings.
+- `financialEntries/{entryId}`: immutable per-account posting rows.
+- `financialAccounts/{accountId}`: transactionally maintained balance projections.
+- `financialIdempotency/{idempotencyKey}`: unique operation key.
+- `financialProviderActivity/{uid}/operations/{operationId}`: private, user-scoped provider history.
+
+All amounts remain integer PHP centavos. Firestore transactions read the idempotency and affected account documents before writing; concurrent debits are retried against the latest account state. Each operation is limited to 100 postings so its transaction remains below Firestore's document-write ceiling. Reconciliation reads immutable entries in 500-document pages rather than downloading the full RTDB tree. Firestore client rules deny all direct reads and writes; trusted Cloud Functions use the Admin SDK and continue to enforce callable authorization.
+
+### Required cutover
+
+1. Create/enable the Firestore database in the Firebase project and deploy the Firestore rules.
+2. Schedule a maintenance window. Pause financial writes and payment, cash-collection, payout, refund and settlement processing while the snapshot is taken.
+3. Set `GCLOUD_PROJECT`, `FIREBASE_DATABASE_URL`, and ADC credentials, then run `cd functions && npm run migrate:financial-ledger`. The script refuses to overwrite non-empty target collections and verifies migrated document counts.
+4. Confirm the migration counts against the legacy RTDB finance data and run `npm run test:emulator` plus `npm run build`.
+5. Deploy the Functions build from this branch, run the admin financial reconciliation and provider/cash balance checks, then resume financial writes.
+
+Do not deploy the new Functions before importing existing ledger data: the new writer intentionally does not fall back to RTDB. Keep the legacy RTDB `finance` data unchanged as a rollback archive until the new ledger has been reconciled and production sign-off is complete. The migration script is a one-time snapshot, not a live dual-write or automatic rollback mechanism.

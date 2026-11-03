@@ -1,22 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Database } from "firebase-admin/database";
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
+const { postFinancialOperationMock } = vi.hoisted(() => ({ postFinancialOperationMock: vi.fn() }));
+vi.mock("./ledger.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./ledger.js")>(),
+  postFinancialOperation: postFinancialOperationMock,
+}));
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
 
 function createDatabase(records: Record<string, unknown>) {
-  let finance: Record<string, unknown> | null = null;
   const database = {
     ref(path: string) {
-      if (path === "finance") {
-        return {
-          transaction: async (update: (state: unknown) => unknown) => {
-            const next = update(finance);
-            const committed = next !== finance;
-            if (committed) finance = next as Record<string, unknown>;
-            return { committed, snapshot: { val: () => finance } };
-          },
-        };
-      }
       return {
         get: async () => {
           const value = records[path];
@@ -28,7 +22,7 @@ function createDatabase(records: Record<string, unknown>) {
       };
     },
   };
-  return { database: database as unknown as Database, getFinance: () => finance };
+  return { database: database as unknown as Database };
 }
 
 const payment: Payment = {
@@ -46,16 +40,19 @@ const allocation: PaymentAllocation = {
 };
 
 describe("postPaymentReceiptFromDatabase", () => {
+  beforeEach(() => postFinancialOperationMock.mockReset());
   it("loads persisted records and posts one balanced receipt", async () => {
-    const { database, getFinance } = createDatabase({
+    postFinancialOperationMock.mockResolvedValueOnce({ operationId: "payment_payment_1_received", duplicate: false })
+      .mockResolvedValueOnce({ operationId: "payment_payment_1_received", duplicate: true });
+    const { database } = createDatabase({
       "payments/payment_1": payment,
       "paymentAllocations/payment_1": { allocation_1: allocation },
     });
     const result = await postPaymentReceiptFromDatabase(database, payment.id);
     expect(result).toEqual({ operationId: "payment_payment_1_received", duplicate: false });
-    expect(getFinance()).toBeTruthy();
-    const entries = (getFinance() as { entries: Record<string, { deltaMinor: number }> }).entries;
-    expect(Object.values(entries).reduce((sum, entry) => sum + entry.deltaMinor, 0)).toBe(0);
+    const operation = postFinancialOperationMock.mock.calls[0]?.[0];
+    expect(operation.postings.reduce((sum: number, posting: { deltaMinor: number }) => sum + posting.deltaMinor, 0)).toBe(0);
+    expect(postFinancialOperationMock).toHaveBeenCalledTimes(1);
 
     const duplicate = await postPaymentReceiptFromDatabase(database, payment.id);
     expect(duplicate).toEqual({ operationId: "payment_payment_1_received", duplicate: true });

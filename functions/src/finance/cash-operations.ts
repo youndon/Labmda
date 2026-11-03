@@ -5,7 +5,7 @@ import { recordAdminFinancialAudit } from "./admin-financial.js";
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 import { commitCashCollection } from "./cash-collection.js";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
-import { createFinancialTransfer, postFinancialOperation, reconcileFinancialLedger } from "./ledger.js";
+import { createFinancialTransfer, postFinancialOperation, reconcileFinancialLedger, listFinancialAccounts, listCashOwedAccounts } from "./ledger.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -112,7 +112,7 @@ export const confirmMerchantCashSettlement = onCall({ enforceAppCheck: true }, a
     source: { accountId: `cash_owed_${collection.collectorId}_merchant_${merchantId}`, bucket: "CASH_OWED", deltaMinor: 0, partyType: "CASH", partyId: collection.collectorId },
     destination: { accountId: `wallet_merchant_${merchantId}`, bucket: "AVAILABLE", deltaMinor: 0, partyType: "MERCHANT", partyId: merchantId },
   });
-  const posted = await postFinancialOperation(db(), operation);
+  const posted = await postFinancialOperation(operation);
   await db().ref(`cashHandovers/${handoverId}`).set({
     id: handoverId, paymentId, merchantId, collectorId: collection.collectorId,
     amountMinor: allocation.amountMinor, currency: "PHP", status: "CONFIRMED",
@@ -142,7 +142,7 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
     source: { accountId: `cash_owed_${collectorId}`, bucket: "CASH_OWED", deltaMinor: 0, partyType: "CASH", partyId: collectorId },
     destination: { accountId: "platform_revenue", bucket: "AVAILABLE", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
   });
-  const posted = await postFinancialOperation(db(), operation);
+  const posted = await postFinancialOperation(operation);
   const remittance = { id: remittanceId, collectorId, amountMinor, currency: "PHP", status: "CONFIRMED",
     confirmedBy: call.auth!.uid, confirmedAt: Date.now(), ledgerOperationId: posted.operationId };
   await db().ref(`cashRemittances/${remittanceId}`).set(remittance);
@@ -153,12 +153,8 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
 /** Collector-only view of outstanding platform and merchant cash obligations. */
 export const getMyCashOutstanding = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
-  const snapshot = await db().ref("finance/accounts").get();
-  const accounts = (snapshot.val() ?? {}) as Record<string, { cashOwedMinor?: number }>;
-  const prefix = `cash_owed_${uid}`;
-  const breakdown = Object.entries(accounts)
-    .filter(([accountId]) => accountId === prefix || accountId.startsWith(`${prefix}_merchant_`))
-    .map(([accountId, value]) => ({ accountId, amountMinor: value.cashOwedMinor ?? 0 }));
+  const accounts = await listCashOwedAccounts(uid);
+  const breakdown = accounts.map((account) => ({ accountId: account.accountId, amountMinor: account.cashOwedMinor }));
   return { collectorId: uid, currency: "PHP", totalOutstandingMinor: breakdown.reduce((sum, item) => sum + item.amountMinor, 0), breakdown };
 });
 
@@ -168,25 +164,23 @@ export const reconcileCashPayments = onCall({ enforceAppCheck: true }, async (ca
   requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const database = db();
   const [ledger, accountsSnapshot, collectionsSnapshot, handoversSnapshot, remittancesSnapshot] = await Promise.all([
-    reconcileFinancialLedger(database),
-    database.ref("finance/accounts").get(),
+    reconcileFinancialLedger(),
+    listFinancialAccounts(),
     database.ref("cashCollections").get(),
     database.ref("cashHandovers").get(),
     database.ref("cashRemittances").get(),
   ]);
-  const accounts = (accountsSnapshot.val() ?? {}) as Record<string, { cashOwedMinor?: number; availableMinor?: number }>;
+  const accounts = accountsSnapshot;
   const collections = Object.values((collectionsSnapshot.val() ?? {}) as Record<string, CashCollection>);
   const handovers = Object.values((handoversSnapshot.val() ?? {}) as Record<string, { status?: string; amountMinor?: number }>);
   const remittances = Object.values((remittancesSnapshot.val() ?? {}) as Record<string, { status?: string; amountMinor?: number }>);
   const cashCollectedMinor = collections.filter((item) => item.status === "COLLECTED").reduce((sum, item) => sum + item.amountMinor, 0);
   const merchantSettledMinor = handovers.filter((item) => item.status === "CONFIRMED").reduce((sum, item) => sum + (item.amountMinor ?? 0), 0);
   const platformRemittedMinor = remittances.filter((item) => item.status === "CONFIRMED").reduce((sum, item) => sum + (item.amountMinor ?? 0), 0);
-  const cashOutstandingMinor = Object.entries(accounts)
-    .filter(([accountId]) => accountId.startsWith("cash_owed_"))
-    .reduce((sum, [, account]) => sum + (account.cashOwedMinor ?? 0), 0);
-  const collectorRetainedMinor = Object.entries(accounts)
-    .filter(([accountId]) => accountId.startsWith("cash_retained_"))
-    .reduce((sum, [, account]) => sum + (account.availableMinor ?? 0), 0);
+  const cashOutstandingMinor = accounts.filter((account) => account.accountId.startsWith("cash_owed_"))
+    .reduce((sum, account) => sum + account.cashOwedMinor, 0);
+  const collectorRetainedMinor = accounts.filter((account) => account.accountId.startsWith("cash_retained_"))
+    .reduce((sum, account) => sum + account.availableMinor, 0);
   const accountedCashMinor = merchantSettledMinor + platformRemittedMinor + cashOutstandingMinor + collectorRetainedMinor;
   const cashBalanced = cashCollectedMinor === accountedCashMinor;
   const reconciliationId = randomUUID();

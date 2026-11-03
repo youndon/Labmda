@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // The financial ledger is server-only. Admin SDK Cloud Functions bypass
+    // these client rules; callable functions enforce user/admin authorization.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
