@@ -204,6 +204,7 @@ export const quoteDelivery = onCall({ secrets: [mapsApiKey], enforceAppCheck: tr
 });
 
 export { createOrderFromQuote, createRideFromQuote, createDeliveryFromQuote } from "./operations/quote-operations.js";
+export { cleanupExpiredPricingQuotes } from "./pricing/quote-cleanup.js";
 export { syncPublicDriverPresence, syncDriverPresenceOnServiceChange, syncActiveRideRequest } from "./operations/driver-presence.js";
 export { submitRestaurantApplication, submitShopApplication, setFoodMode, setShopMode, adminUpdateProviderStatus } from "./operations/provider-approvals.js";
 
