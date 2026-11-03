@@ -6,6 +6,7 @@ import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.model.UserProfile
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.database.database
+import com.zouitel.presentaion.screens.trustedTransactionCallData
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,44 +54,10 @@ class AdminRestaurantModel : ScreenModel {
 
     fun updateRestaurantStatus(uid: String, newStatus: Status) {
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("foodStatus").setValue(newStatus.name)
-
-            if (newStatus == Status.APPROVED) {
-                val userSnapshot = db.child("users").child(uid).valueEvents.let { flow ->
-                    var snapshotData: dev.gitlive.firebase.database.DataSnapshot? = null
-                    val job = screenModelScope.launch {
-                        flow.collect {
-                            snapshotData = it
-                            throw java.util.concurrent.CancellationException()
-                        }
-                    }
-                    job.join()
-                    snapshotData
-                }
-
-                userSnapshot?.let { snap ->
-                    val restaurantName = runCatching { snap.child("sourceName").value<String>() }.getOrDefault("My Restaurant")
-                    val imageUrl = runCatching { snap.child("restaurantImageUrl").value<String>() }.getOrDefault("")
-                    val deliveryFee = runCatching { snap.child("deliveryFee").value<Double>() }.getOrDefault(0.0)
-                    val estimatedTimeMinutes = runCatching { snap.child("estimatedTimeMinutes").value<Int>() }.getOrDefault(20)
-                    val managerPhone = runCatching { snap.child("managerPhone").value<String>() }.getOrDefault("")
-
-                    val restaurantMap = mapOf(
-                        "id" to uid,
-                        "name" to restaurantName,
-                        "imageUrl" to imageUrl,
-                        "rating" to 5.0,
-                        "deliveryFee" to deliveryFee,
-                        "estimatedTimeMinutes" to estimatedTimeMinutes,
-                        "isOpen" to true,
-                        "managers" to listOf(managerPhone),
-                        "paymentMethods" to listOf("Cash on Delivery", "Card on Delivery")
-                    )
-                    db.child("restaurants").child(uid).setValue(restaurantMap)
-                }
-            } else if (newStatus == Status.REJECTED) {
-                db.child("restaurants").child(uid).removeValue()
-            }
+            trustedTransactionCallData(
+                "adminUpdateProviderStatus",
+                mapOf("service" to "RESTAURANT", "uid" to uid, "status" to newStatus.name)
+            )
         }
     }
 }
