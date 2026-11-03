@@ -113,6 +113,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     item {
                         CustomerPaymentStatusCard(
                             paymentMethod = currentOrder.paymentMethod,
+                            paymentId = currentOrder.paymentId,
                             paymentStatus = currentOrder.paymentStatus,
                             checkoutUrl = currentOrder.checkoutUrl
                         )
