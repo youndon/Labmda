@@ -41,33 +41,33 @@
       "$uid": {
         "driverService": {
           "id": {
-            ".write": "auth != null && auth.uid == $uid && newData.val() == $uid"
+            ".write": "auth != null && auth.uid == $uid && (!newData.exists() || newData.val() == $uid)"
           },
           "vehicleInfo": {
             "type": {
-              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+              ".write": "auth != null && auth.uid == $uid && (!newData.exists() || root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED')"
             },
             "make": {
-              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+              ".write": "auth != null && auth.uid == $uid && (!newData.exists() || root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED')"
             },
             "model": {
-              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+              ".write": "auth != null && auth.uid == $uid && (!newData.exists() || root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED')"
             },
             "color": {
-              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+              ".write": "auth != null && auth.uid == $uid && (!newData.exists() || root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED')"
             },
             "licensePlate": {
-              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+              ".write": "auth != null && auth.uid == $uid && (!newData.exists() || root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED')"
             },
             "serviceType": {
-              ".write": "auth != null && auth.uid == $uid && root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED'"
+              ".write": "auth != null && auth.uid == $uid && (!newData.exists() || root.child('users').child($uid).child('driverService').child('status').val() != 'APPROVED')"
             }
           },
           "status": {
-            ".write": "auth != null && auth.uid == $uid && ((!data.exists() && newData.val() == 'PENDING') || newData.val() == data.val())"
+            ".write": "auth != null && auth.uid == $uid && (!newData.exists() || ((!data.exists() && newData.val() == 'PENDING') || newData.val() == data.val()))"
           },
           "isOnline": {
-            ".write": "auth != null && auth.uid == $uid && (newData.val() == false || root.child('users').child($uid).child('driverService').child('status').val() == 'APPROVED')",
+            ".write": "auth != null && auth.uid == $uid && (!newData.exists() || newData.val() == false || root.child('users').child($uid).child('driverService').child('status').val() == 'APPROVED')",
             ".validate": "newData.isBoolean()"
           }
         },
