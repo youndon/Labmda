@@ -186,7 +186,6 @@ class AdminFinanceOverviewScreen : Screen {
                             Text("LABMDA FINANCE", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             Text("Your platform at a glance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Text("PHP ledger figures • server generated", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (data.generatedAt > 0) Text("Updated ${formatFinanceTimestamp(data.generatedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                         }
                     }
                     if (!message.isNullOrBlank()) {
@@ -219,6 +218,7 @@ class AdminFinanceOverviewScreen : Screen {
                                     }
                                     Text("${data.platformRevenueAvailableMinor.let(::formatFinancePhp)}", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
                                     Text("Available balance across platform ledger accounts. This is not gross sales.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    if (data.generatedAt > 0) Text("Updated ${formatFinanceTimestamp(data.generatedAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
                                 }
                             }
                         }
