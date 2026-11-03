@@ -209,16 +209,32 @@ class AdminPaymentSettingsScreen : Screen {
                             ) {
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("Collection provider", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                                    Text("BDO Checkout", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                                    Text("Customer currency: PHP • Checkout: manual BDO payment request link", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("Provider payouts: manual administrator transfers", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(paymentProviderLabel(current.provider), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                    Text("Customer currency: ${current.currency} • Checkout mode: ${current.checkoutMode.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Provider payout mode: ${current.payoutMode.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("Configuration version: ${current.version}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                        item {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                            ) {
+                                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("Configuration only", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                                    Text(
+                                        "These switches control which methods and services the app offers. They do not activate provider credentials, create checkout sessions, verify webhooks, or execute provider payouts.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
                                 }
                             }
                         }
                         item { Text("Customer payment methods", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                         item {
-                            SettingsToggle("GCash", "Online collection through BDO Checkout", gcashEnabled, !saving) { gcashEnabled = it }
+                            SettingsToggle("GCash", "Online collection using the configured checkout provider", gcashEnabled, !saving) { gcashEnabled = it }
                         }
                         item {
                             SettingsToggle("Cash", "Cash collection by the assigned courier or driver", cashEnabled, !saving) { cashEnabled = it }
@@ -267,7 +283,7 @@ class AdminPaymentSettingsScreen : Screen {
                         }
                         item {
                             Text(
-                                "BDO API checkout and automated payouts are intentionally unavailable until BDO approves and documents those integrations.",
+                                if (current.provider != "XENDIT") "Xendit is not the configured collection provider in the current backend configuration. Enabling GCash here does not switch the provider or make live Xendit checkout available." else "Xendit is selected in configuration; live checkout and payout readiness still depend on deployed credentials, enabled services, verified webhooks, and provider approval.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -302,4 +318,12 @@ private fun SettingsToggle(
             Checkbox(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
         }
     }
+}
+
+ 
+private fun paymentProviderLabel(provider: String): String = when (provider.uppercase()) {
+    "BDO_CHECKOUT" -> "BDO Checkout"
+    "XENDIT" -> "Xendit"
+    "MANUAL" -> "Manual collection"
+    else -> provider.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
 }
