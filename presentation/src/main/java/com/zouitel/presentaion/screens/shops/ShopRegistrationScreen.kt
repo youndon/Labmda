@@ -51,8 +51,8 @@ data class ShopRegistrationScreen(val existingShop: Shop? = null) : Screen {
         var imageUrl by remember { mutableStateOf(existingShop?.imageUrl ?: "") }
         var isOnline by remember { mutableStateOf(existingShop?.isOnline ?: false) }
 
-        var storeLat by remember { mutableStateOf(existingShop?.latitude) }
-        var storeLng by remember { mutableStateOf(existingShop?.longitude) }
+        var storeLat by remember { mutableStateOf(existingShop?.latitude?.takeIf { it != 0.0 }) }
+        var storeLng by remember { mutableStateOf(existingShop?.longitude?.takeIf { it != 0.0 }) }
         var showMapPicker by remember { mutableStateOf(false) }
 
         val imageUpload by screenModel.imageUpload.collectAsState()
