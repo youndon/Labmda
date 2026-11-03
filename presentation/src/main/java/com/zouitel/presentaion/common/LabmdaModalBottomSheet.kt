@@ -13,8 +13,9 @@ import androidx.compose.ui.unit.dp
 /**
  * Shared modal-sheet treatment for Labmda.
  *
- * Keeps sheet geometry, drag affordance, state and system-window handling
- * consistent while leaving each feature's content and business actions local.
+ * Keeps sheet geometry, drag affordance and state consistent while leaving
+ * each feature's content and business actions local. Material 3's default
+ * window-inset behavior is retained for compatibility with the pinned library.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,7 +31,6 @@ fun LabmdaModalBottomSheet(
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         dragHandle = { BottomSheetDefaults.DragHandle() },
-        windowInsets = BottomSheetDefaults.windowInsets,
         content = content
     )
 }
