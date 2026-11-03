@@ -11,7 +11,8 @@
     "set-admin-claim": "node scripts/set-admin-claim.cjs",
     "migrate:financial-ledger": "node scripts/migrate-financial-ledger.cjs",
     "migrate:catalog-paths": "node scripts/migrate-catalog-paths.cjs",
-    "test:emulator": "vitest run --no-file-parallelism src/operations/quote-claim.emulator.test.ts src/finance/cash-collection.emulator.test.ts src/payments/refund-transaction.emulator.test.ts src/finance/ledger.firestore.emulator.test.ts"
+    "test:emulator": "vitest run --no-file-parallelism src/operations/quote-claim.emulator.test.ts src/finance/cash-collection.emulator.test.ts src/payments/refund-transaction.emulator.test.ts src/finance/ledger.firestore.emulator.test.ts",
+    "migrate:active-ride-requests": "node scripts/migrate-active-ride-requests.cjs"
   },
   "dependencies": {
     "firebase-admin": "^13.5.0",
