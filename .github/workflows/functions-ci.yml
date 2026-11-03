@@ -2,14 +2,16 @@ name: Firebase Functions CI
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "main", "master" ]
     paths:
       - "functions/**"
+      - "firebase.test.json"
       - ".github/workflows/functions-ci.yml"
   pull_request:
-    branches: [ "master", "main" ]
+    branches: [ "main", "master" ]
     paths:
       - "functions/**"
+      - "firebase.test.json"
       - ".github/workflows/functions-ci.yml"
 
 jobs:
@@ -23,13 +25,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: functions/package.json
       - name: Install dependencies
         run: npm install
-      - name: Run Firebase Functions tests
+      - name: Run unit tests
         run: npm test
-      - name: Run RTDB transaction tests against the emulator
-        run: npx --yes firebase-tools@14 emulators:exec --only database --project demo-labmda --config ../firebase.test.json "npm run test:emulator"
+      - name: Run Realtime Database and Firestore emulator tests
+        run: npx --yes firebase-tools@14 emulators:exec --only database,firestore --project demo-labmda --config ../firebase.test.json "npm run test:emulator"
       - name: Build Firebase Functions
         run: npm run build

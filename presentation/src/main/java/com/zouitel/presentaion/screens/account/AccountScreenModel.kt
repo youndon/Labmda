@@ -12,6 +12,7 @@ import dev.gitlive.firebase.database.DatabaseReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,8 @@ class AccountScreenModel(
 ): ScreenModel {
 
     private val _currentUser: MutableStateFlow<FirebaseUser?> = MutableStateFlow(auth.currentUser)
+    private val _profileReadError = MutableStateFlow<String?>(null)
+    val profileReadError: StateFlow<String?> = _profileReadError
     val currentUser: StateFlow<FirebaseUser?> = _currentUser
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -41,11 +44,12 @@ class AccountScreenModel(
                     .child(uid)
                     .valueEvents
                     .map { snapshot ->
-                        if (snapshot.exists) {
-                            runCatching { snapshot.value<UserProfile>() }.getOrNull()
-                        } else {
-                            null
-                        }
+                        _profileReadError.value = null
+                        if (snapshot.exists) snapshot.value<UserProfile>() else null
+                    }
+                    .catch { error ->
+                        _profileReadError.value = error.message ?: "Unable to read the user profile"
+                        emit(null)
                     }
             }
         }
@@ -86,11 +90,7 @@ class AccountScreenModel(
                 .child(uid)
                 .valueEvents
                 .map { snapshot ->
-                    if (snapshot.exists) {
-                        runCatching { snapshot.value<UserProfile>() }.getOrNull()
-                    } else {
-                        null
-                    }
+                    if (snapshot.exists) snapshot.value<UserProfile>() else null
                 }
         } catch (e: Exception) {
             e.printStackTrace()

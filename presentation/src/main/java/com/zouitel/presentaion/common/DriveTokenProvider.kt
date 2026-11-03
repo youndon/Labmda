@@ -1,5 +1,13 @@
 package com.zouitel.presentaion.common
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Matrix
+import android.media.ExifInterface
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.bearerAuth
@@ -48,7 +56,7 @@ class DriveUploadException(message: String, cause: Throwable? = null) : Exceptio
  */
 object DriveImageUploader {
 
-    private const val FOLDER_NAME = "RideGo Media"
+    private const val FOLDER_NAME = "Labmda Media"
     private const val FOLDER_MIME = "application/vnd.google-apps.folder"
     private const val FILES_URL = "https://www.googleapis.com/drive/v3/files"
     private const val UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
@@ -76,11 +84,78 @@ object DriveImageUploader {
 
     /** @return the URL to store and display for the uploaded photo. */
     suspend fun upload(bytes: ByteArray, accessToken: String, label: String): String {
-        val mimeType = sniffImageMimeType(bytes)
+        val optimizedBytes = compressForUpload(bytes)
         val folderId = findOrCreateFolder(accessToken)
-        val fileId = uploadFile(bytes, mimeType, accessToken, folderId, label)
+        val fileId = uploadFile(optimizedBytes, "image/jpeg", accessToken, folderId, label)
         makePublic(fileId, accessToken)
         return displayUrl(fileId)
+    }
+
+    /**
+     * Downscales large camera images to at most 1600 px and re-encodes them as JPEG.
+     * Decode sampling avoids loading full-resolution phone photos into memory.
+     */
+    private fun compressForUpload(bytes: ByteArray): ByteArray {
+        if (bytes.isEmpty()) throw DriveUploadException("The selected image is empty.")
+
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw DriveUploadException("The selected file is not a supported image.")
+        }
+
+        var sampleSize = 1
+        while (maxOf(bounds.outWidth / sampleSize, bounds.outHeight / sampleSize) > 1600) {
+            sampleSize *= 2
+        }
+        val decoded = BitmapFactory.decodeByteArray(
+            bytes,
+            0,
+            bytes.size,
+            BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        ) ?: throw DriveUploadException("The selected image could not be decoded.")
+
+        val orientation = runCatching {
+            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val rotation = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+        val oriented = if (rotation != 0f) {
+            Bitmap.createBitmap(
+                decoded, 0, 0, decoded.width, decoded.height,
+                Matrix().apply { postRotate(rotation) }, true
+            ).also { if (it !== decoded) decoded.recycle() }
+        } else decoded
+
+        val scale = minOf(1f, 1600f / maxOf(oriented.width, oriented.height))
+        val resized = if (scale < 1f) {
+            Bitmap.createScaledBitmap(
+                oriented,
+                (oriented.width * scale).toInt().coerceAtLeast(1),
+                (oriented.height * scale).toInt().coerceAtLeast(1),
+                true
+            ).also { if (it !== oriented) oriented.recycle() }
+        } else oriented
+
+        val jpegBitmap = Bitmap.createBitmap(
+            resized.width, resized.height, Bitmap.Config.ARGB_8888
+        )
+        Canvas(jpegBitmap).apply {
+            drawColor(Color.WHITE)
+            drawBitmap(resized, 0f, 0f, null)
+        }
+        val output = ByteArrayOutputStream()
+        jpegBitmap.compress(Bitmap.CompressFormat.JPEG, 82, output)
+        jpegBitmap.recycle()
+        resized.recycle()
+        return output.toByteArray()
     }
 
     private suspend fun findOrCreateFolder(token: String): String = folderLock.withLock {
