@@ -43,6 +43,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -131,20 +132,22 @@ class MainScreen() : Screen {
             ).filter { isAdmin || it.screen !is PanelScreen }
         }
 
-        Navigator(tabs.first().screen) { navigator ->
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                containerColor = MaterialTheme.colorScheme.background,
-                bottomBar = {
-                    BrandNavigationBar(
-                        tabs = tabs,
-                        isSelected = { navigator.lastItem::class == it.screen::class },
-                        onSelect = { navigator.replaceAll(it.screen) },
-                    )
-                },
-            ) { innerPadding ->
-                Box(modifier = Modifier.padding(innerPadding)) {
-                    CurrentScreen()
+        key(tabs.first().screen::class) {
+            Navigator(tabs.first().screen) { navigator ->
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = MaterialTheme.colorScheme.background,
+                    bottomBar = {
+                        BrandNavigationBar(
+                            tabs = tabs,
+                            isSelected = { navigator.lastItem::class == it.screen::class },
+                            onSelect = { navigator.replaceAll(it.screen) },
+                        )
+                    },
+                ) { innerPadding ->
+                    Box(modifier = Modifier.padding(innerPadding)) {
+                        CurrentScreen()
+                    }
                 }
             }
         }
