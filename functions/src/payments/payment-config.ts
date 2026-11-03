@@ -8,11 +8,11 @@ export type PaymentService = (typeof PAYMENT_SERVICES)[number];
 
 export interface PaymentConfiguration {
   version: number;
-  provider: "BDO_CHECKOUT";
+  provider: "XENDIT";
   currency: "PHP";
   enabledMethods: PaymentMethod[];
   services: Record<PaymentService, boolean>;
-  checkoutMode: "MANUAL_LINK";
+  checkoutMode: "API";
   payoutMode: "MANUAL";
   updatedAt: number;
   updatedBy: string;
@@ -20,11 +20,11 @@ export interface PaymentConfiguration {
 
 export const DEFAULT_PAYMENT_CONFIGURATION: PaymentConfiguration = {
   version: 1,
-  provider: "BDO_CHECKOUT",
+  provider: "XENDIT",
   currency: "PHP",
   enabledMethods: ["GCASH", "CASH"],
   services: { FOOD: true, SHOP: true, DELIVERY: true, RIDE: true },
-  checkoutMode: "MANUAL_LINK",
+  checkoutMode: "API",
   payoutMode: "MANUAL",
   updatedAt: 0,
   updatedBy: "SYSTEM",
@@ -36,8 +36,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function validatePaymentConfiguration(value: unknown): PaymentConfiguration {
   if (!isRecord(value)) throw new Error("Payment configuration must be an object.");
-  if (value.provider !== "BDO_CHECKOUT" || value.currency !== "PHP") {
-    throw new Error("Payment provider and currency must be BDO_CHECKOUT and PHP.");
+  const legacyBdo = value.provider === "BDO_CHECKOUT" && value.checkoutMode === "MANUAL_LINK";
+  const xendit = value.provider === "XENDIT" && value.checkoutMode === "API";
+  if ((!legacyBdo && !xendit) || value.currency !== "PHP") {
+    throw new Error("Payment provider and currency must be XENDIT and PHP.");
   }
   if (!Array.isArray(value.enabledMethods) || value.enabledMethods.length === 0
     || value.enabledMethods.some((method) => method !== "GCASH" && method !== "CASH")
@@ -48,8 +50,8 @@ export function validatePaymentConfiguration(value: unknown): PaymentConfigurati
   if (!isRecord(rawServices) || PAYMENT_SERVICES.some((service) => typeof rawServices[service] !== "boolean")) {
     throw new Error("FOOD, SHOP, DELIVERY and RIDE must each have an explicit enabled state.");
   }
-  if (value.checkoutMode !== "MANUAL_LINK" || value.payoutMode !== "MANUAL") {
-    throw new Error("BDO API checkout and automated payouts are unavailable until BDO approves and documents those integrations.");
+  if (value.payoutMode !== "MANUAL") {
+    throw new Error("Automated third-party payouts remain disabled until Xendit approves Labmda's payout arrangement.");
   }
   if (!Number.isSafeInteger(value.version) || (value.version as number) < 1
     || !Number.isSafeInteger(value.updatedAt) || (value.updatedAt as number) < 0
@@ -58,7 +60,7 @@ export function validatePaymentConfiguration(value: unknown): PaymentConfigurati
   }
   return {
     version: value.version as number,
-    provider: "BDO_CHECKOUT",
+    provider: "XENDIT",
     currency: "PHP",
     enabledMethods: [...value.enabledMethods] as PaymentMethod[],
     services: {
@@ -67,7 +69,7 @@ export function validatePaymentConfiguration(value: unknown): PaymentConfigurati
       DELIVERY: rawServices.DELIVERY as boolean,
       RIDE: rawServices.RIDE as boolean,
     },
-    checkoutMode: "MANUAL_LINK",
+    checkoutMode: "API",
     payoutMode: "MANUAL",
     updatedAt: value.updatedAt as number,
     updatedBy: value.updatedBy,
@@ -113,7 +115,7 @@ export const getPaymentConfiguration = onCall({ enforceAppCheck: true }, async (
   };
 });
 
-/** Admins may enable/disable currently supported methods and app services; provider and manual payout mode stay fixed. */
+/** Admins may enable/disable supported methods and services; Xendit checkout and manual payout mode stay fixed. */
 export const updateAdminPaymentConfiguration = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = call.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in to continue.");
