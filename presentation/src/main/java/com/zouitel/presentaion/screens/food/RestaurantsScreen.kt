@@ -29,6 +29,10 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
 import coil3.compose.AsyncImage
+import com.zouitel.presentaion.common.AppCard
+import com.zouitel.presentaion.common.AppCardContent
+import com.zouitel.presentaion.common.AppSectionTitle
+import com.zouitel.presentaion.common.AppSpacing
 import com.zouitel.presentaion.common.UserMode
 import com.zouitel.presentaion.screens.account.AccountScreenModel
 import com.zouitel.presentaion.screens.delivery.DeliveryDashboardScreen
@@ -96,25 +100,19 @@ class RestaurantsScreen : Screen {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = AppSpacing.lg, vertical = AppSpacing.md),
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
                 ) {
-                    Text(
-                        "Find your next favorite meal",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "Browse nearby kitchens and discover what is available today.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    AppSectionTitle(
+                        title = "Find your next favorite meal",
+                        subtitle = "Browse nearby kitchens and discover what is available today."
                     )
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = MaterialTheme.shapes.large,
                         placeholder = { Text("Search restaurants or locations") },
                         leadingIcon = {
                             Icon(Icons.Default.Search, contentDescription = null)
@@ -129,14 +127,14 @@ class RestaurantsScreen : Screen {
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.sm)
                     ) {
                         listOf("All", "Open now", "Closed").forEach { filter ->
                             FilterChip(
                                 selected = selectedAvailability == filter,
                                 onClick = { selectedAvailability = filter },
                                 label = { Text(filter) },
-                                shape = RoundedCornerShape(12.dp)
+                                shape = MaterialTheme.shapes.medium
                             )
                         }
                     }
@@ -189,9 +187,9 @@ private fun EmptyRestaurantsState(
         contentAlignment = Alignment.Center
     ) {
         Column(
-            modifier = Modifier.padding(32.dp),
+            modifier = Modifier.padding(AppSpacing.xxxl),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
         ) {
             Icon(
                 Icons.Default.Restaurant,
@@ -214,12 +212,11 @@ private fun RestaurantCardItem(
     restaurant: Restaurant,
     onClick: () -> Unit
 ) {
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    AppCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.large
     ) {
         Column {
             if (restaurant.imageUrl.isNotBlank()) {
@@ -249,9 +246,8 @@ private fun RestaurantCardItem(
                 }
             }
 
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            AppCardContent(
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
