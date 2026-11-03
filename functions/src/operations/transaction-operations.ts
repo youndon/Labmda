@@ -451,6 +451,7 @@ export const claimRide = onCall({ enforceAppCheck: true }, async (call) => {
   const fullName = readString(profile.child("fullName").val()) || "Verified Driver";
   const phone = readString(profile.child("phoneNumber").val()) || readString(profile.child("phone").val());
   const vehicle = profile.child("driverService/vehicleInfo");
+  const driverVehicleType = readString(vehicle.child("type").val());
   const make = readString(vehicle.child("make").val());
   const model = readString(vehicle.child("model").val());
   const color = readString(vehicle.child("color").val());
@@ -460,11 +461,19 @@ export const claimRide = onCall({ enforceAppCheck: true }, async (call) => {
   const result = await ref.transaction((current: Record<string, any> | null) => {
     if (current === null) return null;
     if (current.status !== "REQUESTED" || readString(current.driverId).trim()) return;
+    const requestedVehicleType = readString(current.rideType);
+    if (requestedVehicleType && requestedVehicleType !== "STANDARD" && requestedVehicleType !== driverVehicleType) return;
     return { ...current, driverId: uid, driverName: fullName, driverPhone: phone, vehicleDetails, status: "ACCEPTED", acceptedAt: Date.now() };
   }, undefined, false);
   if (!result.committed) {
     const latest = result.snapshot.val() as Record<string, any> | null;
-    if (latest?.driverId !== uid || latest?.status !== "ACCEPTED") fail("This ride has already been accepted or is no longer available.");
+    if (latest?.driverId !== uid || latest?.status !== "ACCEPTED") {
+      if (latest?.status === "REQUESTED" && readString(latest?.rideType) && readString(latest?.rideType) !== "STANDARD"
+        && readString(latest?.rideType) !== driverVehicleType) {
+        fail("This ride requires a different vehicle type.");
+      }
+      fail("This ride has already been accepted or is no longer available.");
+    }
     await ensureRideAllocations(tripId, uid);
     return { tripId, driverId: uid, duplicate: true };
   }
