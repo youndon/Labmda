@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.ride
 
+import com.zouitel.presentaion.common.LabmdaAlertDialog
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -312,7 +314,7 @@ class DriverWorkplaceScreen : Screen {
         var licensePlate by remember { mutableStateOf(account?.vehicleInfo?.licensePlate ?: "") }
         var expandedDropdown by remember { mutableStateOf(false) }
 
-        AlertDialog(
+        LabmdaAlertDialog(
             onDismissRequest = onDismiss,
             shape = RoundedCornerShape(20.dp),
             title = { Text(if (account == null) "Register Driver Service" else "Edit Driver Service", fontWeight = FontWeight.Bold) },
