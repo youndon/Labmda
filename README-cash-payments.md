@@ -23,7 +23,11 @@ Exports from `functions/src/finance/cash-operations.ts`:
 - `getMyCashOutstanding()`: a signed-in collector can read their platform and merchant cash obligations. It does not expose other collectors' balances.
 - `reconcileCashPayments()`: administrator-only ledger reconciliation; persists an audit snapshot under `cashReconciliations/{id}`.
 
-## Provider-independent payment state machine\n\n`functions/src/finance/payment-state.ts` defines normalized transitions for pending, processing, succeeded, failed, cancelled and expired payments, plus refund states. Provider-specific callbacks must be verified and normalized before using this state machine. Same-state retries are no-ops; failed, cancelled and expired payments cannot be reopened. Cash collection uses the direct `PENDING -> SUCCEEDED` transition.\n\n## Cash accounting
+## Provider-independent payment state machine
+
+`functions/src/finance/payment-state.ts` defines normalized transitions for pending, processing, succeeded, failed, cancelled and expired payments, plus refund states. Provider-specific callbacks must be verified and normalized before using this state machine. Same-state retries are no-ops; failed, cancelled and expired payments cannot be reopened. Cash collection uses the direct `PENDING -> SUCCEEDED` transition.
+
+## Cash accounting
 
 At collection, the receipt operation balances the full customer payment against its allocations:
 
