@@ -1,13 +1,16 @@
 package com.zouitel.presentaion.screens.shops
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,11 +33,39 @@ class ShopOrdersScreen() : Screen {
         val screenModel = rememberScreenModel { ShopOrdersScreenModel() }
         val orders by screenModel.orders.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        var searchQuery by remember { mutableStateOf("") }
+        var selectedFilter by remember { mutableStateOf("All") }
+
+        val filters = listOf("All", "Needs attention", "Preparing", "Out for delivery", "Completed", "Cancelled")
+        val filteredOrders = remember(orders, searchQuery, selectedFilter) {
+            val query = searchQuery.trim().lowercase()
+            orders.filter { order ->
+                val matchesSearch = query.isBlank() || listOf(
+                    order.id,
+                    order.clientId,
+                    order.sourceName,
+                    order.pickupLocation,
+                    order.dropoffLocation,
+                    order.deliveryName,
+                    order.deliveryPhone,
+                    order.items.joinToString(" ") { it.name }
+                ).any { it.lowercase().contains(query) }
+                val matchesStatus = when (selectedFilter) {
+                    "Needs attention" -> order.status == OrderStatus.PENDING_PAYMENT || order.status == OrderStatus.PLACED
+                    "Preparing" -> order.status == OrderStatus.ACCEPTED || order.status == OrderStatus.PREPARING
+                    "Out for delivery" -> order.status == OrderStatus.OUT_FOR_DELIVERY
+                    "Completed" -> order.status == OrderStatus.DELIVERED
+                    "Cancelled" -> order.status == OrderStatus.CANCELLED
+                    else -> true
+                }
+                matchesSearch && matchesStatus
+            }
+        }
 
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Text("Store Incoming Demand Cards", fontWeight = FontWeight.Bold) },
+                    title = { Text("Shop orders", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -43,32 +74,107 @@ class ShopOrdersScreen() : Screen {
                 )
             }
         ) { paddingValues ->
-            if (isLoading) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+            when {
+                isLoading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(paddingValues),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator() }
                 }
-            } else if (orders.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No customer demand cards received yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                orders.isEmpty() -> {
+                    EmptyOrdersState(
+                        title = "No shop orders yet",
+                        message = "New customer orders will appear here when your shop receives them.",
+                        modifier = Modifier.fillMaxSize().padding(paddingValues)
                     )
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(paddingValues),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(orders, key = { it.id }) { order ->
-                        ManagerOrderCard(
-                            order = order,
-                            onStatusChange = { newStatus -> screenModel.updateOrderStatus(order, newStatus) }
-                        )
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize().padding(paddingValues),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        item {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text(
+                                    "Keep every order moving",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "${filteredOrders.size} of ${orders.size} orders",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                OutlinedTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    placeholder = { Text("Search order, customer, address or item") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Search, contentDescription = null)
+                                    },
+                                    trailingIcon = {
+                                        if (searchQuery.isNotEmpty()) {
+                                            TextButton(onClick = { searchQuery = "" }) { Text("Clear") }
+                                        }
+                                    }
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    filters.forEach { filter ->
+                                        FilterChip(
+                                            selected = selectedFilter == filter,
+                                            onClick = { selectedFilter = filter },
+                                            label = { Text(filter) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (filteredOrders.isEmpty()) {
+                            item {
+                                EmptyOrdersState(
+                                    title = "No matching orders",
+                                    message = "Try another search term or choose a different order status.",
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 36.dp)
+                                )
+                            }
+                        } else {
+                            items(filteredOrders, key = { it.id }) { order ->
+                                ManagerOrderCard(
+                                    order = order,
+                                    onStatusChange = { newStatus ->
+                                        screenModel.updateOrderStatus(order, newStatus)
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun EmptyOrdersState(title: String, message: String, modifier: Modifier = Modifier) {
+        Box(modifier = modifier.padding(28.dp), contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
             }
         }
     }
@@ -82,76 +188,93 @@ class ShopOrdersScreen() : Screen {
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
             elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Demand #${order.id.takeLast(6).uppercase()}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                    Text(formattedDate, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            "Order #${order.id.takeLast(6).uppercase()}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(formattedDate, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    StatusChip(order.status)
                 }
-
-                StatusChip(order.status)
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Text("Courier Pickup (Store)", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
-                Text(
-                    order.pickupLocation.ifBlank { order.sourceName },
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                Text("PICKUP", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Text(order.pickupLocation.ifBlank { order.sourceName }, style = MaterialTheme.typography.bodyMedium)
+                Text("CUSTOMER DROP-OFF", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Text(order.dropoffLocation.ifBlank { "Address not provided" }, style = MaterialTheme.typography.bodyMedium)
 
-                Text("Client Drop-off Address", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                 Text(
-                    order.dropoffLocation.ifBlank { "Address not provided" },
-                    style = MaterialTheme.typography.bodyMedium
+                    "Payment: ${order.paymentMethod.ifBlank { "Cash" }}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-
-                Text("Payment Method: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (order.deliveryName.isNotBlank()) {
-                    Text("Assigned Delivery: ${order.deliveryName} (${order.deliveryPhone})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary, fontWeight = FontWeight.Medium)
+                    Text(
+                        "Courier: ${order.deliveryName}${order.deliveryPhone.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                Text("Ordered Products (${order.items.sumOf { it.quantity }})", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                Text(
+                    "ITEMS · ${order.items.sumOf { it.quantity }}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
                 order.items.forEach { item ->
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("${item.quantity}x ${item.name}", style = MaterialTheme.typography.bodySmall)
+                        Text("${item.quantity} × ${item.name}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                         Text("₱${"%.2f".format(item.totalPrice)}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                     }
                 }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Total Price", style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold))
-                    Text("₱${"%.2f".format(order.totalPrice)}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Order total", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "₱${"%.2f".format(order.totalPrice)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    when (order.status) {
-                        OrderStatus.PENDING_PAYMENT -> {
-                            Text("Waiting for customer payment confirmation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        OrderStatus.PLACED -> {
+                when (order.status) {
+                    OrderStatus.PENDING_PAYMENT -> {
+                        Text("Waiting for customer payment confirmation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    OrderStatus.PLACED -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick = { onStatusChange(OrderStatus.ACCEPTED) },
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.weight(1f).height(48.dp)
                             ) {
                                 Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Accept", fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(
@@ -161,44 +284,33 @@ class ShopOrdersScreen() : Screen {
                                 modifier = Modifier.weight(1f).height(48.dp)
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Spacer(Modifier.width(4.dp))
                                 Text("Reject", fontWeight = FontWeight.Bold)
                             }
                         }
-                        OrderStatus.ACCEPTED -> {
-                            Button(
-                                onClick = { onStatusChange(OrderStatus.PREPARING) },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth().height(48.dp)
-                            ) {
-                                Text("Start Preparing Order", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        OrderStatus.PREPARING -> {
-                            Button(
-                                onClick = { onStatusChange(OrderStatus.OUT_FOR_DELIVERY) },
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth().height(48.dp)
-                            ) {
-                                Text("Dispatch to Delivery", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        OrderStatus.OUT_FOR_DELIVERY -> {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    "Handed to courier network. Awaiting courier delivery confirmation.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(12.dp)
-                                )
-                            }
-                        }
-                        OrderStatus.DELIVERED, OrderStatus.CANCELLED -> {}
                     }
+                    OrderStatus.ACCEPTED -> {
+                        Button(
+                            onClick = { onStatusChange(OrderStatus.PREPARING) },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                        ) { Text("Start preparing", fontWeight = FontWeight.Bold) }
+                    }
+                    OrderStatus.PREPARING -> {
+                        Button(
+                            onClick = { onStatusChange(OrderStatus.OUT_FOR_DELIVERY) },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                        ) { Text("Dispatch to courier", fontWeight = FontWeight.Bold) }
+                    }
+                    OrderStatus.OUT_FOR_DELIVERY -> {
+                        Text(
+                            "Handed to the courier network. Waiting for delivery confirmation.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    OrderStatus.DELIVERED, OrderStatus.CANCELLED -> Unit
                 }
             }
         }
@@ -210,19 +322,17 @@ class ShopOrdersScreen() : Screen {
             OrderStatus.PENDING_PAYMENT -> MaterialTheme.colorScheme.tertiary to "PAYMENT PENDING"
             OrderStatus.PLACED -> MaterialTheme.colorScheme.error to "PLACED"
             OrderStatus.ACCEPTED -> MaterialTheme.colorScheme.tertiary to "ACCEPTED"
-            OrderStatus.PREPARING -> MaterialTheme.colorScheme.secondary to "PACKAGING"
-            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR COURIER"
+            OrderStatus.PREPARING -> MaterialTheme.colorScheme.secondary to "PREPARING"
+            OrderStatus.OUT_FOR_DELIVERY -> MaterialTheme.colorScheme.primary to "OUT FOR DELIVERY"
             OrderStatus.DELIVERED -> MaterialTheme.colorScheme.outline to "DELIVERED"
             OrderStatus.CANCELLED -> MaterialTheme.colorScheme.error to "CANCELLED"
         }
-        Surface(
-            color = color.copy(alpha = 0.15f),
-            shape = RoundedCornerShape(8.dp)
-        ) {
+        Surface(color = color.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp)) {
             Text(
                 text = text,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
                 color = color
             )
         }
