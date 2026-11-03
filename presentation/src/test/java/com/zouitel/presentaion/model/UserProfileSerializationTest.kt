@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.model
 
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -30,6 +32,6 @@ class UserProfileSerializationTest {
         val decoded = json.decodeFromString<UserProfile>(encoded)
 
         assertEquals(profile, decoded)
-        assertEquals(false, "\"phone\" in encoded)
+        assertEquals(false, "\"phone\":" in encoded)
     }
 }
