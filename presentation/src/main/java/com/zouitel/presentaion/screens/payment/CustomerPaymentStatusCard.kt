@@ -31,7 +31,6 @@ import java.net.URI
  * This component displays only the state persisted by trusted backend operations.
  * Opening a checkout URL never changes the payment state.
  */
-@Composable
 @Serializable
 private data class XenditCheckoutResponse(
     val paymentId: String = "",
@@ -42,6 +41,7 @@ private data class XenditCheckoutResponse(
     val providerRequestId: String = ""
 )
 
+@Composable
 fun CustomerPaymentStatusCard(
     paymentMethod: String,
     paymentId: String = "",
