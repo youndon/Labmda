@@ -598,7 +598,7 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(fare)}",
+                        "₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -713,7 +713,7 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Distance: ${"%.1f".format(tripDistanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(fare)}",
+                        "₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -805,7 +805,7 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Distance: ${"%.1f".format(distanceKm)} km", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(fare)}",
+                        "₱${"%.2f".format(fare)}",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -890,7 +890,7 @@ class PassengerScreen : Screen {
                 ) {
                     Text("Fare amount", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        "$${"%.2f".format(trip.fare)}",
+                        "₱${"%.2f".format(trip.fare)}",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
