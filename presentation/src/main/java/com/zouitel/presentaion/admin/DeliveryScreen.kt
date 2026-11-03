@@ -77,7 +77,7 @@ class DeliveryScreen : Screen {
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(text = "Phone: ${profile.phoneNumber}", style = MaterialTheme.typography.bodyMedium)
-                Text(text = "Vehicle: ${profile.deliveryServices?.vehicleInfo}", style = MaterialTheme.typography.bodyMedium)
+                Text(text = "Vehicle: ${profile.deliveryServices?.vehicleInfo?.type?.name ?: "Not provided"}", style = MaterialTheme.typography.bodyMedium)
                 if (hasIdentityDocument) {
                     TextButton(onClick = { uriHandler.openUri(identityDocumentLink) }) {
                         Text("View identity document")
