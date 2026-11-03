@@ -39,6 +39,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import coil3.compose.AsyncImage
 import com.zouitel.presentaion.common.Status
+import com.zouitel.presentaion.screens.account.LogInScreen
 import com.zouitel.presentaion.screens.delivery.DeliveryWorkplaceScreen
 import com.zouitel.presentaion.screens.food.RestaurantWorkplaceScreen
 import com.zouitel.presentaion.screens.ride.DriverWorkplaceScreen
@@ -254,9 +255,18 @@ class AccountScreen : Screen {
                                     tint = MaterialTheme.colorScheme.error
                                 ) {
                                     coroutineScope.launch {
-                                        Firebase.auth.signOut()
+                                        try {
+                                            Firebase.auth.signOut()
+                                            Toast.makeText(context, "Signed out", Toast.LENGTH_SHORT).show()
+                                            navigator.replaceAll(LogInScreen())
+                                        } catch (error: Exception) {
+                                            Toast.makeText(
+                                                context,
+                                                error.message ?: "Could not sign out",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
                                     }
-                                    Toast.makeText(context, "Signed out", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
