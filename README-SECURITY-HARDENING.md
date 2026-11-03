@@ -38,7 +38,22 @@ removal in the privileged payment and finance modules.
 
 Admin authorization is based on the trusted Firebase Authentication custom
 claim admin === true. Never infer admin rights from a client-writable
-Realtime Database profile field. Provision or revoke the claim only from a
+Realtime Database profile field.
+
+Provider onboarding and approval callables are exported from
+`functions/src/operations/provider-approvals.ts`. Restaurant and shop
+applications are created server-side in PENDING state; provider status
+changes require the admin custom claim. Food/shop manager modes are only
+granted by a callable after the corresponding approval status is APPROVED.
+The Android Panel tab is hidden unless the refreshed ID token contains
+`admin === true`; this is a presentation gate, not a substitute for backend
+authorization.
+
+The order/ride rules fragment now additionally marks `foodStatus`,
+`foodMode`, `shopStatus`, `shopMode`, and `freightStatus` as server-owned,
+and protects status fields under `shops` and `restaurants`. These rules are
+still only a fragment and are not deployable until merged into the complete
+application ruleset. Provision or revoke the claim only from a
 trusted administrative environment using the existing
 functions/scripts/set-admin-claim.cjs workflow and appropriate
 Firebase Admin credentials.
