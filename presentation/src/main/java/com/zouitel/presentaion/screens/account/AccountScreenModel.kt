@@ -67,12 +67,12 @@ class AccountScreenModel(
     suspend fun saveUserProfile(userProfile: UserProfile) {
         if (userProfile.uid.isBlank()) return
         val updates = mutableMapOf<String, Any?>(
-            "uid" to userProfile.uid,
-            "fullName" to userProfile.fullName
+            "uid" to userProfile.uid
         )
-        userProfile.email?.let { updates["email"] = it }
-        userProfile.phoneNumber?.let { updates["phoneNumber"] = it }
-        userProfile.photoUrl?.let { updates["photoUrl"] = it }
+        userProfile.fullName.takeIf { it.isNotBlank() }?.let { updates["fullName"] = it }
+        userProfile.email?.takeIf { it.isNotBlank() }?.let { updates["email"] = it }
+        userProfile.phoneNumber?.takeIf { it.isNotBlank() }?.let { updates["phoneNumber"] = it }
+        userProfile.photoUrl?.takeIf { it.isNotBlank() }?.let { updates["photoUrl"] = it }
         db.child("users")
             .child(userProfile.uid)
             .updateChildren(updates)

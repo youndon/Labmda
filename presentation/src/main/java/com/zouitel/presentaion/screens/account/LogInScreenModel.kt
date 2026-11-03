@@ -14,8 +14,16 @@ class LogInScreenModel(
             // Creates a path like: /users/{uid}
             val userNode = usersRef.child("users").child(userProfile.uid)
 
-            // RTDB uses setValue() for serialized classes
-            userNode.setValue(userProfile)
+            // Update identity fields only. Never serialize UserProfile here:
+            // doing so would overwrite server-owned approvals and service settings.
+            val updates = mutableMapOf<String, Any?>(
+                "uid" to userProfile.uid
+            )
+            userProfile.fullName.takeIf { it.isNotBlank() }?.let { updates["fullName"] = it }
+            userProfile.email?.takeIf { it.isNotBlank() }?.let { updates["email"] = it }
+            userProfile.phoneNumber?.let { updates["phoneNumber"] = it }
+            userProfile.photoUrl?.let { updates["photoUrl"] = it }
+            userNode.updateChildren(updates)
 
             result.data = Unit
         } catch (e: Exception) {
