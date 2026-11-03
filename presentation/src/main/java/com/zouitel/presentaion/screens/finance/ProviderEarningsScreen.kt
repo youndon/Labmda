@@ -2,7 +2,6 @@ package com.zouitel.presentaion.screens.finance
 
 import com.zouitel.presentaion.common.LabmdaAlertDialog
 import com.zouitel.presentaion.common.AppCard
-import com.zouitel.presentaion.common.AppCardContent
 import com.zouitel.presentaion.common.AppSectionTitle
 import com.zouitel.presentaion.common.AppSpacing
 import com.zouitel.presentaion.common.AppPrimaryButton
@@ -157,7 +156,6 @@ class ProviderEarningsScreen : Screen {
                         AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.extraLarge,
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
                             Column(Modifier.padding(AppSpacing.lg), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -190,7 +188,6 @@ class ProviderEarningsScreen : Screen {
                         AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -215,7 +212,6 @@ class ProviderEarningsScreen : Screen {
                             AppCard(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(18.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                             ) {
                                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("Select earnings wallet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -240,7 +236,6 @@ class ProviderEarningsScreen : Screen {
                         AppCard(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text("Request a payout", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -281,7 +276,6 @@ class ProviderEarningsScreen : Screen {
                             AppCard(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = MaterialTheme.shapes.large,
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                             ) {
                                 Column(Modifier.padding(AppSpacing.md), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -407,7 +401,6 @@ private fun BalanceTile(label: String, amountMinor: Long, modifier: Modifier = M
     AppCard(
         modifier = modifier,
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
