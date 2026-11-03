@@ -91,15 +91,16 @@ class LogInScreen : Screen {
                         val firebaseUser = authResult.user
 
                         if (firebaseUser != null && firebaseUser.uid.isNotBlank()) {
-                            screenModel.saveUserProfile(
-                                UserProfile().copy(
+                            val saved = screenModel.saveUserProfile(
+                                UserProfile(
                                     uid = firebaseUser.uid,
                                     fullName = firebaseUser.displayName ?: "",
-                                    email = firebaseUser.email ?: "",
-                                    phoneNumber = firebaseUser.phoneNumber ?: "",
+                                    email = firebaseUser.email,
+                                    phoneNumber = firebaseUser.phoneNumber,
                                     photoUrl = firebaseUser.photoURL
                                 )
                             )
+                            saved.e?.let { throw it }
                         }
 
                         onSignedIn()
