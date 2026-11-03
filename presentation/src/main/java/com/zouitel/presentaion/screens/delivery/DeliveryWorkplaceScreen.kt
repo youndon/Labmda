@@ -311,7 +311,6 @@ class DeliveryWorkplaceScreen : Screen {
 
         LabmdaAlertDialog(
             onDismissRequest = onDismiss,
-            shape = RoundedCornerShape(20.dp),
             title = { Text(if (service == null) "Register Delivery Service" else "Edit Delivery Service", fontWeight = FontWeight.Bold) },
             text = {
                 Column(
