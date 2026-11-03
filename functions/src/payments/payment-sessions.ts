@@ -67,7 +67,11 @@ export const createSimulatedGcashSession = onCall({ enforceAppCheck: true }, asy
     if (current.uid !== uid || !["QUOTED", "ORDER_CREATED", "RIDE_CREATED", "DELIVERY_CREATED"].includes(current.status) || current.expiresAt <= Date.now()) return;
     return { ...current, status: "CHECKOUT_STARTED", checkoutSessionId: sessionId };
   }, undefined, false);
-  if (!quoteClaim.committed) throw new HttpsError("failed-precondition", "This quote has already started checkout or has expired.");
+  const claimedQuote = quoteClaim.snapshot.val() as Record<string, any> | null;
+  if (!quoteClaim.committed || !claimedQuote || claimedQuote.status !== "CHECKOUT_STARTED"
+    || claimedQuote.checkoutSessionId !== sessionId) {
+    throw new HttpsError("failed-precondition", "This quote has already started checkout or has expired.");
+  }
   const updates: Record<string, unknown> = {};
   updates[`paymentSessions/${sessionId}`] = session;
   updates[`paymentIntents/${paymentId}`] = paymentIntent;
