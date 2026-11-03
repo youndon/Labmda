@@ -246,9 +246,7 @@ private fun RestaurantCardItem(
                 }
             }
 
-            AppCardContent(
-                verticalArrangement = Arrangement.spacedBy(AppSpacing.md)
-            ) {
+            AppCardContent {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
