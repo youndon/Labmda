@@ -13,7 +13,7 @@ type FakeFirestore = {
   runTransaction: (work: (transaction: {
     get: (ref: FakeRef) => Promise<{ exists: boolean; data: () => unknown }>;
     create: (ref: FakeRef, value: unknown) => void;
-  }) => Promise<void>;
+  }) => Promise<void>) => Promise<void>;
   collection: (name: string) => { doc: (id: string) => FakeRef };
 };
 
