@@ -127,6 +127,15 @@ class AdminPayoutScreen : Screen {
         val message by model.message.collectAsState()
         var selectedForPayment by remember { mutableStateOf<PendingPayout?>(null) }
         var transferReference by remember { mutableStateOf("") }
+        var query by remember { mutableStateOf("") }
+        val filteredRequests = requests.filter {
+            it.providerKind.contains(query, ignoreCase = true) ||
+                it.providerId.contains(query, ignoreCase = true) ||
+                it.accountName.contains(query, ignoreCase = true) ||
+                it.accountNumber.contains(query, ignoreCase = true) ||
+                it.method.contains(query, ignoreCase = true) ||
+                it.payoutId.contains(query, ignoreCase = true)
+        }
 
         Scaffold(
             topBar = {
@@ -155,10 +164,37 @@ class AdminPayoutScreen : Screen {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (!message.isNullOrBlank()) item { Text(message.orEmpty(), color = MaterialTheme.colorScheme.primary) }
-                    if (requests.isEmpty()) {
-                        item { Text("There are no payout requests awaiting review.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                "${requests.size} payout requests awaiting review",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Review the provider destination and record a transfer reference only after the payment has actually been sent.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            OutlinedTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                label = { Text("Search provider, account or payout ID") }
+                            )
+                        }
                     }
-                    items(requests, key = { it.payoutId }) { request ->
+                    if (filteredRequests.isEmpty()) {
+                        item {
+                            AdminApplicationEmptyState(
+                                title = if (requests.isEmpty()) "No payout requests awaiting review" else "No matching payout requests",
+                                description = if (requests.isEmpty()) "New provider payout requests will appear here." else "Try another provider, account number or payout ID."
+                            )
+                        }
+                    }
+                    items(filteredRequests, key = { it.payoutId }) { request ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(18.dp),
