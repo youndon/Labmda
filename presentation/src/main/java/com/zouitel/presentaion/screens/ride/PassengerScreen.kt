@@ -927,6 +927,7 @@ class PassengerScreen : Screen {
 
                 CustomerPaymentStatusCard(
                     paymentMethod = trip.paymentMethod,
+                    paymentId = trip.paymentId,
                     paymentStatus = trip.paymentStatus,
                     checkoutUrl = trip.checkoutUrl
                 )
