@@ -166,11 +166,13 @@ export async function processXenditPaymentWebhook(
     ?? (eventName === "payment.capture" ? data.payment_id : createHash("sha256").update(JSON.stringify(normalized)).digest("hex"));
   const eventKey = createHash("sha256").update(`${eventName}:${eventIdentity}`).digest("hex");
   let rejected = false;
+  let wasDuplicate = false;
   const now = Date.now();
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const events = root.paymentWebhookEvents ?? {};
     if (events[eventKey]) {
+      wasDuplicate = true;
       const prior = events[eventKey];
       if (prior.paymentId !== paymentId || prior.paymentRequestId !== paymentRequestId
         || prior.amountMinor !== amountMinor || prior.currency !== (data.currency ?? "PHP")) rejected = true;
@@ -224,7 +226,7 @@ export async function processXenditPaymentWebhook(
 
   const root = result.snapshot.val() as Record<string, any> | null;
   const storedEvent = root?.paymentWebhookEvents?.[eventKey];
-  if (storedEvent) return { accepted: !rejected, duplicate: !result.committed, status: storedEvent.status };
+  if (storedEvent) return { accepted: !rejected, duplicate: wasDuplicate, status: storedEvent.status };
   return { accepted: !rejected, duplicate: false };
 }
 
