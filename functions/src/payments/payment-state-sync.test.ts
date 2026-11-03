@@ -41,21 +41,23 @@ describe("payment state synchronization", () => {
   it("keeps cash due until the trusted collector marks the payment succeeded", async () => {
     const db = fakeDatabase({
       payments: { p1: { id: "p1", transactionType: "RIDE", tripId: "t1", method: "CASH", provider: "CASH", status: "PENDING", updatedAt: 30 } },
-      trips: { t1: { id: "t1", paymentId: "p1", status: "REQUESTED", paymentStatus: "CASH_DUE", paymentState: "CASH_DUE" } },
+      trips: { t1: { id: "t1", passengerId: "passenger_1", paymentId: "p1", status: "REQUESTED", paymentStatus: "CASH_DUE", paymentState: "CASH_DUE" } },
     });
     await synchronizePaymentState(db, "p1");
     expect(db.value().trips.t1.paymentStatus).toBe("CASH_DUE");
     expect(db.value().trips.t1.paymentState).toBe("CASH_DUE");
+    expect(db.value().activeRideRequests.passenger_1.t1.status).toBe("REQUESTED");
   });
 
   it("cancels only a transaction still waiting for payment", async () => {
     const db = fakeDatabase({
       payments: { p1: { id: "p1", transactionType: "RIDE", tripId: "t1", method: "GCASH", provider: "BDO_CHECKOUT", status: "CANCELLED", updatedAt: 40 } },
-      trips: { t1: { id: "t1", paymentId: "p1", status: "PENDING_PAYMENT", paymentStatus: "PENDING" } },
+      trips: { t1: { id: "t1", passengerId: "passenger_1", paymentId: "p1", status: "PENDING_PAYMENT", paymentStatus: "PENDING" } },
     });
     await synchronizePaymentState(db, "p1");
     expect(db.value().trips.t1.paymentStatus).toBe("CANCELLED");
     expect(db.value().trips.t1.status).toBe("CANCELLED");
+    expect(db.value().activeRideRequests?.passenger_1).toBeUndefined();
   });
 
   it("does not touch a different transaction or an unrelated payment", async () => {
