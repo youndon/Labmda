@@ -1,5 +1,7 @@
 package com.zouitel.presentaion.screens.delivery
 
+import android.widget.Toast
+
 import com.zouitel.presentaion.common.LabmdaAlertDialog
 
 import androidx.compose.foundation.background
@@ -15,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,6 +41,12 @@ class DeliveryWorkplaceScreen : Screen {
         val profile by screenModel.profile.collectAsState()
         val deliveryAccount by screenModel.deliveryAccount.collectAsState()
         val isLoading by screenModel.isLoading.collectAsState()
+        val onlineError by screenModel.onlineError.collectAsState()
+        val context = LocalContext.current
+
+        LaunchedEffect(onlineError) {
+            if (!onlineError.isNullOrBlank()) Toast.makeText(context, onlineError, Toast.LENGTH_LONG).show()
+        }
 
         var showAddEditDialog by remember { mutableStateOf(false) }
 
