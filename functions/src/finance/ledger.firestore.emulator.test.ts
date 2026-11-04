@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { deleteApp, initializeApp, type App } from "firebase-admin/app";
 import { getFinancialAccount, postFinancialOperation, reconcileFinancialLedger, createFinancialTransfer } from "./ledger.js";
+import { buildClaimAllocationTransfer } from "../operations/transaction-operations.js";
 
 const emulatorOnly = !!process.env.FIRESTORE_EMULATOR_HOST;
 
@@ -51,6 +52,36 @@ describe.skipIf(!emulatorOnly)("Firestore emulator: financial ledger transaction
     expect(reconciliation.balanced).toBe(true);
     expect(reconciliation.discrepancies).toEqual([]);
   });
+
+  it("posts a claim-time courier transfer once when the claim is retried", async () => {
+    const suffix = randomUUID().replace(/-/g, "");
+    const paymentId = `payment_claim_${suffix}`;
+    const courierId = `courier_${suffix}`;
+    const clearingId = `unallocated_payment_${paymentId}`;
+    const walletId = `wallet_delivery_${courierId}`;
+    const now = Date.now();
+
+    await postFinancialOperation(createFinancialTransfer({
+      operationId: `seed_claim_${suffix}`, eventType: "ADJUSTMENT", referenceType: "PAYMENT",
+      referenceId: paymentId, idempotencyKey: `seed_claim_${suffix}`, createdAt: now,
+      description: "Seed unclaimed courier share", amountMinor: 875,
+      source: { accountId: `external_claim_${suffix}`, bucket: "CLEARING", deltaMinor: 0, partyType: "PAYMENT_PROVIDER", partyId: "test" },
+      destination: { accountId: clearingId, bucket: "CLEARING", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
+    }));
+
+    const claim = buildClaimAllocationTransfer({
+      paymentId, allocationId: `alloc_${paymentId}_delivery`,
+      beneficiaryId: courierId, beneficiaryType: "DELIVERY", amountMinor: 875, createdAt: now + 1,
+    });
+    expect(await postFinancialOperation(claim)).toEqual({ operationId: claim.operationId, duplicate: false });
+    expect(await postFinancialOperation(claim)).toEqual({ operationId: claim.operationId, duplicate: true });
+
+    expect((await getFinancialAccount(clearingId))?.clearingMinor).toBe(0);
+    expect((await getFinancialAccount(walletId))?.pendingMinor).toBe(875);
+    const reconciliation = await reconcileFinancialLedger();
+    expect(reconciliation.balanced).toBe(true);
+  });
+
   it("serializes many concurrent payout reservations against the same wallet", async () => {
     const suffix = randomUUID().replace(/-/g, "");
     const accountId = `wallet_driver_stress_${suffix}`;
