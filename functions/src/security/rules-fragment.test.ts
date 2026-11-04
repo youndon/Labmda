@@ -40,6 +40,11 @@ describe("order and ride Realtime Database rules fragment", () => {
     expect(rules.restaurantMeals["$restaurantId"]["$mealId"][".write"]).toContain("$restaurantId");
   });
 
+  it("allows clients to go offline but requires the server to authorize going online", () => {
+    expect(rules.users["$uid"].driverService.isOnline[".write"]).toContain("newData.val() == false");
+    expect(rules.users["$uid"].deliveryServices.isOnline[".write"]).toContain("newData.val() == false");
+  });
+
   it("prevents users from self-approving driver or delivery services", () => {
     expect(rules.users["$uid"].driverService.status[".write"]).toContain("newData.val() == 'PENDING'");
     expect(rules.users["$uid"].deliveryServices.status[".write"]).toContain("newData.val() == 'PENDING'");
