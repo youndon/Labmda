@@ -28,6 +28,144 @@ function fail(message: string): never {
 function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
+type ClaimBeneficiaryType = "DELIVERY" | "DRIVER";
+
+/** Deterministic, balanced transfer of the unassigned receipt remainder to the claimant's pending wallet. */
+export function buildClaimAllocationTransfer(args: {
+  paymentId: string;
+  allocationId: string;
+  beneficiaryId: string;
+  beneficiaryType: ClaimBeneficiaryType;
+  amountMinor: number;
+  createdAt: number;
+}) {
+  if (!args.paymentId || !args.allocationId || !args.beneficiaryId
+    || !["DELIVERY", "DRIVER"].includes(args.beneficiaryType)
+    || !Number.isSafeInteger(args.amountMinor) || args.amountMinor <= 0
+    || !Number.isSafeInteger(args.createdAt) || args.createdAt <= 0) {
+    throw new Error("Claim allocation transfer details are invalid.");
+  }
+  const operationId = `payment_${args.paymentId}_allocation_${args.allocationId}_assigned`;
+  const partyType = args.beneficiaryType === "DELIVERY" ? "COURIER" : "DRIVER";
+  const accountType = args.beneficiaryType === "DELIVERY" ? "delivery" : "driver";
+  return createFinancialTransfer({
+    operationId, eventType: "ADJUSTMENT", referenceType: "PAYMENT",
+    referenceId: args.paymentId, idempotencyKey: operationId,
+    createdAt: args.createdAt, description: "Assign unallocated payment proceeds to claimed service provider",
+    amountMinor: args.amountMinor,
+    source: { accountId: `unallocated_payment_${args.paymentId}`, bucket: "CLEARING",
+      deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },
+    destination: { accountId: `wallet_${accountType}_${args.beneficiaryId}`, bucket: "PENDING",
+      deltaMinor: 0, partyType, partyId: args.beneficiaryId },
+  });
+}
+
+/**
+ * A succeeded GCash receipt is immutable. Claiming creates a new allocation
+ * for its previously-unallocated remainder and posts a separate clearing to
+ * pending-wallet transfer. The deterministic operation ID makes retries safe
+ * even if the process stops after the ledger commit but before RTDB metadata.
+ */
+async function assignSucceededOnlinePaymentShare(
+  paymentId: string,
+  beneficiaryId: string,
+  beneficiaryType: ClaimBeneficiaryType,
+  transactionId: string,
+): Promise<void> {
+  const paymentRef = db().ref("payments/" + paymentId);
+  const paymentSnapshot = await paymentRef.get();
+  if (!paymentSnapshot.exists()) fail("The payment record is missing.");
+  const payment = paymentSnapshot.val() as Record<string, any>;
+  if (payment.method !== "GCASH" || payment.status !== "SUCCEEDED") return;
+  const expectedTransactionType = beneficiaryType === "DELIVERY" ? "ORDER" : "RIDE";
+  const expectedReference = beneficiaryType === "DELIVERY" ? payment.orderId : payment.tripId;
+  if (payment.transactionType !== expectedTransactionType || expectedReference !== transactionId) {
+    fail("The payment does not belong to this claimed transaction.");
+  }
+
+  const allocationsRef = db().ref("paymentAllocations/" + paymentId);
+  const allocationSnapshot = await allocationsRef.get();
+  if (!allocationSnapshot.exists()) fail("The succeeded payment has no initial allocations.");
+  const allocations = allocationSnapshot.val() as Record<string, Record<string, any>>;
+  const existingBeneficiary = Object.entries(allocations).find(([, row]) => row.beneficiaryType === beneficiaryType);
+  const now = Date.now();
+
+  if (existingBeneficiary) {
+    const [existingId, existing] = existingBeneficiary;
+    if (existing.beneficiaryId !== beneficiaryId || existing.status === "REVERSED") {
+      fail("The payment allocation is already assigned to another provider.");
+    }
+    if (beneficiaryType === "DELIVERY") {
+      await allocationsRef.transaction((current: Record<string, Record<string, any>> | null) => {
+        if (!current) return;
+        const row = current[existingId];
+        if (!row || row.beneficiaryId !== beneficiaryId) return;
+        const next = { ...current };
+        for (const [id, allocation] of Object.entries(current)) {
+          next[id] = { ...allocation, deliveryId: beneficiaryId, updatedAt: now };
+        }
+        return next;
+      }, undefined, false);
+      await paymentRef.transaction((current: Record<string, any> | null) => {
+        if (!current || (current.deliveryId && current.deliveryId !== beneficiaryId)) return;
+        return { ...current, deliveryId: beneficiaryId, updatedAt: now };
+      }, undefined, false);
+    }
+    return;
+  }
+
+  const allocatedMinor = Object.values(allocations).reduce((sum, row) => {
+    if (!Number.isSafeInteger(row.amountMinor) || row.amountMinor <= 0 || row.paymentId !== paymentId) {
+      fail("An existing payment allocation is invalid.");
+    }
+    return sum + row.amountMinor;
+  }, 0);
+  const amountMinor = Number(payment.amountMinor) - allocatedMinor;
+  if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
+    fail("The succeeded payment has no unassigned provider share to allocate.");
+  }
+  const allocationId = `alloc_${paymentId}_${beneficiaryType.toLowerCase()}`;
+  const transfer = buildClaimAllocationTransfer({
+    paymentId, allocationId, beneficiaryId, beneficiaryType, amountMinor, createdAt: now,
+  });
+  const clearing = await getFinancialAccount(`unallocated_payment_${paymentId}`);
+  if (!clearing || clearing.clearingMinor < amountMinor) {
+    fail("The payment clearing balance does not cover the unassigned provider share.");
+  }
+  await postFinancialOperation(transfer);
+
+  const allocation = {
+    id: allocationId, paymentId, transactionType: expectedTransactionType,
+    orderId: expectedTransactionType === "ORDER" ? transactionId : "",
+    tripId: expectedTransactionType === "RIDE" ? transactionId : "",
+    deliveryId: beneficiaryType === "DELIVERY" ? beneficiaryId : "",
+    beneficiaryId, beneficiaryType, amountMinor, currency: "PHP", status: "PENDING",
+    createdAt: now, updatedAt: now,
+  };
+  const saved = await allocationsRef.transaction((current: Record<string, Record<string, any>> | null) => {
+    if (!current) return;
+    const prior = current[allocationId];
+    if (prior && (prior.beneficiaryId !== beneficiaryId || prior.amountMinor !== amountMinor)) return;
+    const next: Record<string, Record<string, any>> = { ...current };
+    for (const [id, row] of Object.entries(current)) {
+      next[id] = beneficiaryType === "DELIVERY"
+        ? { ...row, deliveryId: beneficiaryId, updatedAt: now }
+        : row;
+    }
+    next[allocationId] = prior ?? allocation;
+    return next;
+  }, undefined, false);
+  if (!saved.committed) fail("The payment allocation changed while the provider share was being assigned.");
+
+  if (beneficiaryType === "DELIVERY") {
+    const linked = await paymentRef.transaction((current: Record<string, any> | null) => {
+      if (!current || (current.deliveryId && current.deliveryId !== beneficiaryId)) return;
+      return { ...current, deliveryId: beneficiaryId, updatedAt: now };
+    }, undefined, false);
+    if (!linked.committed) fail("The courier allocation was posted but the payment assignment could not be linked. Retry the claim.");
+  }
+}
+
 async function ensureOrderAllocations(orderId: string, courierId: string): Promise<void> {
   const orderSnapshot = await db().ref("orders/" + orderId).get();
   if (!orderSnapshot.exists()) return;
@@ -62,7 +200,13 @@ async function ensureOrderAllocations(orderId: string, courierId: string): Promi
     throw new HttpsError("failed-precondition", "Payment allocations already exist for a different courier.");
   }
   const latest = await db().ref("payments/" + paymentId).get();
-  if (latest.child("status").val() === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
+  if (latest.child("status").val() === "SUCCEEDED") {
+    if (latest.child("method").val() === "GCASH") {
+      await assignSucceededOnlinePaymentShare(paymentId, courierId, "DELIVERY", orderId);
+    } else {
+      await postPaymentReceiptFromDatabase(db(), paymentId);
+    }
+  }
 }
 
 async function releaseSucceededOnlinePaymentAllocations(paymentId: string): Promise<void> {
@@ -116,12 +260,16 @@ async function ensureRideAllocations(tripId: string, driverId: string): Promise<
     const allocations = buildRidePaymentAllocations({ paymentId, tripId, driverId, fareMinor: breakdown.fareMinor, driverEarningsMinor: breakdown.driverEarningsMinor, platformCommissionMinor: breakdown.platformCommissionMinor, providerFeeMinor: breakdown.providerFeeMinor, providerFeePayer: trip.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM", customerTotalMinor: breakdown.customerTotalMinor, createdAt: Date.now() });
     const rows: Record<string, unknown> = {};
     for (const allocation of allocations) rows[allocation.id] = allocation;
-    const updates: Record<string, unknown> = {};
-    updates["paymentAllocations/" + paymentId] = rows;
-    await db().ref().update(updates);
+    await db().ref("paymentAllocations/" + paymentId).set(rows);
   }
   const payment = await db().ref("payments/" + paymentId).get();
-  if (payment.child("status").val() === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
+  if (payment.child("status").val() === "SUCCEEDED") {
+    if (payment.child("method").val() === "GCASH") {
+      await assignSucceededOnlinePaymentShare(paymentId, driverId, "DRIVER", tripId);
+    } else {
+      await postPaymentReceiptFromDatabase(db(), paymentId);
+    }
+  }
 }
 export function isAllowedOrderTransition(from: string, to: string): boolean {
   return (from === "PLACED" && (to === "ACCEPTED" || to === "CANCELLED"))
