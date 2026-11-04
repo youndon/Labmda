@@ -381,7 +381,26 @@ export async function releaseCompletedPaymentAllocations(paymentId: string): Pro
       source: { accountId, bucket: "PENDING", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
       destination: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
     });
-    await postFinancialOperation(operation);
+    const priorRelease = await getFinancialOperation(operationId);
+    if (priorRelease) {
+      // Recover releases committed by the previous implementation, which used
+      // Date.now() as createdAt and could therefore not pass strict retry matching.
+      const debit = priorRelease.postings.find((posting) => posting.accountId === accountId
+        && posting.bucket === "PENDING" && posting.partyType === partyType
+        && posting.partyId === allocation.beneficiaryId && posting.deltaMinor < 0);
+      const credit = priorRelease.postings.find((posting) => posting.accountId === accountId
+        && posting.bucket === "AVAILABLE" && posting.partyType === partyType
+        && posting.partyId === allocation.beneficiaryId && posting.deltaMinor > 0);
+      const priorAmount = debit ? -debit.deltaMinor : 0;
+      if (priorRelease.eventType !== "ADJUSTMENT" || priorRelease.referenceType !== "PAYMENT"
+        || priorRelease.referenceId !== paymentId || priorRelease.idempotencyKey !== operationId
+        || !debit || !credit || credit.deltaMinor !== priorAmount
+        || (priorAmount !== releasableMinor && priorAmount !== allocation.amountMinor)) {
+        throw new HttpsError("failed-precondition", "An existing allocation release operation does not match the expected payment release.");
+      }
+    } else {
+      await postFinancialOperation(operation);
+    }
     const marked = await db().ref("paymentAllocations/" + paymentId + "/" + allocationId).transaction((current: Record<string, any> | null) => {
       if (!current || current.status === "READY") return current;
       if (current.status !== "PENDING") return;
