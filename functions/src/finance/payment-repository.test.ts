@@ -98,4 +98,19 @@ describe("postPaymentReceiptFromDatabase", () => {
     });
     await expect(postPaymentReceiptFromDatabase(database, payment.id)).rejects.toThrow(/identity/i);
   });
+
+  it("posts an unassigned courier share to CLEARING instead of requiring a courier allocation", async () => {
+    postFinancialOperationMock.mockResolvedValueOnce({ operationId: "payment_payment_1_received", duplicate: false });
+    const partialAllocation: PaymentAllocation = { ...allocation, amountMinor: 700 };
+    const { database } = createDatabase({
+      "payments/payment_1": payment,
+      "paymentAllocations/payment_1": { allocation_1: partialAllocation },
+    });
+    await postPaymentReceiptFromDatabase(database, payment.id);
+    const operation = postFinancialOperationMock.mock.calls[0]?.[0];
+    expect(operation.postings).toContainEqual(expect.objectContaining({
+      accountId: "unallocated_payment_payment_1", bucket: "CLEARING", deltaMinor: 300,
+    }));
+    expect(operation.postings.reduce((sum: number, posting: { deltaMinor: number }) => sum + posting.deltaMinor, 0)).toBe(0);
+  });
 });
