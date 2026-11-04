@@ -58,7 +58,7 @@ async function ensureOrderAllocations(orderId: string, courierId: string): Promi
     updates["payments/" + paymentId + "/deliveryId"] = courierId;
     updates["payments/" + paymentId + "/updatedAt"] = Date.now();
     await db().ref().update(updates);
-  } else if (payment.deliveryId !== courierId) {
+  } else if (payment.deliveryId && payment.deliveryId !== courierId) {
     throw new HttpsError("failed-precondition", "Payment allocations already exist for a different courier.");
   }
   const latest = await db().ref("payments/" + paymentId).get();

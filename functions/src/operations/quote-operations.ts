@@ -3,6 +3,7 @@ import { getDatabase, type Reference } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { isQuoteClaimable } from "./quote-guards.js";
 import { assertQuotePickupMatches, requireMerchantPickup } from "./merchant-location.js";
+import { buildInitialOrderPaymentAllocations, buildInitialRidePaymentAllocations, buildInitialStandaloneDeliveryPaymentAllocations } from "../finance/payment-allocations.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -112,6 +113,25 @@ export const createOrderFromQuote = onCall({ enforceAppCheck: true }, async (cal
       payerId: uid, method, status: "PENDING", provider: method === "GCASH" ? "BDO_CHECKOUT" : "CASH", amountMinor: breakdown.customerTotalMinor,
       currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
     };
+    if (method === "GCASH") {
+      const providerFeePayer = order.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM";
+      const initialAllocations = order.orderType === "DELIVERY"
+        ? buildInitialStandaloneDeliveryPaymentAllocations({
+            paymentId, orderId, deliveryFeeMinor: breakdown.deliveryFeeMinor,
+            courierEarningsMinor: breakdown.courierEarningsMinor,
+            platformCommissionMinor: breakdown.platformCommissionMinor,
+            providerFeeMinor: breakdown.providerFeeMinor ?? 0, providerFeePayer,
+            customerTotalMinor: breakdown.customerTotalMinor, createdAt: now,
+          })
+        : buildInitialOrderPaymentAllocations({
+            paymentId, orderId, merchantOwnerId: ownerUid, breakdown,
+            providerFeePayer, createdAt: now,
+          });
+      if (initialAllocations.length === 0) throw new HttpsError("failed-precondition", "The order quote produced no initial payment allocations.");
+      const allocationRows: Record<string, unknown> = {};
+      for (const allocation of initialAllocations) allocationRows[allocation.id] = allocation;
+      updates[`paymentAllocations/${paymentId}`] = allocationRows;
+    }
     updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
     updates[`pricing/quotes/${quoteId}/status`] = "ORDER_CREATED";
     updates[`pricing/quotes/${quoteId}/orderId`] = orderId;
@@ -176,6 +196,20 @@ export const createRideFromQuote = onCall({ enforceAppCheck: true }, async (call
       status: "PENDING", amountMinor: breakdown.customerTotalMinor,
       currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
     };
+    if (trip.paymentMethod === "GCASH") {
+      const initialAllocations = buildInitialRidePaymentAllocations({
+        paymentId, tripId, fareMinor: breakdown.fareMinor,
+        driverEarningsMinor: breakdown.driverEarningsMinor,
+        platformCommissionMinor: breakdown.platformCommissionMinor,
+        providerFeeMinor: breakdown.providerFeeMinor ?? 0,
+        providerFeePayer: trip.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM",
+        customerTotalMinor: breakdown.customerTotalMinor, createdAt: now,
+      });
+      if (initialAllocations.length === 0) throw new HttpsError("failed-precondition", "The ride quote produced no initial payment allocations.");
+      const allocationRows: Record<string, unknown> = {};
+      for (const allocation of initialAllocations) allocationRows[allocation.id] = allocation;
+      updates[`paymentAllocations/${paymentId}`] = allocationRows;
+    }
     updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
     updates[`pricing/quotes/${quoteId}/status`] = "RIDE_CREATED";
     updates[`pricing/quotes/${quoteId}/tripId`] = tripId;
@@ -204,7 +238,8 @@ export const createDeliveryFromQuote = onCall({ enforceAppCheck: true }, async (
     const now = Date.now();
     const method = quote.paymentMethod === "GCASH" ? "GCASH" : "CASH";
     const providerFeePayer = method === "GCASH"
-      ? String((await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() ?? "PLATFORM")
+      && (await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() === "CUSTOMER"
+      ? "CUSTOMER"
       : "PLATFORM";
     const order = {
       id: orderId, clientId: uid, orderType: "DELIVERY", sourceId: "", sourceName: "Standalone Delivery",
@@ -234,6 +269,19 @@ export const createDeliveryFromQuote = onCall({ enforceAppCheck: true }, async (
       currency: "PHP", refundedAmountMinor: 0, createdAt: now, updatedAt: now, completedAt: null,
       provider: method === "GCASH" ? "BDO_CHECKOUT" : "CASH",
     };
+    if (method === "GCASH") {
+      const initialAllocations = buildInitialStandaloneDeliveryPaymentAllocations({
+        paymentId, orderId, deliveryFeeMinor: breakdown.deliveryFeeMinor,
+        courierEarningsMinor: breakdown.courierEarningsMinor,
+        platformCommissionMinor: breakdown.platformCommissionMinor,
+        providerFeeMinor: breakdown.providerFeeMinor ?? 0, providerFeePayer,
+        customerTotalMinor: breakdown.customerTotalMinor, createdAt: now,
+      });
+      if (initialAllocations.length === 0) throw new HttpsError("failed-precondition", "The delivery quote produced no initial payment allocations.");
+      const allocationRows: Record<string, unknown> = {};
+      for (const allocation of initialAllocations) allocationRows[allocation.id] = allocation;
+      updates[`paymentAllocations/${paymentId}`] = allocationRows;
+    }
     updates[`pricing/quotes/${quoteId}/paymentId`] = paymentId;
     updates[`pricing/quotes/${quoteId}/status`] = "DELIVERY_CREATED";
     updates[`pricing/quotes/${quoteId}/orderId`] = orderId;

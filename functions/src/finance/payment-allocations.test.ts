@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations } from "./payment-allocations.js";
+import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandaloneDeliveryAllocations, buildInitialOrderPaymentAllocations, buildInitialRidePaymentAllocations, buildInitialStandaloneDeliveryPaymentAllocations } from "./payment-allocations.js";
 import type { MoneyBreakdown } from "../pricing/engine.js";
 
 const orderBreakdown: MoneyBreakdown = {
@@ -78,6 +78,54 @@ describe("standalone delivery allocations", () => {
       paymentId: "payment_delivery", orderId: "delivery_1", courierId: "courier_uid",
       deliveryFeeMinor: 1_000, courierEarningsMinor: 850, platformCommissionMinor: 100,
       providerFeeMinor: 0, providerFeePayer: "PLATFORM", customerTotalMinor: 1_000, createdAt: 100,
+    })).toThrow(/do not reconcile/i);
+  });
+});
+
+
+describe("pre-assignment GCash allocations", () => {
+  it("allocates merchant and platform shares while leaving the courier share unallocated", () => {
+    const rows = buildInitialOrderPaymentAllocations({
+      paymentId: "payment_initial_order", orderId: "order_1",
+      merchantOwnerId: "merchant_uid", breakdown: orderBreakdown,
+      providerFeePayer: "CUSTOMER", createdAt: 100,
+    });
+    expect(rows.map((row) => [row.beneficiaryType, row.amountMinor])).toEqual([
+      ["MERCHANT", 8_640], ["PLATFORM", 760],
+    ]);
+    expect(rows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(9_400);
+    expect(orderBreakdown.customerTotalMinor - rows.reduce((sum, row) => sum + row.amountMinor, 0))
+      .toBe(orderBreakdown.courierEarningsMinor);
+    expect(rows.every((row) => row.deliveryId === "")).toBe(true);
+  });
+
+  it("allocates only the platform share before a ride driver is assigned", () => {
+    const rows = buildInitialRidePaymentAllocations({
+      paymentId: "payment_initial_ride", tripId: "trip_1",
+      fareMinor: 5_000, driverEarningsMinor: 4_000, platformCommissionMinor: 1_000,
+      providerFeeMinor: 150, providerFeePayer: "CUSTOMER", customerTotalMinor: 5_150, createdAt: 100,
+    });
+    expect(rows).toEqual([
+      expect.objectContaining({ beneficiaryType: "PLATFORM", beneficiaryId: "platform", amountMinor: 1_150 }),
+    ]);
+    expect(5_150 - rows.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(4_000);
+  });
+
+  it("keeps a standalone delivery courier share unassigned while recording the platform share", () => {
+    const rows = buildInitialStandaloneDeliveryPaymentAllocations({
+      paymentId: "payment_initial_delivery", orderId: "delivery_1",
+      deliveryFeeMinor: 1_000, courierEarningsMinor: 850, platformCommissionMinor: 150,
+      providerFeeMinor: 25, providerFeePayer: "CUSTOMER", customerTotalMinor: 1_025, createdAt: 100,
+    });
+    expect(rows.map((row) => [row.beneficiaryType, row.amountMinor])).toEqual([["PLATFORM", 175]]);
+    expect(1_025 - rows[0].amountMinor).toBe(850);
+  });
+
+  it("rejects an initial split that does not account for the unassigned courier amount", () => {
+    expect(() => buildInitialOrderPaymentAllocations({
+      paymentId: "payment_bad", orderId: "order_1", merchantOwnerId: "merchant_uid",
+      breakdown: { ...orderBreakdown, customerTotalMinor: 10_000 },
+      providerFeePayer: "CUSTOMER", createdAt: 100,
     })).toThrow(/do not reconcile/i);
   });
 });

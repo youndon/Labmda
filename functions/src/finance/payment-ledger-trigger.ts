@@ -3,8 +3,11 @@ import { getDatabase } from "firebase-admin/database";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
 
 /**
- * Missing allocations are an expected intermediate state for courier-delivery
- * payments: the courier claim creates them and posts the receipt later.
+ * Every GCash transaction is created with its known merchant/platform
+ * allocations before checkout. The unassigned courier/driver share is left
+ * out of allocations so the receipt adapter posts it to CLEARING.
+ * Cash remains claim/collection-driven because its receipt requires a named
+ * collector and allocations that exactly match the collected amount.
  */
 export function shouldPostSucceededPaymentToLedger(
   before: unknown,
