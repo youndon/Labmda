@@ -81,7 +81,7 @@ export const getMyCashOperations = onCall({ enforceAppCheck: true }, async (call
   const uid = requireUid(call.auth?.uid);
   const [accounts, collectionsSnapshot, handoversSnapshot] = await Promise.all([
     listCashOwedAccounts(uid),
-    db().ref("cashCollections").get(),
+    db().ref("cashCollections").orderByChild("collectorId").equalTo(uid).get(),
     db().ref("cashHandovers").get(),
   ]);
   const handovers = (handoversSnapshot.val() ?? {}) as Record<string, { status?: string }>;
@@ -119,7 +119,7 @@ export const getMyCashOperations = onCall({ enforceAppCheck: true }, async (call
 export const getMyCashSettlementItems = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
   const [collectionsSnapshot, handoversSnapshot] = await Promise.all([
-    db().ref("cashCollections").get(), db().ref("cashHandovers").get(),
+    db().ref("cashCollections").orderByChild("status").equalTo("COLLECTED").get(), db().ref("cashHandovers").get(),
   ]);
   const handovers = (handoversSnapshot.val() ?? {}) as Record<string, { status?: string }>;
   const collections = Object.values((collectionsSnapshot.val() ?? {}) as Record<string, {
@@ -185,7 +185,7 @@ export const alertOverdueCashCollections = onSchedule("every 60 minutes", async 
   const config = await controls();
   const threshold = now - config.alertAfterHours * 60 * 60 * 1000;
   const [paymentsSnapshot, alertsSnapshot] = await Promise.all([
-    db().ref("payments").get(), db().ref("adminCashAlerts").get(),
+    db().ref("payments").orderByChild("status").equalTo("PENDING").get(), db().ref("adminCashAlerts").get(),
   ]);
   const payments = (paymentsSnapshot.val() ?? {}) as Record<string, Record<string, any>>;
   const alerts = (alertsSnapshot.val() ?? {}) as Record<string, Record<string, any>>;
