@@ -58,7 +58,7 @@ import java.util.UUID
 @Serializable data class MyCashSettlementItems(val currency: String = "PHP", val items: List<CashSettlementItem> = emptyList())
 @Serializable data class CashControlsConfig(val alertAfterHours: Int = 24, val maxCollectorOutstandingMinor: Long = 50_000)
 @Serializable data class CashOverdueAlert(val paymentId: String = "", val collectorId: String = "", val amountMinor: Long = 0, val ageHours: Int = 0, val status: String = "")
-@Serializable data class CashCollectorBalance(val collectorId: String = "", val outstandingMinor: Long = 0)
+@Serializable data class CashCollectorBalance(val collectorId: String = "", val outstandingMinor: Long = 0, val platformOutstandingMinor: Long = 0, val merchantOutstandingMinor: Long = 0)
 @Serializable data class AdminCashOverview(val config: CashControlsConfig = CashControlsConfig(), val alerts: List<CashOverdueAlert> = emptyList(), val collectors: List<CashCollectorBalance> = emptyList())
 
 class CashOperationsScreenModel : ScreenModel {
@@ -241,8 +241,9 @@ class AdminCashControlsScreen : Screen {
                     var remittanceId by remember(collector.collectorId) { mutableStateOf("rem_${UUID.randomUUID()}") }
                     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(collector.collectorId, fontWeight = FontWeight.SemiBold)
-                        Text("Outstanding: ${php(collector.outstandingMinor)}")
-                        OutlinedTextField(amount, { amount = it }, label = { Text("Cash remitted (PHP)") }, singleLine = true)
+                        Text("Platform commission due: ${php(collector.platformOutstandingMinor)}")
+                        Text("Merchant handovers due: ${php(collector.merchantOutstandingMinor)}", style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(amount, { amount = it }, label = { Text("Platform cash remitted (PHP)") }, singleLine = true)
                         OutlinedButton(onClick = {
                             val minor = ((amount.toDoubleOrNull() ?: 0.0) * 100).toLong()
                             if (minor > 0) model.remitCash(collector.collectorId, minor, remittanceId) {
