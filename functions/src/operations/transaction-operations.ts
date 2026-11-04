@@ -481,13 +481,20 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
       const existing = root.paymentAllocations?.[paymentId] as Record<string, Record<string, any>> | undefined;
       const succeededGcash = payment.method === "GCASH" && payment.status === "SUCCEEDED";
 
+      const existingCourier = existing
+        ? Object.values(existing).find((row) => row.beneficiaryType === "DELIVERY")
+        : undefined;
       if (succeededGcash) {
         // A succeeded receipt must already have its immutable initial
         // allocations. The unassigned courier share is posted by the
         // idempotent ledger-transfer recovery below after this transaction.
-        if (!existing || Object.values(existing).some((row) =>
-          row.beneficiaryType === "DELIVERY" && row.beneficiaryId !== uid)) return;
-      } else if (!existing) {
+        if (!existing || (existingCourier && existingCourier.beneficiaryId !== uid)
+          || (existingCourier && existingCourier.status === "REVERSED")) return;
+      } else if (!existingCourier
+        && (!existing || (payment.method === "GCASH" && ["PENDING", "PROCESSING"].includes(payment.status)))) {
+        // GCash orders are created with merchant/platform-only initial rows.
+        // Before payment succeeds, replace those rows with the complete split
+        // in the same transaction that claims the courier.
         const breakdown = current.paymentBreakdown as Record<string, number>;
         const rows = current.orderType === "DELIVERY"
           ? buildStandaloneDeliveryAllocations({
@@ -508,8 +515,8 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
         const allocationRows: Record<string, unknown> = {};
         for (const allocation of rows) allocationRows[allocation.id] = allocation;
         nextRoot.paymentAllocations = { ...root.paymentAllocations, [paymentId]: allocationRows };
-      } else if (!Object.values(existing).some((row) =>
-        row.beneficiaryType === "DELIVERY" && row.beneficiaryId === uid)) {
+      } else if (!existingCourier || existingCourier.beneficiaryId !== uid
+        || existingCourier.status === "REVERSED") {
         // Do not silently adopt an incomplete or differently assigned split.
         return;
       }
