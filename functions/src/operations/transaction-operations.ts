@@ -5,6 +5,7 @@ import { buildOrderPaymentAllocations, buildRidePaymentAllocations, buildStandal
 import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js";
 import { hasActiveBdoCheckoutRequest } from "../payments/payment-lifecycle-guards.js";
 import { createFinancialTransfer, getFinancialAccount, getFinancialOperation, postFinancialOperation } from "../finance/ledger.js";
+import { buildAutomaticOrderRefundCase } from "../finance/order-refunds.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -27,6 +28,83 @@ function fail(message: string): never {
 }
 function readString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * Atomically cancels an order and reserves the still-refundable amount of a
+ * succeeded GCash payment. The payment receipt and payment status are never
+ * rewritten; only the refund reservation and case are added.
+ */
+export function buildCancelledOrderRoot(
+  root: Record<string, any>,
+  orderId: string,
+  order: Record<string, any>,
+  actorUid: string,
+  actorRole: "CUSTOMER" | "MERCHANT" | "ADMIN",
+  now: number,
+): Record<string, any> | null {
+  const paymentId = readString(order.paymentId);
+  const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
+  let nextPayment = payment;
+  let nextRefundCases = root.refundCases ?? {};
+  let refundCaseId = readString(order.refundCaseId);
+
+  if (payment) {
+    if (payment.id !== paymentId || payment.orderId !== orderId || payment.transactionType !== "ORDER"
+      || payment.payerId !== order.clientId || payment.currency !== "PHP") return null;
+
+    if (payment.status === "PENDING" || payment.status === "PROCESSING") {
+      if (hasActiveBdoCheckoutRequest(payment)) return null;
+      nextPayment = { ...payment, status: "CANCELLED", updatedAt: now, completedAt: now };
+    } else if (payment.status === "SUCCEEDED" || payment.status === "PARTIALLY_REFUNDED") {
+      if (payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
+        || !Number.isSafeInteger(payment.amountMinor) || payment.amountMinor <= 0) return null;
+      const refunded = payment.refundedAmountMinor ?? 0;
+      const reserved = payment.refundReservedAmountMinor ?? 0;
+      if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved)
+        || refunded < 0 || reserved < 0 || refunded + reserved > payment.amountMinor) return null;
+
+      if (!refundCaseId) {
+        const refundable = payment.amountMinor - refunded - reserved;
+        if (refundable <= 0) return null;
+        const refund = buildAutomaticOrderRefundCase({
+          orderId, paymentId, payerId: payment.payerId, amountMinor: refundable,
+          reason: actorRole === "CUSTOMER" ? "Customer cancelled paid order" : "Merchant cancelled paid order",
+          requestedBy: actorUid, requestedByRole: actorRole, createdAt: now,
+        });
+        const existing = nextRefundCases[refund.id] as Record<string, any> | undefined;
+        if (existing) {
+          if (existing.paymentId !== paymentId || existing.orderId !== orderId
+            || existing.amountMinor !== refundable || existing.payerId !== payment.payerId) return null;
+          refundCaseId = refund.id;
+        } else {
+          nextRefundCases = { ...nextRefundCases, [refund.id]: refund };
+          nextPayment = { ...payment, refundReservedAmountMinor: reserved + refundable, updatedAt: now };
+          refundCaseId = refund.id;
+        }
+      } else {
+        const existing = nextRefundCases[refundCaseId] as Record<string, any> | undefined;
+        if (!existing || existing.paymentId !== paymentId || existing.orderId !== orderId) return null;
+      }
+    } else if (payment.status !== "REFUNDED") {
+      return null;
+    }
+  }
+
+  const nextOrder = {
+    ...order, status: "CANCELLED", updatedAtTimestamp: now, cancelledAt: order.cancelledAt ?? now,
+    ...(refundCaseId ? { paymentStatus: "REFUND_PENDING", refundCaseId } :
+      payment?.status === "REFUNDED" ? { paymentStatus: "REFUNDED" } :
+      payment ? { paymentStatus: "CANCELLED" } : {}),
+  };
+  const nextRoot: Record<string, any> = {
+    ...root, orders: { ...root.orders, [orderId]: nextOrder },
+  };
+  if (nextPayment && nextPayment !== payment) {
+    nextRoot.payments = { ...root.payments, [paymentId]: nextPayment };
+  }
+  if (nextRefundCases !== (root.refundCases ?? {})) nextRoot.refundCases = nextRefundCases;
+  return nextRoot;
 }
 type ClaimBeneficiaryType = "DELIVERY" | "DRIVER";
 
@@ -317,23 +395,45 @@ export const transitionOrderStatus = onCall({ enforceAppCheck: true }, async (ca
   const sourceId = readString(order.sourceId);
   const sourceRoot = order.orderType === "FOOD" ? "restaurants" : "shops";
   const source = await db().ref(`${sourceRoot}/${sourceId}`).get();
+  const isAdmin = requireAdmin(call.auth?.token as Record<string, unknown> | undefined);
   const ownsSource = sourceId === uid || source.child("ownerUid").val() === uid
     || source.child("managerId").val() === uid;
-  if (!ownsSource && !requireAdmin(call.auth?.token as Record<string, unknown> | undefined)) {
+  if (!ownsSource && !isAdmin) {
     throw new HttpsError("permission-denied", "Only this merchant or an administrator can change the order.");
   }
+  if (order.status === "CANCELLED" && nextStatus === "CANCELLED") {
+    const paymentId = readString(order.paymentId);
+    const payment = paymentId ? await db().ref("payments/" + paymentId).get() : null;
+    if (payment?.child("status").val() === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
+    return { orderId, status: "CANCELLED", refundCaseId: readString(order.refundCaseId), duplicate: true };
+  }
   if (!isAllowedOrderTransition(readString(order.status), nextStatus)
-    && !(requireAdmin(call.auth?.token as Record<string, unknown> | undefined)
-      && ["PLACED", "ACCEPTED", "PREPARING"].includes(readString(order.status)))) {
+    && !(isAdmin && ["PLACED", "ACCEPTED", "PREPARING"].includes(readString(order.status)))) {
     fail(`Order cannot transition from ${readString(order.status)} to ${nextStatus}.`);
   }
 
+  if (nextStatus === "CANCELLED") {
+    const now = Date.now();
+    const result = await db().ref().transaction((root: Record<string, any> | null) => {
+      if (!root) return null;
+      const current = root.orders?.[orderId] as Record<string, any> | undefined;
+      if (!current || current.status !== order.status) return;
+      if (!isAllowedOrderTransition(readString(current.status), nextStatus)
+        && !(isAdmin && ["PLACED", "ACCEPTED", "PREPARING"].includes(readString(current.status)))) return;
+      return buildCancelledOrderRoot(root, orderId, current, uid, isAdmin ? "ADMIN" : "MERCHANT", now);
+    }, undefined, false);
+    if (!result.committed) fail("The paid order cannot be cancelled, its payment is not refundable, or its checkout is still active.");
+    const cancelled = result.snapshot.child("orders/" + orderId).val() as Record<string, any>;
+    const paymentId = readString(cancelled.paymentId);
+    const payment = paymentId ? result.snapshot.child("payments/" + paymentId).val() as Record<string, any> : null;
+    if (payment?.status === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
+    return { orderId, status: "CANCELLED", refundCaseId: readString(cancelled.refundCaseId) };
+  }
+
   const result = await orderRef.transaction((current: Record<string, any> | null) => {
-    if (current === null) return null;
-    if (current.status !== order.status) return;
+    if (current === null || current.status !== order.status) return;
     if (!isAllowedOrderTransition(readString(current.status), nextStatus)
-      && !(requireAdmin(call.auth?.token as Record<string, unknown> | undefined)
-        && ["PLACED", "ACCEPTED", "PREPARING"].includes(readString(current.status)))) return;
+      && !(isAdmin && ["PLACED", "ACCEPTED", "PREPARING"].includes(readString(current.status)))) return;
     return { ...current, status: nextStatus, updatedAtTimestamp: Date.now() };
   }, undefined, false);
   if (!result.committed) fail("The order changed before this update. Refresh and try again.");
@@ -700,30 +800,29 @@ export const cancelPassengerTrip = onCall({ enforceAppCheck: true }, async (call
 });
 
 
-/** Customer may cancel only their own order before merchant preparation or paid fulfilment. */
+/** Customer may cancel their own eligible order; paid GCash orders open an admin refund case. */
 export const cancelCustomerOrder = onCall({ enforceAppCheck: true }, async (call) => {
   const uid = requireUid(call.auth?.uid);
   const orderId = requireId(call.data?.orderId, "Order ID");
+  const now = Date.now();
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const order = root.orders?.[orderId] as Record<string, any> | undefined;
     if (!order || order.clientId !== uid) return;
+    if (order.status === "CANCELLED") return root;
     const orderStatus = readString(order.status);
     const cancellable = ["PENDING_PAYMENT", "PLACED"].includes(orderStatus)
       || (order.orderType === "DELIVERY" && orderStatus === "OUT_FOR_DELIVERY" && !readString(order.deliveryId));
     if (!cancellable) return;
-    const paymentId = readString(order.paymentId);
-    const payment = paymentId ? root.payments?.[paymentId] as Record<string, any> | undefined : undefined;
-    if (payment && payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
-    // A BDO Checkout link may remain payable after the customer leaves Labmda.
-    // Require portal-verified expiry before allowing local cancellation.
-    if (hasActiveBdoCheckoutRequest(payment)) return;
-    const now = Date.now();
-    const nextOrder = { ...order, status: "CANCELLED", paymentStatus: payment ? "CANCELLED" : order.paymentStatus, updatedAtTimestamp: now, cancelledAt: now };
-    const nextRoot: Record<string, any> = { ...root, orders: { ...root.orders, [orderId]: nextOrder } };
-    if (payment) nextRoot.payments = { ...root.payments, [paymentId]: { ...payment, status: "CANCELLED", updatedAt: now, completedAt: now } };
-    return nextRoot;
+    return buildCancelledOrderRoot(root, orderId, order, uid, "CUSTOMER", now);
   }, undefined, false);
-  if (!result.committed) fail("Only the customer can cancel an unpaid order before preparation.");
-  return { orderId, status: "CANCELLED" };
+  if (!result.committed) fail("Only the customer can cancel an eligible unpaid order or a paid GCash order with a refundable balance.");
+  const cancelled = result.snapshot.child("orders/" + orderId).val() as Record<string, any>;
+  const paymentId = readString(cancelled.paymentId);
+  const payment = paymentId ? result.snapshot.child("payments/" + paymentId).val() as Record<string, any> : null;
+  if (payment?.status === "SUCCEEDED") await postPaymentReceiptFromDatabase(db(), paymentId);
+  return {
+    orderId, status: "CANCELLED", refundCaseId: readString(cancelled.refundCaseId),
+    duplicate: readString(cancelled.status) === "CANCELLED" && Number(cancelled.cancelledAt) !== now,
+  };
 });

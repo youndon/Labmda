@@ -19,6 +19,8 @@ type RefundCase = {
   requestedBy: string; createdAt: number; updatedAt: number; reviewedBy?: string;
   reviewedAt?: number; reviewNote?: string; completedBy?: string; completedAt?: number;
   providerReference?: string; method?: string; ledgerOperationId?: string; processingAt?: number;
+  orderId?: string; requestedByRole?: string; origin?: string;
+  verifiedBy?: string; verifiedAt?: number; verificationNote?: string; verifiedAmountMinor?: number;
 };
 
 function admin(call: AdminCall): string {
@@ -246,24 +248,34 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   const uid = admin(call);
   const refundId = safeId(call.data?.refundId, "Refund ID");
   const providerReference = text(call.data?.providerReference, "Provider/bank refund reference", 160);
+  const verificationNote = text(call.data?.verificationNote, "BDO refund verification note", 500);
+  const verifiedAmountMinor = positiveMinor(call.data?.verifiedAmountMinor, "Verified BDO refund amount");
   const referenceKey = createHash("sha256").update(providerReference.trim().toUpperCase()).digest("hex");
   const now = Date.now();
   const claim = await db().ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const current = root.refundCases?.[refundId] as RefundCase | undefined;
     if (!current) return;
-    if (current.status === "COMPLETED") return root;
+    if (current.status === "COMPLETED") {
+      if (current.providerReference !== providerReference || current.verificationNote !== verificationNote
+        || current.verifiedAmountMinor !== verifiedAmountMinor) return;
+      return root;
+    }
     if (current.status !== "APPROVED" && current.status !== "PROCESSING") return;
-    if (current.status === "PROCESSING" && current.providerReference !== providerReference) return;
+    if (current.status === "PROCESSING"
+      && (current.providerReference !== providerReference || current.verificationNote !== verificationNote
+        || current.verifiedAmountMinor !== verifiedAmountMinor)) return;
+    if (current.amountMinor !== verifiedAmountMinor) return;
     const payment = root.payments?.[current.paymentId] as PaymentRecord | undefined;
-    if (!payment || payment.id !== current.paymentId) return;
+    if (!payment || payment.id !== current.paymentId || payment.method !== "GCASH"
+      || payment.provider !== "BDO_CHECKOUT" || payment.currency !== "PHP") return;
     if (payment.refundProcessingId && payment.refundProcessingId !== refundId) return;
     const referenceOwner = root.refundProviderReferenceIndex?.[referenceKey];
     if (referenceOwner && referenceOwner !== refundId) return;
     const nextCase = current.status === "PROCESSING"
       ? current
       : { ...current, status: "PROCESSING", completedBy: uid, providerReference,
-          processingAt: now, updatedAt: now };
+          verifiedBy: uid, verifiedAt: now, verificationNote, verifiedAmountMinor, processingAt: now, updatedAt: now };
     return {
       ...root,
       payments: { ...root.payments, [current.paymentId]: { ...payment, refundProcessingId: refundId } },
@@ -273,14 +285,29 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   }, undefined, false);
   if (!claim.committed) {
     const current = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase | null;
-    if (current?.status === "COMPLETED") return { refundId, status: "COMPLETED", duplicate: true };
-    throw new HttpsError("failed-precondition", "Refund is not approved, another refund for this payment is processing, or the transfer reference is already assigned.");
+    if (current?.status === "COMPLETED"
+      && current.providerReference === providerReference
+      && current.verificationNote === verificationNote
+      && current.verifiedAmountMinor === verifiedAmountMinor) {
+      return { refundId, status: "COMPLETED", duplicate: true, paymentId: current.paymentId,
+        providerReference, verifiedAmountMinor, ledgerOperationId: current.ledgerOperationId ?? "" };
+    }
+    if (current?.status !== "PROCESSING" || current.providerReference !== providerReference
+      || current.verificationNote !== verificationNote || current.verifiedAmountMinor !== verifiedAmountMinor) {
+      throw new HttpsError("failed-precondition", "Refund is not approved, another refund for this payment is processing, or the transfer reference is already assigned.");
+    }
   }
-  const refund = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
+  const claimedCase = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
+  if (claimedCase.status === "COMPLETED") {
+    return { refundId, status: "COMPLETED", duplicate: true, paymentId: claimedCase.paymentId,
+      providerReference, verifiedAmountMinor, ledgerOperationId: claimedCase.ledgerOperationId ?? "" };
+  }
+  const refund = claimedCase;
   const paymentSnapshot = await db().ref(`payments/${refund.paymentId}`).get();
   if (!paymentSnapshot.exists()) throw new HttpsError("not-found", "Refund payment was not found.");
   const payment = paymentSnapshot.val() as PaymentRecord;
-  if (payment.currency !== "PHP" || !Number.isSafeInteger(payment.amountMinor)) {
+  if (payment.currency !== "PHP" || payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
+    || !Number.isSafeInteger(payment.amountMinor)) {
     throw new HttpsError("failed-precondition", "Payment record is invalid.");
   }
   const original = await getFinancialOperation(`payment_${refund.paymentId}_received`);
@@ -322,9 +349,9 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   }
   const completed = rootResult.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
   await recordAdminFinancialAudit({ uid, action: "REFUND_COMPLETED", targetType: "REFUND", targetId: refundId,
-    before: refund, after: completed, note: providerReference });
+    before: refund, after: completed, note: providerReference + " — " + verificationNote });
   return { refundId, status: "COMPLETED", paymentId: refund.paymentId,
-    providerReference, ledgerOperationId: posted.operationId };
+    providerReference, verifiedAmountMinor, verificationNote, ledgerOperationId: posted.operationId };
 });
 
 export const getAdminRefundCases = onCall({ enforceAppCheck: true }, async (call) => {

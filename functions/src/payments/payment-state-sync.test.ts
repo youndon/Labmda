@@ -38,6 +38,27 @@ describe("payment state synchronization", () => {
     expect(db.value().orders.o1.status).toBe("PLACED");
   });
 
+  it("keeps a cancelled paid order in refund-pending state until the BDO refund is verified", async () => {
+    const db = fakeDatabase({
+      payments: { p1: { id: "p1", transactionType: "ORDER", orderId: "o1", method: "GCASH", provider: "BDO_CHECKOUT", status: "SUCCEEDED", updatedAt: 80 } },
+      orders: { o1: { id: "o1", paymentId: "p1", status: "CANCELLED", paymentStatus: "REFUND_PENDING", refundCaseId: "refund_1" } },
+      refundCases: { refund_1: { id: "refund_1", paymentId: "p1", orderId: "o1", status: "REQUESTED" } },
+    });
+    await synchronizePaymentState(db, "p1");
+    expect(db.value().orders.o1.status).toBe("CANCELLED");
+    expect(db.value().orders.o1.paymentStatus).toBe("REFUND_PENDING");
+  });
+
+  it("marks a cancelled order refund as rejected when the administrator rejects its case", async () => {
+    const db = fakeDatabase({
+      payments: { p1: { id: "p1", transactionType: "ORDER", orderId: "o1", method: "GCASH", provider: "BDO_CHECKOUT", status: "SUCCEEDED", updatedAt: 90 } },
+      orders: { o1: { id: "o1", paymentId: "p1", status: "CANCELLED", paymentStatus: "REFUND_PENDING", refundCaseId: "refund_2" } },
+      refundCases: { refund_2: { id: "refund_2", paymentId: "p1", orderId: "o1", status: "REJECTED" } },
+    });
+    await synchronizePaymentState(db, "p1");
+    expect(db.value().orders.o1.paymentStatus).toBe("REFUND_REJECTED");
+  });
+
   it("keeps cash due until the trusted collector marks the payment succeeded", async () => {
     const db = fakeDatabase({
       payments: { p1: { id: "p1", transactionType: "RIDE", tripId: "t1", method: "CASH", provider: "CASH", status: "PENDING", updatedAt: 30 } },

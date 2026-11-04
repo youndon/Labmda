@@ -172,11 +172,16 @@ class AdminFinancialOperationsScreenModel : ScreenModel {
         "Refund $decision."
     }
 
-    fun completeRefund(refundId: String, reference: String) = action {
+    fun completeRefund(refundId: String, reference: String, verifiedAmountPesos: String, verificationNote: String) = action {
         functions.httpsCallable("completeAdminRefundCase").invoke(
-            mapOf("refundId" to refundId, "providerReference" to reference)
+            mapOf(
+                "refundId" to refundId,
+                "providerReference" to reference,
+                "verifiedAmountMinor" to pesosToMinor(verifiedAmountPesos),
+                "verificationNote" to verificationNote
+            )
         )
-        "Refund completion recorded with provider reference."
+        "BDO refund verified and proportional ledger reversal posted."
     }
 
     fun reconcile() = action {
@@ -249,6 +254,8 @@ class AdminFinancialOperationsScreen : Screen {
         var refundReason by remember { mutableStateOf("") }
         var completionTarget by remember { mutableStateOf<AdminRefundCaseRow?>(null) }
         var providerReference by remember { mutableStateOf("") }
+        var verifiedRefundAmount by remember { mutableStateOf("") }
+        var refundVerificationNote by remember { mutableStateOf("") }
         var showAdjustment by remember { mutableStateOf(false) }
         var checkoutTarget by remember { mutableStateOf<AdminPaymentRow?>(null) }
         var checkoutUrl by remember { mutableStateOf("") }
@@ -384,8 +391,13 @@ class AdminFinancialOperationsScreen : Screen {
                                         OutlinedButton(onClick = { model.reviewRefund(refund.id, "REJECTED") }, enabled = !busy) { Text("Reject") }
                                         Button(onClick = { model.reviewRefund(refund.id, "APPROVED") }, enabled = !busy) { Text("Approve") }
                                     }
-                                    "APPROVED", "PROCESSING" -> Button(onClick = { completionTarget = refund; providerReference = refund.providerReference.orEmpty() }, enabled = !busy) {
-                                        Text("Record executed refund")
+                                    "APPROVED", "PROCESSING" -> Button(onClick = {
+                                        completionTarget = refund
+                                        providerReference = refund.providerReference.orEmpty()
+                                        verifiedRefundAmount = BigDecimal.valueOf(refund.amountMinor, 2).stripTrailingZeros().toPlainString()
+                                        refundVerificationNote = ""
+                                    }, enabled = !busy) {
+                                        Text("Verify BDO refund")
                                     }
                                 }
                                 refund.providerReference?.let { Text("Provider reference: $it", style = MaterialTheme.typography.labelSmall) }
@@ -467,15 +479,20 @@ class AdminFinancialOperationsScreen : Screen {
         completionTarget?.let { refund ->
             LabmdaAlertDialog(
                 onDismissRequest = { completionTarget = null },
-                title = { Text("Confirm external refund") },
+                title = { Text("Verify BDO refund") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Only continue after you have actually refunded ${formatAdminMoney(refund.amountMinor)} through the provider/bank dashboard.")
-                        OutlinedTextField(value = providerReference, onValueChange = { providerReference = it }, label = { Text("Provider/bank reference") }, singleLine = true)
+                        Text("Open the BDO merchant/bank records and confirm the refund was actually sent to the customer. Expected refund: ${formatAdminMoney(refund.amountMinor)}. The exact verified amount must match before the ledger reversal can be posted.")
+                        OutlinedTextField(value = providerReference, onValueChange = { providerReference = it }, label = { Text("BDO refund transaction reference") }, singleLine = true)
+                        OutlinedTextField(value = verifiedRefundAmount, onValueChange = { verifiedRefundAmount = it }, label = { Text("Exact refunded amount (PHP)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true)
+                        OutlinedTextField(value = refundVerificationNote, onValueChange = { refundVerificationNote = it }, label = { Text("Verification note (what you checked in BDO)") })
                     }
                 },
                 confirmButton = {
-                    Button(onClick = { model.completeRefund(refund.id, providerReference); completionTarget = null }, enabled = !busy && providerReference.isNotBlank()) { Text("Record completed") }
+                    Button(
+                        onClick = { model.completeRefund(refund.id, providerReference, verifiedRefundAmount, refundVerificationNote); completionTarget = null },
+                        enabled = !busy && providerReference.isNotBlank() && verifiedRefundAmount.isNotBlank() && refundVerificationNote.isNotBlank()
+                    ) { Text("Verify and post reversal") }
                 },
                 dismissButton = { TextButton(onClick = { completionTarget = null }) { Text("Cancel") } }
             )

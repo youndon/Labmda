@@ -286,7 +286,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                     }
 
                     // Allow Client Cancellation if Order is still in PLACED state
-                    if (currentOrder.paymentStatus != "PAID" && (currentOrder.status == OrderStatus.PLACED || currentOrder.status == OrderStatus.PENDING_PAYMENT || (currentOrder.orderType == com.zouitel.presentaion.model.OrderType.DELIVERY && currentOrder.status == OrderStatus.OUT_FOR_DELIVERY && currentOrder.deliveryId.isBlank()))) {
+                    if ((currentOrder.paymentStatus != "PAID" || currentOrder.paymentMethod == "GCASH") && (currentOrder.status == OrderStatus.PLACED || currentOrder.status == OrderStatus.PENDING_PAYMENT || (currentOrder.orderType == com.zouitel.presentaion.model.OrderType.DELIVERY && currentOrder.status == OrderStatus.OUT_FOR_DELIVERY && currentOrder.deliveryId.isBlank()))) {
                         item {
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
@@ -294,7 +294,7 @@ data class LiveOrderTrackingScreen(val orderId: String) : Screen {
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Cancel Order")
+                                Text(if (currentOrder.paymentStatus == "PAID" && currentOrder.paymentMethod == "GCASH") "Cancel & Request Refund" else "Cancel Order")
                             }
                         }
                     }

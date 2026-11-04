@@ -50,8 +50,15 @@ export async function synchronizePaymentState(database: Database, paymentId: str
         : ["CANCELLED", "FAILED", "EXPIRED"].includes(rawStatus) && order.status === "PENDING_PAYMENT"
           ? "CANCELLED"
           : order.status;
-      const nextOrder = { ...order, ...common, status: nextStatus, updatedAtTimestamp: now };
-      if (Object.keys(common).every((key) => order[key] === (common as Record<string, unknown>)[key])
+      const refundCase = order.refundCaseId ? root.refundCases?.[order.refundCaseId] as Record<string, any> | undefined : undefined;
+      const refundCaseStatus = typeof refundCase?.status === "string" ? refundCase.status : "";
+      const orderPaymentStatus = order.status === "CANCELLED" && refundCaseStatus
+        ? ["REQUESTED", "APPROVED", "PROCESSING"].includes(refundCaseStatus) ? "REFUND_PENDING"
+          : refundCaseStatus === "REJECTED" ? "REFUND_REJECTED" : paymentStatus
+        : paymentStatus;
+      const orderCommon = { ...common, paymentStatus: orderPaymentStatus };
+      const nextOrder = { ...order, ...orderCommon, status: nextStatus, updatedAtTimestamp: now };
+      if (Object.keys(orderCommon).every((key) => order[key] === (orderCommon as Record<string, unknown>)[key])
         && order.status === nextStatus && order.updatedAtTimestamp === now) return;
       return { ...root, orders: { ...root.orders, [payment.orderId]: nextOrder } };
     }
