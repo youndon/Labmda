@@ -191,20 +191,31 @@ export const alertOverdueCashCollections = onSchedule("every 60 minutes", async 
   const alerts = (alertsSnapshot.val() ?? {}) as Record<string, Record<string, any>>;
   const updates: Record<string, unknown> = {};
   for (const [paymentId, payment] of Object.entries(payments)) {
-    if (payment.method !== "CASH" || payment.status !== "PENDING" || !Number.isSafeInteger(payment.createdAt)
-      || Number(payment.createdAt) > threshold) continue;
+    if (payment.method !== "CASH" || payment.status !== "PENDING" || !Number.isSafeInteger(payment.createdAt)) continue;
+    let collectorId = typeof payment.deliveryId === "string" ? payment.deliveryId : "";
+    let cashDueAt = 0;
+    if (payment.transactionType === "ORDER" && typeof payment.orderId === "string") {
+      const order = await db().ref(`orders/${payment.orderId}`).get();
+      if (order.child("status").val() !== "DELIVERED") continue;
+      collectorId = collectorId || String(order.child("deliveryId").val() ?? "");
+      cashDueAt = Number(order.child("deliveredAt").val() ?? order.child("updatedAtTimestamp").val() ?? payment.createdAt);
+    } else if (payment.transactionType === "RIDE" && typeof payment.tripId === "string") {
+      const trip = await db().ref(`trips/${payment.tripId}`).get();
+      if (trip.child("status").val() !== "COMPLETED") continue;
+      collectorId = String(trip.child("driverId").val() ?? "");
+      cashDueAt = Number(trip.child("completedAt").val() ?? trip.child("updatedAtTimestamp").val() ?? payment.createdAt);
+    } else {
+      continue;
+    }
+    if (!Number.isSafeInteger(cashDueAt) || cashDueAt <= 0 || cashDueAt > threshold) continue;
     const prior = alerts[paymentId];
     if (prior?.status === "OPEN" && now - Number(prior.lastAlertAt ?? 0) < 12 * 60 * 60 * 1000) continue;
-    let collectorId = typeof payment.deliveryId === "string" ? payment.deliveryId : "";
-    if (!collectorId && payment.transactionType === "RIDE" && typeof payment.tripId === "string") {
-      const trip = await db().ref(`trips/${payment.tripId}`).get();
-      collectorId = typeof trip.child("driverId").val() === "string" ? String(trip.child("driverId").val()) : "";
-    }
     updates[paymentId] = {
       id: paymentId, paymentId, collectorId, transactionType: payment.transactionType ?? "",
       orderId: payment.orderId ?? "", tripId: payment.tripId ?? "",
       amountMinor: Number(payment.amountMinor ?? 0), currency: "PHP",
-      paymentCreatedAt: Number(payment.createdAt), ageHours: Math.floor((now - Number(payment.createdAt)) / 3_600_000),
+      paymentCreatedAt: Number(payment.createdAt), cashDueAt,
+      ageHours: Math.floor((now - cashDueAt) / 3_600_000),
       status: "OPEN", firstAlertAt: prior?.firstAlertAt ?? now, lastAlertAt: now,
       alertAfterHours: config.alertAfterHours,
     };
