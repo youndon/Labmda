@@ -155,29 +155,36 @@ export function calculateOrderBreakdown(args: {
   const { config, service, subtotalMinor, route, paymentMethod } = args;
   assertMinor(subtotalMinor, "subtotalMinor");
   const delivery = calculateDeliveryFee(config.delivery, route);
-  const discount = applyDiscount(subtotalMinor, args.discount, args.now);
+  const requestedDiscount = applyDiscount(subtotalMinor, args.discount, args.now);
   const commissionRate = service === "FOOD" ? config.food.commissionBps : config.shop.commissionBps;
   assertBps(commissionRate, `${service.toLowerCase()}.commissionBps`);
-  const commissionBase = subtotalMinor - discount.merchant;
+  const commissionBase = subtotalMinor - requestedDiscount.merchant;
   const merchantCommissionMinor = roundBps(commissionBase, commissionRate);
-  const beforeProvider = subtotalMinor + delivery.feeMinor - discount.total;
+  const platformCommissionMinor = merchantCommissionMinor + delivery.platformCommissionMinor;
+
+  // A platform-funded promotion is paid from platform commission, not from
+  // merchant or courier proceeds. Cap it at the commission available on this
+  // quote so the customer receipt can always be split into non-negative rows.
+  const platformDiscountMinor = Math.min(requestedDiscount.platform, platformCommissionMinor);
+  const discountMinor = requestedDiscount.merchant + platformDiscountMinor;
+  const beforeProvider = subtotalMinor + delivery.feeMinor - discountMinor;
   assertMinor(beforeProvider, "order total before provider fee");
   const fee = calculateProviderFee(config, paymentMethod, beforeProvider);
   const customerTotalMinor = beforeProvider + (fee.payer === "CUSTOMER" ? fee.amount : 0);
-  const platformNet = merchantCommissionMinor + delivery.platformCommissionMinor
-    - discount.platform - (fee.payer === "PLATFORM" ? fee.amount : 0);
+  const platformNet = platformCommissionMinor
+    - platformDiscountMinor - (fee.payer === "PLATFORM" ? fee.amount : 0);
   return {
     currency: "PHP",
     subtotalMinor,
     deliveryFeeMinor: delivery.feeMinor,
-    discountMinor: discount.total,
-    merchantDiscountMinor: discount.merchant,
-    platformDiscountMinor: discount.platform,
+    discountMinor,
+    merchantDiscountMinor: requestedDiscount.merchant,
+    platformDiscountMinor,
     providerFeeMinor: fee.amount,
     customerTotalMinor,
     merchantCommissionMinor,
     deliveryCommissionMinor: delivery.platformCommissionMinor,
-    platformCommissionMinor: merchantCommissionMinor + delivery.platformCommissionMinor,
+    platformCommissionMinor,
     merchantEarningsMinor: commissionBase - merchantCommissionMinor,
     courierEarningsMinor: delivery.courierEarningsMinor,
     platformNetBeforeOtherCostsMinor: platformNet,
