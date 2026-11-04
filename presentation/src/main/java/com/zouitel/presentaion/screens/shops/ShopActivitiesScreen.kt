@@ -252,7 +252,7 @@ class ShopActivitiesScreen : Screen {
                         Text("Track order", fontWeight = FontWeight.Bold)
                     }
 
-                    if ((order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT) && order.paymentStatus != "PAID") {
+                    if ((order.status == OrderStatus.PLACED || order.status == OrderStatus.PENDING_PAYMENT) && (order.paymentStatus != "PAID" || order.paymentMethod == "GCASH")) {
                         OutlinedButton(
                             onClick = onCancelOrder,
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
@@ -261,7 +261,7 @@ class ShopActivitiesScreen : Screen {
                         ) {
                             Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Cancel", fontWeight = FontWeight.Bold)
+                            Text(if (order.paymentStatus == "PAID" && order.paymentMethod == "GCASH") "Cancel & refund" else "Cancel", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
