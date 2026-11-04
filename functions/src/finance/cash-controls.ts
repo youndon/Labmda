@@ -153,11 +153,18 @@ export const getAdminCashControlOverview = onCall({ enforceAppCheck: true }, asy
   const alerts = Object.values((alertsSnapshot.val() ?? {}) as Record<string, Record<string, unknown>>)
     .filter((item) => item.status === "OPEN")
     .sort((a, b) => Number(b.ageHours ?? 0) - Number(a.ageHours ?? 0));
-  const collectors = new Map<string, { collectorId: string; outstandingMinor: number }>();
+  const collectors = new Map<string, {
+    collectorId: string; outstandingMinor: number; platformOutstandingMinor: number; merchantOutstandingMinor: number;
+  }>();
   for (const account of accounts) {
     const collectorId = account.accountId.slice("cash_owed_".length).split("_merchant_")[0]!;
-    const current = collectors.get(collectorId) ?? { collectorId, outstandingMinor: 0 };
-    current.outstandingMinor += Number(account.cashOwedMinor ?? 0);
+    const current = collectors.get(collectorId) ?? {
+      collectorId, outstandingMinor: 0, platformOutstandingMinor: 0, merchantOutstandingMinor: 0,
+    };
+    const amount = Number(account.cashOwedMinor ?? 0);
+    current.outstandingMinor += amount;
+    if (account.accountId === `cash_owed_${collectorId}`) current.platformOutstandingMinor += amount;
+    else current.merchantOutstandingMinor += amount;
     collectors.set(collectorId, current);
   }
   return { config: readControls(configSnapshot.val()), alerts: alerts.slice(0, 200), collectors: [...collectors.values()] };
