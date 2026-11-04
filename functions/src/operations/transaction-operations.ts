@@ -31,9 +31,9 @@ function readString(value: unknown): string {
 }
 
 /**
- * Atomically cancels an order and reserves the still-refundable amount of a
- * succeeded GCash payment. The payment receipt and payment status are never
- * rewritten; only the refund reservation and case are added.
+ * Atomically cancels an order, including its pending cash obligation, or
+ * reserves the refundable amount of a succeeded GCash payment. Successful
+ * GCash receipts remain immutable; cash cancellation is not a refund.
  */
 export function buildCancelledOrderRoot(
   root: Record<string, any>,
