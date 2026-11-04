@@ -144,10 +144,13 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
     }
 
     fun updateOnlineStatus(isOnline: Boolean) {
-        val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("deliveryServices").child("isOnline")
-                .setValue(isOnline)
+            runCatching {
+                com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "setCollectorOnline",
+                    mapOf("online" to isOnline, "service" to "DELIVERY")
+                )
+            }
         }
     }
 
