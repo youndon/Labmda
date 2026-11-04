@@ -6,6 +6,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Looper
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -68,6 +69,7 @@ class DriverDashboardScreen : Screen {
 
         val context = LocalContext.current
         val isOnline by screenModel.isOnline.collectAsState()
+        val onlineError by screenModel.onlineError.collectAsState()
         val hasActiveTrip = activeTrips.any { it.status != "COMPLETED" }
         var myLocation by remember { mutableStateOf<LatLng?>(null) }
 
@@ -86,6 +88,10 @@ class DriverDashboardScreen : Screen {
             if (hasLocationPermission) screenModel.setOnline(true)
         }
         val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
+        LaunchedEffect(onlineError) {
+            if (!onlineError.isNullOrBlank()) Toast.makeText(context, onlineError, Toast.LENGTH_LONG).show()
+        }
 
         DisposableEffect(isOnline, hasLocationPermission) {
             if (!isOnline || !hasLocationPermission) {
