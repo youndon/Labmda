@@ -238,7 +238,8 @@ export const createDeliveryFromQuote = onCall({ enforceAppCheck: true }, async (
     const now = Date.now();
     const method = quote.paymentMethod === "GCASH" ? "GCASH" : "CASH";
     const providerFeePayer = method === "GCASH"
-      ? String((await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() ?? "PLATFORM")
+      && (await db().ref("pricing/config/providerFees/GCASH/payer").get()).val() === "CUSTOMER"
+      ? "CUSTOMER"
       : "PLATFORM";
     const order = {
       id: orderId, clientId: uid, orderType: "DELIVERY", sourceId: "", sourceName: "Standalone Delivery",
