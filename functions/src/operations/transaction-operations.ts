@@ -83,6 +83,14 @@ async function assignSucceededOnlinePaymentShare(
     fail("The payment does not belong to this claimed transaction.");
   }
 
+  // The receipt is immutable and must exist before its CLEARING remainder can
+  // be transferred. This also safely recovers if the payment-status trigger
+  // has not finished yet.
+  const receiptOperationId = "payment_" + paymentId + "_received";
+  if (!await getFinancialOperation(receiptOperationId)) {
+    await postPaymentReceiptFromDatabase(db(), paymentId);
+  }
+
   const allocationsRef = db().ref("paymentAllocations/" + paymentId);
   const allocationSnapshot = await allocationsRef.get();
   if (!allocationSnapshot.exists()) fail("The succeeded payment has no initial allocations.");
@@ -106,10 +114,11 @@ async function assignSucceededOnlinePaymentShare(
         }
         return next;
       }, undefined, false);
-      await paymentRef.transaction((current: Record<string, any> | null) => {
+      const linked = await paymentRef.transaction((current: Record<string, any> | null) => {
         if (!current || (current.deliveryId && current.deliveryId !== beneficiaryId)) return;
         return { ...current, deliveryId: beneficiaryId, updatedAt: now };
       }, undefined, false);
+      if (!linked.committed) fail("The courier allocation is recorded but the payment assignment could not be linked. Retry the claim.");
     }
     return;
   }
