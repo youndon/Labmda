@@ -153,6 +153,9 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
                     mapOf("online" to isOnline, "service" to "DELIVERY")
                 )
             }.onSuccess {
+                val onlineRef = db.child("users").child(uid).child("deliveryServices").child("isOnline")
+                if (isOnline) runCatching { onlineRef.onDisconnect().setValue(false) }
+                else runCatching { onlineRef.onDisconnect().cancel() }
                 _onlineError.value = null
             }.onFailure {
                 _onlineError.value = it.message ?: "Cash outstanding limit prevents going online."
