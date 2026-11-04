@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LocationOn
@@ -47,6 +48,7 @@ import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.Trip
+import com.zouitel.presentaion.screens.cash.CollectorCashScreen
 
 class DriverDashboardScreen : Screen {
     @SuppressLint("MissingPermission")
@@ -144,6 +146,11 @@ class DriverDashboardScreen : Screen {
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { navigator?.push(CollectorCashScreen()) }) {
+                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Cash balance")
                         }
                     }
                 )
