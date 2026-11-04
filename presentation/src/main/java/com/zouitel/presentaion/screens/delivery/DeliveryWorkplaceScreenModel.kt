@@ -146,6 +146,7 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
     }
 
     fun updateOnlineStatus(isOnline: Boolean) {
+        val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch(Dispatchers.IO) {
             runCatching {
                 com.zouitel.presentaion.screens.trustedTransactionCallData(
