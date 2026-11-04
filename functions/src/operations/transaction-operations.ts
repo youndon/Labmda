@@ -57,7 +57,8 @@ function buildCancelledOrderRoot(
       if (hasActiveBdoCheckoutRequest(payment)) return null;
       nextPayment = { ...payment, status: "CANCELLED", updatedAt: now, completedAt: now };
     } else if (payment.status === "SUCCEEDED" || payment.status === "PARTIALLY_REFUNDED") {
-      if (payment.method !== "GCASH" || !Number.isSafeInteger(payment.amountMinor) || payment.amountMinor <= 0) return null;
+      if (payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
+        || !Number.isSafeInteger(payment.amountMinor) || payment.amountMinor <= 0) return null;
       const refunded = payment.refundedAmountMinor ?? 0;
       const reserved = payment.refundReservedAmountMinor ?? 0;
       if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved)
