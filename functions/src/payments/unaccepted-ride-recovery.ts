@@ -102,22 +102,16 @@ export const recoverUnacceptedPaidRides = onSchedule("every 1 minutes", async ()
     .equalTo("REQUESTED")
     .get();
 
-  if (!candidates.exists()) return { scanned: 0, cancelled: 0 };
+  if (!candidates.exists()) return;
 
-  let scanned = 0;
-  let cancelled = 0;
   for (const [tripId, candidate] of Object.entries(candidates.val() as Record<string, Record<string, any>>)) {
     if (!Number.isSafeInteger(candidate.createdAtTimestamp)
       || candidate.createdAtTimestamp > cutoff
       || (typeof candidate.driverId === "string" && candidate.driverId.trim())) continue;
 
-    scanned += 1;
-    const result = await database.ref().transaction((root: RideRoot | null) => {
+    await database.ref().transaction((root: RideRoot | null) => {
       if (root === null) return null;
       return buildUnacceptedPaidRideRecoveryRoot(root, tripId, now);
     }, undefined, false);
-    if (result.committed) cancelled += 1;
   }
-
-  return { scanned, cancelled };
 });
