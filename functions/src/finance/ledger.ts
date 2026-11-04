@@ -170,6 +170,7 @@ export async function listEntriesForAccount(accountId: string): Promise<StoredEn
 export interface ReconciliationResult {
   balanced: boolean; checkedEntries: number;
   discrepancies: Array<{ accountId: string; bucket: BalanceBucket; ledgerMinor: number; projectionMinor: number }>;
+  negativeBalances: Array<{ accountId: string; bucket: BalanceBucket; balanceMinor: number }>;
 }
 /** Recomputes account balances from Firestore entries in bounded pages rather than downloading the finance tree. */
 export async function reconcileFinancialLedger(): Promise<ReconciliationResult> {
@@ -196,7 +197,20 @@ export async function reconcileFinancialLedger(): Promise<ReconciliationResult> 
     const key = field[bucket]; const ledgerMinor = totals.get(id)?.[key] ?? 0; const projectionMinor = projections.get(id)?.[key] ?? 0;
     if (ledgerMinor !== projectionMinor) discrepancies.push({ accountId: id, bucket, ledgerMinor, projectionMinor });
   }
-  return { balanced: discrepancies.length === 0, checkedEntries, discrepancies };
+  const negativeBalances: ReconciliationResult["negativeBalances"] = [];
+  // CLEARING is a settlement/counterparty bucket, not a provider wallet balance.
+  // External counterpart accounts can legitimately carry negative CLEARING entries
+  // because each balanced transfer records the opposite side of the movement there.
+  // Only report negative provider-facing wallet buckets as financial deficits.
+  const monitoredBuckets = ["AVAILABLE", "PENDING", "CASH_OWED"] as const;
+  for (const [accountId, balance] of totals) {
+    for (const bucket of monitoredBuckets) {
+      const balanceMinor = balance[field[bucket]];
+      if (balanceMinor < 0) negativeBalances.push({ accountId, bucket, balanceMinor });
+    }
+  }
+  return { balanced: discrepancies.length === 0 && negativeBalances.length === 0,
+    checkedEntries, discrepancies, negativeBalances };
 }
 export function createFinancialTransfer(args: {
   operationId: string; eventType: FinancialEventType; referenceType: FinancialOperation["referenceType"];

@@ -316,10 +316,14 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   if (!postings.length || !Number.isSafeInteger(original.createdAt)) {
     throw new HttpsError("failed-precondition", "The original payment journal entry is invalid.");
   }
+  const currentAccounts = await listFinancialAccounts();
+  const currentBalances = Object.fromEntries(currentAccounts.map((account) => [account.accountId, {
+    availableMinor: account.availableMinor, pendingMinor: account.pendingMinor,
+  }]));
   const reversal = buildRefundReversal({
     refundId, paymentId: refund.paymentId, paymentAmountMinor: payment.amountMinor,
     refundAmountMinor: refund.amountMinor, createdAt: refund.processingAt ?? refund.updatedAt, reason: refund.reason,
-    originalPostings: postings,
+    originalPostings: postings, currentBalances,
   });
   const posted = await postFinancialOperation(reversal);
   const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
