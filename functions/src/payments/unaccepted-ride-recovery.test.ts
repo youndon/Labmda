@@ -5,7 +5,7 @@ import {
 } from "./unaccepted-ride-recovery.js";
 
 const now = 1_798_000_000_000;
-function root(overrides: Record<string, unknown> = {}) {
+function root(overrides: Record<string, unknown> = {}): any {
   return {
     trips: {
       trip_1: {
