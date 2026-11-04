@@ -29,6 +29,8 @@ class DriverDashboardScreenModel : ScreenModel {
     // Mirrors users/{uid}/driverService/isOnline so the switch always shows the real stored value
     private val _isOnline = MutableStateFlow(false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+    private val _onlineError = MutableStateFlow<String?>(null)
+    val onlineError: StateFlow<String?> = _onlineError.asStateFlow()
 
     init {
         listenToOnlineState()
@@ -62,8 +64,10 @@ class DriverDashboardScreenModel : ScreenModel {
                     runCatching { db.child("users").child(uid).child("driverService").child("isOnline").onDisconnect().cancel() }
                     db.child("driverLocations").child(uid).removeValue()
                 }
+            }.onSuccess {
+                _onlineError.value = null
             }.onFailure {
-                // Keep the observed server state; the callable error explains why online was refused.
+                _onlineError.value = it.message ?: "Cash outstanding limit prevents going online."
             }
         }
     }
