@@ -12,8 +12,9 @@ export function buildRefundReversal(args: {
   createdAt: number;
   reason: string;
   originalPostings: LedgerPosting[];
+  currentBalances: Record<string, { availableMinor?: number; pendingMinor?: number }>;
 }): FinancialOperation {
-  const { refundId, paymentId, paymentAmountMinor, refundAmountMinor, originalPostings } = args;
+  const { refundId, paymentId, paymentAmountMinor, refundAmountMinor, originalPostings, currentBalances } = args;
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(refundId) || !/^[A-Za-z0-9_-]{1,128}$/.test(paymentId)) {
     throw new Error("Refund and payment IDs must be valid Firebase identifiers.");
   }
@@ -48,8 +49,31 @@ export function buildRefundReversal(args: {
   const positiveAmounts = allocate(positive);
   const postings: LedgerPosting[] = [
     ...negative.map((item, index) => ({ ...item, deltaMinor: negativeAmounts[index] })),
-    ...positive.map((item, index) => ({ ...item, deltaMinor: -positiveAmounts[index] })),
   ];
+  positive.forEach((item, index) => {
+    let remaining = positiveAmounts[index]!;
+    if (remaining <= 0) return;
+    // Refund the beneficiary's current liability, not the bucket used by the
+    // original receipt. Pending is consumed first; released funds are debited
+    // from AVAILABLE. Any shortfall becomes an AVAILABLE clawback (negative
+    // balance), which blocks later payouts until future earnings repay it.
+    const balance = currentBalances[item.accountId] ?? {};
+    const pending = Number.isSafeInteger(balance.pendingMinor) ? Math.max(0, balance.pendingMinor!) : 0;
+    const available = Number.isSafeInteger(balance.availableMinor) ? Math.max(0, balance.availableMinor!) : 0;
+    const pendingDebit = Math.min(remaining, pending);
+    if (pendingDebit > 0) {
+      postings.push({ ...item, bucket: "PENDING", deltaMinor: -pendingDebit });
+      remaining -= pendingDebit;
+    }
+    const availableDebit = Math.min(remaining, available);
+    if (availableDebit > 0) {
+      postings.push({ ...item, bucket: "AVAILABLE", deltaMinor: -availableDebit });
+      remaining -= availableDebit;
+    }
+    if (remaining > 0) {
+      postings.push({ ...item, bucket: "AVAILABLE", deltaMinor: -remaining });
+    }
+  });
   if (postings.reduce((sum, item) => sum + BigInt(item.deltaMinor), 0n) !== 0n) {
     throw new Error("Refund reversal did not balance.");
   }
