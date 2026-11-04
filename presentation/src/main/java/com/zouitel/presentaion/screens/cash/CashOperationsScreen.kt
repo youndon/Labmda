@@ -98,14 +98,15 @@ class CashOperationsScreenModel : ScreenModel {
         functions.httpsCallable("confirmMerchantCashSettlement").invoke(mapOf("paymentId" to paymentId))
         refreshMerchant()
     }
-    fun remitCash(collectorId: String, amountMinor: Long) = runAction("Cash remittance recorded.") {
-        functions.httpsCallable("confirmCashRemittance").invoke(mapOf(
-            "remittanceId" to "rem_${UUID.randomUUID()}",
-            "collectorId" to collectorId,
-            "amountMinor" to amountMinor
-        ))
-        refreshAdmin()
-    }
+    fun remitCash(collectorId: String, amountMinor: Long, remittanceId: String, onSuccess: () -> Unit) =
+        runAction("Cash remittance recorded.", onSuccess) {
+            functions.httpsCallable("confirmCashRemittance").invoke(mapOf(
+                "remittanceId" to remittanceId,
+                "collectorId" to collectorId,
+                "amountMinor" to amountMinor
+            ))
+            refreshAdmin()
+        }
     fun saveControls(hours: Int, capMinor: Long) = runAction("Cash controls updated.") {
         functions.httpsCallable("updateAdminCashControls").invoke(mapOf(
             "alertAfterHours" to hours,
@@ -113,12 +114,12 @@ class CashOperationsScreenModel : ScreenModel {
         ))
         refreshAdmin()
     }
-    private fun runAction(success: String, action: suspend () -> Unit) {
+    private fun runAction(success: String, onSuccess: () -> Unit = {}, action: suspend () -> Unit) {
         if (_busy.value) return
         screenModelScope.launch {
             _busy.value = true
             _message.value = null
-            runCatching { action(); _message.value = success }
+            runCatching { action(); _message.value = success; onSuccess() }
                 .onFailure { _message.value = it.message ?: "Cash operation failed." }
             _busy.value = false
         }
@@ -237,13 +238,17 @@ class AdminCashControlsScreen : Screen {
                 item { Text("Collector balances", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
                 items(data?.collectors.orEmpty()) { collector ->
                     var amount by remember(collector.collectorId) { mutableStateOf("") }
+                    var remittanceId by remember(collector.collectorId) { mutableStateOf("rem_${UUID.randomUUID()}") }
                     Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(collector.collectorId, fontWeight = FontWeight.SemiBold)
                         Text("Outstanding: ${php(collector.outstandingMinor)}")
                         OutlinedTextField(amount, { amount = it }, label = { Text("Cash remitted (PHP)") }, singleLine = true)
                         OutlinedButton(onClick = {
                             val minor = ((amount.toDoubleOrNull() ?: 0.0) * 100).toLong()
-                            if (minor > 0) model.remitCash(collector.collectorId, minor)
+                            if (minor > 0) model.remitCash(collector.collectorId, minor, remittanceId) {
+                                remittanceId = "rem_${UUID.randomUUID()}"
+                                amount = ""
+                            }
                         }, enabled = !busy) { Text("Confirm platform remittance") }
                     } }
                 }
