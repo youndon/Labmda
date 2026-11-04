@@ -11,7 +11,7 @@ function root(overrides: Record<string, unknown> = {}): any {
       trip_1: {
         id: "trip_1", passengerId: "passenger_1", paymentId: "payment_1",
         customerTotalMinor: 18500, status: "REQUESTED", driverId: "",
-        createdAtTimestamp: now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS - 1000,
+        createdAtTimestamp: now - 60_000, updatedAtTimestamp: now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS - 1000,
         paymentStatus: "PAID", paymentState: "PAID",
       },
     },
@@ -20,6 +20,7 @@ function root(overrides: Record<string, unknown> = {}): any {
         id: "payment_1", transactionType: "RIDE", tripId: "trip_1",
         payerId: "passenger_1", method: "GCASH", provider: "BDO_CHECKOUT",
         status: "SUCCEEDED", amountMinor: 18500, currency: "PHP",
+        completedAt: now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS - 1000,
         refundedAmountMinor: 0, refundReservedAmountMinor: 0,
       },
     },
@@ -49,7 +50,16 @@ describe("unaccepted paid ride recovery", () => {
 
   it("does not touch rides before the ten-minute timeout", () => {
     const current = root();
-    current.trips.trip_1.createdAtTimestamp = now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS + 1;
+    current.trips.trip_1.updatedAtTimestamp = now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS + 1;
+    current.payments.payment_1.completedAt = now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS + 1;
+    expect(buildUnacceptedPaidRideRecoveryRoot(current, "trip_1", now)).toBeNull();
+  });
+
+  it("measures the timeout from successful payment, not ride creation", () => {
+    const current = root();
+    current.trips.trip_1.createdAtTimestamp = now - 24 * 60 * 60 * 1000;
+    current.trips.trip_1.updatedAtTimestamp = now - 60_000;
+    current.payments.payment_1.completedAt = now - 60_000;
     expect(buildUnacceptedPaidRideRecoveryRoot(current, "trip_1", now)).toBeNull();
   });
 
