@@ -29,6 +29,18 @@ describe("PHP pricing engine", () => {
       fareMinor: 14580, platformCommissionMinor: 2187, driverEarningsMinor: 12393,
     });
   });
+  it("caps a platform-funded promotion at the commission available to fund it", () => {
+    const quote = calculateOrderBreakdown({
+      config, service: "FOOD", subtotalMinor: 20000,
+      route: { distanceMeters: 1000, durationSeconds: 300 }, paymentMethod: "GCASH",
+      discount: { active: true, kind: "FIXED", valueMinor: 10000, funder: "PLATFORM" },
+    });
+    expect(quote.platformDiscountMinor).toBe(quote.platformCommissionMinor);
+    expect(quote.discountMinor).toBe(quote.platformCommissionMinor);
+    expect(quote.merchantEarningsMinor + quote.courierEarningsMinor
+      + quote.platformCommissionMinor - quote.platformDiscountMinor).toBe(quote.customerTotalMinor);
+    expect(quote.platformCommissionMinor - quote.platformDiscountMinor).toBe(0);
+  });
   it("separates merchant-funded discount, platform commission and courier earnings", () => {
     const quote = calculateOrderBreakdown({
       config, service: "FOOD", subtotalMinor: 20000,
