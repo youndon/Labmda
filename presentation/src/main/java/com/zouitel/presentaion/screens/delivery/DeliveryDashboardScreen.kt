@@ -25,6 +25,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.screens.cash.CollectorCashScreen
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
