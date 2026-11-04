@@ -292,7 +292,10 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
       return { refundId, status: "COMPLETED", duplicate: true, paymentId: current.paymentId,
         providerReference, verifiedAmountMinor, ledgerOperationId: current.ledgerOperationId ?? "" };
     }
-    throw new HttpsError("failed-precondition", "Refund is not approved, another refund for this payment is processing, or the transfer reference is already assigned.");
+    if (current?.status !== "PROCESSING" || current.providerReference !== providerReference
+      || current.verificationNote !== verificationNote || current.verifiedAmountMinor !== verifiedAmountMinor) {
+      throw new HttpsError("failed-precondition", "Refund is not approved, another refund for this payment is processing, or the transfer reference is already assigned.");
+    }
   }
   const claimedCase = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
   if (claimedCase.status === "COMPLETED") {
