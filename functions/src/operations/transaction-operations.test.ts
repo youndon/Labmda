@@ -55,6 +55,36 @@ describe("paid order cancellation and refund reservation", () => {
     expect(buildCancelledOrderRoot(root, "order_1", order, "customer_1", "CUSTOMER", 1_798_000_000_100)).toBeNull();
   });
 
+  it("cancels a pending cash payment atomically and clears CASH_DUE on the order", () => {
+    const cashOrder = { ...order, status: "PLACED", paymentStatus: "CASH_DUE", paymentMethod: "CASH" };
+    const cashPayment = { ...payment, method: "CASH", provider: "CASH", status: "PENDING" };
+    const root = { orders: { order_1: cashOrder }, payments: { payment_1: cashPayment }, refundCases: {} };
+    const result = buildCancelledOrderRoot(root, "order_1", cashOrder, "merchant_1", "MERCHANT", 1_798_000_000_100);
+    expect(result?.orders.order_1).toMatchObject({ status: "CANCELLED", paymentStatus: "CANCELLED" });
+    expect(result?.payments.payment_1).toMatchObject({
+      status: "CANCELLED", method: "CASH", provider: "CASH",
+      updatedAt: 1_798_000_000_100, completedAt: 1_798_000_000_100,
+    });
+    expect(result?.refundCases).toEqual({});
+  });
+
+  it("refuses to cancel a CASH_DUE order if its linked payment record is missing", () => {
+    const cashOrder = { ...order, status: "PLACED", paymentStatus: "CASH_DUE", paymentMethod: "CASH" };
+    const root = { orders: { order_1: cashOrder }, payments: {}, refundCases: {} };
+    expect(buildCancelledOrderRoot(root, "order_1", cashOrder, "merchant_1", "MERCHANT", 1_798_000_000_100)).toBeNull();
+  });
+
+  it("does not cancel a cash payment that is already collected or has an unexpected provider", () => {
+    const cashOrder = { ...order, status: "PLACED", paymentStatus: "CASH_DUE" };
+    for (const cashPayment of [
+      { ...payment, method: "CASH", provider: "CASH", status: "SUCCEEDED" },
+      { ...payment, method: "CASH", provider: "BDO_CHECKOUT", status: "PENDING" },
+    ]) {
+      const root = { orders: { order_1: cashOrder }, payments: { payment_1: cashPayment }, refundCases: {} };
+      expect(buildCancelledOrderRoot(root, "order_1", cashOrder, "merchant_1", "MERCHANT", 1_798_000_000_100)).toBeNull();
+    }
+  });
+
   it("does not cancel a payment while its BDO Checkout link is still payable", () => {
     const pendingOrder = { ...order, status: "PENDING_PAYMENT" };
     const pendingPayment = { ...payment, status: "PROCESSING", checkoutUrl: "https://checkout.bdo.com.ph/request/123" };

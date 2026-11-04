@@ -59,6 +59,25 @@ describe("payment state synchronization", () => {
     expect(db.value().orders.o1.paymentStatus).toBe("REFUND_REJECTED");
   });
 
+  it("clears CASH_DUE and cancels a placed cash order after its pending payment is cancelled", async () => {
+    const db = fakeDatabase({
+      payments: { p1: { id: "p1", transactionType: "ORDER", orderId: "o1", method: "CASH", provider: "CASH", status: "CANCELLED", updatedAt: 35 } },
+      orders: { o1: { id: "o1", paymentId: "p1", orderType: "FOOD", status: "CANCELLED", paymentStatus: "CANCELLED", paymentMethod: "CASH" } },
+    });
+    await synchronizePaymentState(db, "p1");
+    expect(db.value().orders.o1).toMatchObject({ status: "CANCELLED", paymentStatus: "CANCELLED", paymentMethod: "CASH" });
+    expect(db.value().orders.o1.paymentStatus).not.toBe("CASH_DUE");
+  });
+
+  it("also repairs a legacy placed cash order whose payment was cancelled separately", async () => {
+    const db = fakeDatabase({
+      payments: { p1: { id: "p1", transactionType: "ORDER", orderId: "o1", method: "CASH", provider: "CASH", status: "CANCELLED", updatedAt: 36 } },
+      orders: { o1: { id: "o1", paymentId: "p1", orderType: "FOOD", status: "PLACED", paymentStatus: "CASH_DUE", paymentMethod: "CASH" } },
+    });
+    await synchronizePaymentState(db, "p1");
+    expect(db.value().orders.o1).toMatchObject({ status: "CANCELLED", paymentStatus: "CANCELLED" });
+  });
+
   it("keeps cash due until the trusted collector marks the payment succeeded", async () => {
     const db = fakeDatabase({
       payments: { p1: { id: "p1", transactionType: "RIDE", tripId: "t1", method: "CASH", provider: "CASH", status: "PENDING", updatedAt: 30 } },

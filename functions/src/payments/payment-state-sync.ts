@@ -49,7 +49,10 @@ export async function synchronizePaymentState(database: Database, paymentId: str
         ? (order.orderType === "DELIVERY" ? "OUT_FOR_DELIVERY" : "PLACED")
         : ["CANCELLED", "FAILED", "EXPIRED"].includes(rawStatus) && order.status === "PENDING_PAYMENT"
           ? "CANCELLED"
-          : order.status;
+          : method === "CASH" && rawStatus === "CANCELLED" && order.paymentStatus === "CASH_DUE"
+            && ["PLACED", "ACCEPTED"].includes(String(order.status))
+            ? "CANCELLED"
+            : order.status;
       const refundCase = order.refundCaseId ? root.refundCases?.[order.refundCaseId] as Record<string, any> | undefined : undefined;
       const refundCaseStatus = typeof refundCase?.status === "string" ? refundCase.status : "";
       const orderPaymentStatus = order.status === "CANCELLED" && refundCaseStatus
