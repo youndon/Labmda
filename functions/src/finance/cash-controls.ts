@@ -55,16 +55,22 @@ export const setCollectorOnline = onCall({ enforceAppCheck: true }, async (call)
   const serviceNode = service === "DRIVER" ? "driverService" : "deliveryServices";
   const profileRef = db().ref(`users/${uid}`);
   const profile = await profileRef.get();
-  if (!profile.exists() || profile.child(`${serviceNode}/status`).val() !== "APPROVED") {
-    throw new HttpsError("permission-denied", "An approved provider account is required.");
+  if (!profile.exists() || !profile.child(serviceNode).exists()) {
+    throw new HttpsError("failed-precondition", "Your provider service profile was not found.");
   }
   const balance = online ? await assertCollectorCashLimit(uid) : null;
-  const result = await profileRef.child(`${serviceNode}/isOnline`).transaction((current: unknown) => {
-    if (online && profile.child(`${serviceNode}/status`).val() !== "APPROVED") return;
-    return online;
+  const result = await profileRef.child(serviceNode).transaction((current: Record<string, any> | null) => {
+    if (!current || (online && current.status !== "APPROVED")) return;
+    return { ...current, isOnline: online };
   }, undefined, false);
-  if (!result.committed && result.snapshot.val() !== online) {
+  if (online && !result.committed && result.snapshot.child("isOnline").val() !== true) {
+    if (result.snapshot.child("status").val() !== "APPROVED") {
+      throw new HttpsError("permission-denied", "An approved provider account is required.");
+    }
     throw new HttpsError("aborted", "Your online status changed. Refresh and try again.");
+  }
+  if (!online && !result.committed && result.snapshot.child("isOnline").val() !== false) {
+    throw new HttpsError("aborted", "Could not set your provider offline. Try again.");
   }
   if (!online) await db().ref(`driverLocations/${uid}`).remove();
   return { service, online, ...(balance ?? {}) };
