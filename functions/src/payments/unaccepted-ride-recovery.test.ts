@@ -11,7 +11,7 @@ function root(overrides: Record<string, unknown> = {}): any {
       trip_1: {
         id: "trip_1", passengerId: "passenger_1", paymentId: "payment_1",
         customerTotalMinor: 18500, status: "REQUESTED", driverId: "",
-        createdAtTimestamp: now - 60_000, updatedAtTimestamp: now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS - 1000,
+        createdAtTimestamp: now - 60_000, updatedAtTimestamp: now - 60_000,
         paymentStatus: "PAID", paymentState: "PAID",
       },
     },
@@ -50,7 +50,6 @@ describe("unaccepted paid ride recovery", () => {
 
   it("does not touch rides before the ten-minute timeout", () => {
     const current = root();
-    current.trips.trip_1.updatedAtTimestamp = now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS + 1;
     current.payments.payment_1.completedAt = now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS + 1;
     expect(buildUnacceptedPaidRideRecoveryRoot(current, "trip_1", now)).toBeNull();
   });
@@ -61,6 +60,12 @@ describe("unaccepted paid ride recovery", () => {
     current.trips.trip_1.updatedAtTimestamp = now - 60_000;
     current.payments.payment_1.completedAt = now - 60_000;
     expect(buildUnacceptedPaidRideRecoveryRoot(current, "trip_1", now)).toBeNull();
+  });
+
+  it("uses payment completion even if the ride record was updated later", () => {
+    const current = root();
+    current.trips.trip_1.updatedAtTimestamp = now - 60_000;
+    expect(buildUnacceptedPaidRideRecoveryRoot(current, "trip_1", now)).not.toBeNull();
   });
 
   it("does not cancel a ride accepted concurrently by a driver", () => {
