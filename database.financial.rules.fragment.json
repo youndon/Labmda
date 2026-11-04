@@ -169,6 +169,14 @@
     "paymentConfig": {
       ".read": false,
       ".write": false
+    },
+    "cashControls": {
+      ".read": false,
+      ".write": false
+    },
+    "adminCashAlerts": {
+      ".read": false,
+      ".write": false
     }
   }
 }
