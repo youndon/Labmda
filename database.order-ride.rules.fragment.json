@@ -67,7 +67,7 @@
             ".write": "auth != null && auth.uid == $uid && (!newData.exists() || ((!data.exists() && newData.val() == 'PENDING') || newData.val() == data.val()))"
           },
           "isOnline": {
-            ".write": "auth != null && auth.uid == $uid && newData.isBoolean() && newData.val() == false"",
+            ".write": "auth != null && auth.uid == $uid && newData.isBoolean() && newData.val() == false",
             ".validate": "newData.isBoolean()"
           }
         },
@@ -76,7 +76,7 @@
             ".write": "auth != null && auth.uid == $uid && ((!data.exists() && newData.val() == 'PENDING') || newData.val() == data.val())"
           },
           "isOnline": {
-            ".write": "auth != null && auth.uid == $uid && newData.isBoolean() && newData.val() == false""
+            ".write": "auth != null && auth.uid == $uid && newData.isBoolean() && newData.val() == false"
           }
         },
         "foodStatus": {
