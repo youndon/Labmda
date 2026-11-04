@@ -1,5 +1,67 @@
 import { describe, expect, it } from "vitest";
-import { buildClaimAllocationTransfer, buildDeliveryReassignmentTransfer, isAllowedOrderTransition, isAllowedTripTransition } from "./transaction-operations.js";
+import { buildCancelledOrderRoot, buildClaimAllocationTransfer, buildDeliveryReassignmentTransfer, isAllowedOrderTransition, isAllowedTripTransition } from "./transaction-operations.js";
+
+describe("paid order cancellation and refund reservation", () => {
+  const order = {
+    id: "order_1", clientId: "customer_1", paymentId: "payment_1",
+    status: "PLACED", orderType: "FOOD",
+  };
+  const payment = {
+    id: "payment_1", orderId: "order_1", transactionType: "ORDER",
+    payerId: "customer_1", currency: "PHP", status: "SUCCEEDED",
+    method: "GCASH", provider: "BDO_CHECKOUT", amountMinor: 10000,
+    refundedAmountMinor: 0, refundReservedAmountMinor: 0,
+  };
+
+  it("creates and reserves a deterministic refund case without changing the succeeded payment or receipt", () => {
+    const originalReceipt = { operationId: "payment_payment_1_received", immutable: true };
+    const root = { orders: { order_1: order }, payments: { payment_1: payment },
+      refundCases: {}, financialOperations: { payment_payment_1_received: originalReceipt } };
+    const result = buildCancelledOrderRoot(root, "order_1", order, "customer_1", "CUSTOMER", 1_798_000_000_100);
+    expect(result?.orders.order_1).toMatchObject({ status: "CANCELLED", paymentStatus: "REFUND_PENDING" });
+    expect(result?.payments.payment_1).toMatchObject({ status: "SUCCEEDED", refundReservedAmountMinor: 10000 });
+    const refund = Object.values(result?.refundCases ?? {})[0] as Record<string, any>;
+    expect(refund).toMatchObject({
+      paymentId: "payment_1", orderId: "order_1", payerId: "customer_1",
+      amountMinor: 10000, currency: "PHP", status: "REQUESTED", origin: "ORDER_CANCELLATION",
+    });
+    expect(result?.financialOperations.payment_payment_1_received).toBe(originalReceipt);
+  });
+
+  it("reserves only the remaining amount after previous refunds and reservations", () => {
+    const partialPayment = { ...payment, status: "PARTIALLY_REFUNDED", amountMinor: 10000,
+      refundedAmountMinor: 2000, refundReservedAmountMinor: 1000 };
+    const root = { orders: { order_1: order }, payments: { payment_1: partialPayment }, refundCases: {} };
+    const result = buildCancelledOrderRoot(root, "order_1", order, "merchant_1", "MERCHANT", 1_798_000_000_100);
+    expect(result?.payments.payment_1.refundReservedAmountMinor).toBe(8000);
+    const refund = Object.values(result?.refundCases ?? {})[0] as Record<string, any>;
+    expect(refund.amountMinor).toBe(7000);
+    expect(refund.requestedByRole).toBe("MERCHANT");
+  });
+
+  it("is idempotent when the same cancelled order is processed again", () => {
+    const root = { orders: { order_1: order }, payments: { payment_1: payment }, refundCases: {} };
+    const first = buildCancelledOrderRoot(root, "order_1", order, "customer_1", "CUSTOMER", 1_798_000_000_100)!;
+    const firstOrder = first.orders.order_1;
+    const second = buildCancelledOrderRoot(first, "order_1", firstOrder, "customer_1", "CUSTOMER", 1_798_000_000_200)!;
+    expect(second.payments.payment_1.refundReservedAmountMinor).toBe(10000);
+    expect(Object.keys(second.refundCases)).toHaveLength(1);
+    expect(second.orders.order_1.refundCaseId).toBe(firstOrder.refundCaseId);
+  });
+
+  it("does not send cash refunds through the BDO GCash workflow", () => {
+    const cashPayment = { ...payment, method: "CASH", provider: "CASH" };
+    const root = { orders: { order_1: order }, payments: { payment_1: cashPayment }, refundCases: {} };
+    expect(buildCancelledOrderRoot(root, "order_1", order, "customer_1", "CUSTOMER", 1_798_000_000_100)).toBeNull();
+  });
+
+  it("does not cancel a payment while its BDO Checkout link is still payable", () => {
+    const pendingOrder = { ...order, status: "PENDING_PAYMENT" };
+    const pendingPayment = { ...payment, status: "PROCESSING", checkoutUrl: "https://checkout.bdo.com.ph/request/123" };
+    const root = { orders: { order_1: pendingOrder }, payments: { payment_1: pendingPayment }, refundCases: {} };
+    expect(buildCancelledOrderRoot(root, "order_1", pendingOrder, "customer_1", "CUSTOMER", 1_798_000_000_100)).toBeNull();
+  });
+});
 
 describe("trusted order state machine", () => {
   it("allows only the merchant workflow transitions", () => {
