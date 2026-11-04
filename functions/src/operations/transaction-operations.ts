@@ -108,7 +108,7 @@ async function assignSucceededOnlinePaymentShare(
       fail("The payment allocation is already assigned to another provider.");
     }
     if (beneficiaryType === "DELIVERY") {
-      await allocationsRef.transaction((current: Record<string, Record<string, any>> | null) => {
+      const linkedAllocations = await allocationsRef.transaction((current: Record<string, Record<string, any>> | null) => {
         if (!current) return;
         const row = current[existingId];
         if (!row || row.beneficiaryId !== beneficiaryId) return;
@@ -118,6 +118,7 @@ async function assignSucceededOnlinePaymentShare(
         }
         return next;
       }, undefined, false);
+      if (!linkedAllocations.committed) fail("The existing courier allocation could not be linked to this payment.");
       const linked = await paymentRef.transaction((current: Record<string, any> | null) => {
         if (!current || (current.deliveryId && current.deliveryId !== beneficiaryId)) return;
         return { ...current, deliveryId: beneficiaryId, updatedAt: now };
