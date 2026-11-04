@@ -428,13 +428,223 @@ class RestaurantWorkplaceScreen : Screen {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(AppSpacing.lg),
-            contentPadding = PaddingValues(bottom = AppSpacing.lg)
+            contentPadding = PaddingValues(bottom = AppSpacing.xxl)
         ) {
             item {
                 AppSectionTitle(
-                    title = restaurantInfo.name.ifBlank { "Restaurant workspace" },
-                    subtitle = "Manage availability, menu, and business performance."
+                    title = "Restaurant overview",
+                    subtitle = "A quick view of your storefront, availability, and menu."
                 )
+            }
+
+            item {
+                AppCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.extraLarge
+                ) {
+                    Column {
+                        if (restaurantInfo.imageUrl.isNotBlank()) {
+                            AsyncImage(
+                                model = restaurantInfo.imageUrl,
+                                contentDescription = "Restaurant photo",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(176.dp),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(AppSpacing.lg),
+                            verticalArrangement = Arrangement.spacedBy(AppSpacing.sm)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = restaurantInfo.name.ifBlank { "My Restaurant" },
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Surface(
+                                    color = if (isOnline) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = RoundedCornerShape(50)
+                                ) {
+                                    Text(
+                                        text = if (isOnline) "OPEN" else "CLOSED",
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isOnline) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Text(
+                                text = restaurantInfo.address.ifBlank { "Add your pickup address to complete your storefront profile." },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (restaurantInfo.managerPhone.isNotBlank()) {
+                                Text(
+                                    text = "Manager contact · ${restaurantInfo.managerPhone}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                AppCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.extraLarge
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(AppSpacing.lg),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
+                        ) {
+                            Text(
+                                "Order availability",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (isOnline) "Customers can place orders from your restaurant."
+                                else "Your restaurant is hidden from new order requests.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isOnline,
+                            onCheckedChange = onOnlineChanged
+                        )
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.md)
+                ) {
+                    RestaurantMetricCard(
+                        modifier = Modifier.weight(1f),
+                        label = "Menu items",
+                        value = mealCount.toString(),
+                        supporting = if (mealCount == 0) "Add your first meal" else "Listed meals",
+                        icon = Icons.Default.Fastfood
+                    )
+                    RestaurantMetricCard(
+                        modifier = Modifier.weight(1f),
+                        label = "Prep time",
+                        value = "${restaurantInfo.estimatedTimeMinutes} min",
+                        supporting = "Estimated",
+                        icon = Icons.Default.HourglassEmpty
+                    )
+                }
+            }
+
+            item {
+                AppCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.extraLarge
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(AppSpacing.lg),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
+                    ) {
+                        Text(
+                            "Delivery information",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "₱${"%.2f".format(restaurantInfo.deliveryFee)}",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "Delivery fee shown in your restaurant profile",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            item {
+                AppSectionTitle(
+                    title = "Manage your business",
+                    subtitle = "Keep your menu current and review your provider balance."
+                )
+            }
+
+            item {
+                AppCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onManageMenu),
+                    shape = MaterialTheme.shapes.extraLarge
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(AppSpacing.lg),
+                        horizontalArrangement = Arrangement.spacedBy(AppSpacing.md),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Fastfood,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Manage menu",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (mealCount == 0) "Create your first menu item"
+                                else "Review and update your $mealCount menu items",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Open menu",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
 
             item {
@@ -444,139 +654,49 @@ class RestaurantWorkplaceScreen : Screen {
                     modifier = Modifier.fillMaxWidth()
                 )
             }
+        }
+    }
 
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Restaurant, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Restaurant Status", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                                Text(
-                                    text = if (isOnline) "Accepting Orders" else "Offline / Closed",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isOnline) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                        Switch(checked = isOnline, onCheckedChange = onOnlineChanged)
-                    }
-                }
-            }
-
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        if (restaurantInfo.imageUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = restaurantInfo.imageUrl,
-                                contentDescription = "Restaurant photo",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(180.dp)
-                                    .clip(RoundedCornerShape(12.dp)),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-
-                        Text(
-                            text = restaurantInfo.name.ifBlank { "My Restaurant" },
-                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
-                        )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                        Text(
-                            text = "Delivery Fee: ₱${"%.2f".format(restaurantInfo.deliveryFee)}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = "Prep / Estimated Time: ${restaurantInfo.estimatedTimeMinutes} minutes",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = if (restaurantInfo.address.isNotBlank()) "Address: ${restaurantInfo.address}"
-                            else "Location not set. Tap edit to set it on the map.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (restaurantInfo.address.isNotBlank()) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.error
-                        )
-                        if (restaurantInfo.managerPhone.isNotBlank()) {
-                            Text(
-                                text = "Manager Contact: ${restaurantInfo.managerPhone}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onManageMenu),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Fastfood, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text("Manage Menu", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                                Text(
-                                    text = if (mealCount == 0) "No meals yet. Tap to add your first meal."
-                                    else "$mealCount meals on your menu. Tap to view or edit.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+    @Composable
+    private fun RestaurantMetricCard(
+        modifier: Modifier = Modifier,
+        label: String,
+        value: String,
+        supporting: String,
+        icon: androidx.compose.ui.graphics.vector.ImageVector
+    ) {
+        AppCard(
+            modifier = modifier,
+            shape = MaterialTheme.shapes.large
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(AppSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.xs)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    value,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
+
 }
