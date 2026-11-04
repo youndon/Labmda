@@ -12,9 +12,13 @@ export function buildRefundReversal(args: {
   createdAt: number;
   reason: string;
   originalPostings: LedgerPosting[];
-  currentBalances: Record<string, { availableMinor?: number; pendingMinor?: number }>;
+  currentBalances?: Record<string, { availableMinor?: number; pendingMinor?: number }>;
 }): FinancialOperation {
-  const { refundId, paymentId, paymentAmountMinor, refundAmountMinor, originalPostings, currentBalances } = args;
+  const { refundId, paymentId, paymentAmountMinor, refundAmountMinor, originalPostings } = args;
+  // Older callers/tests may not have a balance snapshot. Treat missing data as
+  // zero known balance so the unrecovered portion is explicitly posted as a
+  // negative AVAILABLE clawback rather than crashing or silently disappearing.
+  const currentBalances = args.currentBalances ?? {};
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(refundId) || !/^[A-Za-z0-9_-]{1,128}$/.test(paymentId)) {
     throw new Error("Refund and payment IDs must be valid Firebase identifiers.");
   }
