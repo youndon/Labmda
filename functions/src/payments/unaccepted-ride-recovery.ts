@@ -1,0 +1,137 @@
+import type { Database } from "firebase-admin/database";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { buildAutomaticRideRefundCase } from "../finance/ride-refunds.js";
+
+export const UNACCEPTED_PAID_RIDE_TIMEOUT_MS = 10 * 60 * 1000;
+const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
+
+type RideRoot = Record<string, any>;
+
+/**
+ * Atomically closes an expired, paid ride request, reserves its refundable
+ * balance and removes it from the passenger's active request projection.
+ * Driver acceptance and recovery race through the same RTDB root transaction.
+ */
+export function buildUnacceptedPaidRideRecoveryRoot(
+  root: RideRoot,
+  tripId: string,
+  now: number,
+  timeoutMs = UNACCEPTED_PAID_RIDE_TIMEOUT_MS,
+): RideRoot | null {
+  if (!idPattern.test(tripId) || !Number.isSafeInteger(now) || now <= 0
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) return null;
+
+  const trip = root.trips?.[tripId] as Record<string, any> | undefined;
+  if (!trip || trip.id !== tripId || trip.status !== "REQUESTED"
+    || (typeof trip.driverId === "string" && trip.driverId.trim().length > 0)
+    || !Number.isSafeInteger(trip.createdAtTimestamp)
+    || trip.createdAtTimestamp > now - timeoutMs) return null;
+
+  const paymentId = typeof trip.paymentId === "string" ? trip.paymentId : "";
+  const passengerId = typeof trip.passengerId === "string" ? trip.passengerId : "";
+  if (!idPattern.test(paymentId) || !idPattern.test(passengerId)) return null;
+
+  const payment = root.payments?.[paymentId] as Record<string, any> | undefined;
+  if (!payment || payment.id !== paymentId || payment.transactionType !== "RIDE"
+    || payment.tripId !== tripId || payment.payerId !== passengerId
+    || payment.method !== "GCASH" || payment.provider !== "BDO_CHECKOUT"
+    || (payment.status !== "SUCCEEDED" && payment.status !== "PARTIALLY_REFUNDED")
+    || payment.currency !== "PHP" || !Number.isSafeInteger(payment.amountMinor)
+    || payment.amountMinor <= 0 || payment.amountMinor !== trip.customerTotalMinor
+    || payment.refundProcessingId) return null;
+
+  const refunded = payment.refundedAmountMinor ?? 0;
+  const reserved = payment.refundReservedAmountMinor ?? 0;
+  if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved)
+    || refunded < 0 || reserved < 0 || refunded + reserved > payment.amountMinor) return null;
+
+  const existingCaseId = typeof trip.refundCaseId === "string" ? trip.refundCaseId : "";
+  const refund = buildAutomaticRideRefundCase({
+    tripId, paymentId, payerId: passengerId,
+    amountMinor: payment.amountMinor - refunded - reserved,
+    createdAt: now,
+  });
+  const refundCases = { ...(root.refundCases ?? {}) } as Record<string, Record<string, any>>;
+  const existingCase = refundCases[refund.id];
+  let nextPayment = payment;
+  let refundCaseId = refund.id;
+
+  if (existingCaseId || existingCase) {
+    if (existingCaseId !== refund.id || !existingCase
+      || existingCase.paymentId !== paymentId || existingCase.tripId !== tripId
+      || existingCase.payerId !== passengerId || existingCase.status !== "REQUESTED"
+      || !Number.isSafeInteger(existingCase.amountMinor)
+      || reserved < existingCase.amountMinor) return null;
+  } else {
+    if (refund.amountMinor <= 0) return null;
+    refundCases[refund.id] = refund;
+    nextPayment = {
+      ...payment,
+      refundReservedAmountMinor: reserved + refund.amountMinor,
+      updatedAt: now,
+    };
+  }
+
+  const nextTrip = {
+    ...trip,
+    status: "CANCELLED",
+    paymentStatus: "REFUND_PENDING",
+    paymentState: "REFUND_PENDING",
+    refundCaseId,
+    cancellationReason: "NO_DRIVER_ACCEPTED",
+    cancelledAt: trip.cancelledAt ?? now,
+    updatedAtTimestamp: now,
+  };
+
+  const activeRideRequests = { ...(root.activeRideRequests ?? {}) } as Record<string, Record<string, unknown>>;
+  if (activeRideRequests[passengerId]) {
+    const passengerRequests = { ...activeRideRequests[passengerId] };
+    delete passengerRequests[tripId];
+    if (Object.keys(passengerRequests).length) activeRideRequests[passengerId] = passengerRequests;
+    else delete activeRideRequests[passengerId];
+  }
+
+  return {
+    ...root,
+    trips: { ...root.trips, [tripId]: nextTrip },
+    payments: nextPayment === payment ? root.payments : { ...root.payments, [paymentId]: nextPayment },
+    refundCases,
+    activeRideRequests,
+  };
+}
+
+/** Every minute, recover paid ride requests that have waited ten minutes without driver acceptance. */
+export const recoverUnacceptedPaidRides = onSchedule("every 1 minutes", async () => {
+  const database = (await import("firebase-admin/database")).getDatabase();
+  const now = Date.now();
+  const cutoff = now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS;
+  const candidates = await database.ref("trips")
+    .orderByChild("status")
+    .equalTo("REQUESTED")
+    .get();
+
+  if (!candidates.exists()) return { scanned: 0, cancelled: 0 };
+
+  let scanned = 0;
+  let cancelled = 0;
+  const tasks: Promise<void>[] = [];
+  candidates.forEach((child) => {
+    const tripId = child.key;
+    if (!tripId) return;
+    const candidate = child.val() as Record<string, any>;
+    if (!Number.isSafeInteger(candidate.createdAtTimestamp)
+      || candidate.createdAtTimestamp > cutoff
+      || (typeof candidate.driverId === "string" && candidate.driverId.trim())) return;
+
+    scanned += 1;
+    tasks.push(database.ref().transaction((root: RideRoot | null) => {
+      if (root === null) return null;
+      return buildUnacceptedPaidRideRecoveryRoot(root, tripId, now);
+    }, undefined, false).then((result) => {
+      if (result.committed) cancelled += 1;
+    }));
+  });
+
+  await Promise.all(tasks);
+  return { scanned, cancelled };
+});
