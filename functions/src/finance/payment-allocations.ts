@@ -159,3 +159,93 @@ export function buildStandaloneDeliveryAllocations(input: StandaloneDeliveryAllo
     createdAt: input.createdAt, updatedAt: input.createdAt,
   }));
 }
+
+
+/**
+ * Builds the merchant/platform portion of an order receipt before a courier is
+ * assigned. The courier earning remains unallocated and is posted to CLEARING
+ * by createPaymentReceiptOperation until a later assignment transfer.
+ */
+export function buildInitialOrderPaymentAllocations(input: {
+  paymentId: string;
+  orderId: string;
+  merchantOwnerId: string;
+  breakdown: MoneyBreakdown;
+  providerFeePayer: ProviderFeePayer;
+  createdAt: number;
+}): PaymentAllocation[] {
+  const { breakdown } = input;
+  const values = [breakdown.customerTotalMinor, breakdown.merchantEarningsMinor,
+    breakdown.courierEarningsMinor, breakdown.platformCommissionMinor,
+    breakdown.platformDiscountMinor, breakdown.providerFeeMinor];
+  if (!values.every((amount) => Number.isSafeInteger(amount) && amount >= 0)
+    || !input.paymentId || !input.orderId || !input.merchantOwnerId
+    || !Number.isSafeInteger(input.createdAt) || input.createdAt <= 0) {
+    throw new Error("Initial order allocation identity and amounts are invalid.");
+  }
+  const platformMinor = breakdown.platformCommissionMinor - breakdown.platformDiscountMinor
+    + (input.providerFeePayer === "CUSTOMER" ? breakdown.providerFeeMinor : 0);
+  if (platformMinor < 0 || !Number.isSafeInteger(platformMinor)
+    || breakdown.merchantEarningsMinor + platformMinor + breakdown.courierEarningsMinor !== breakdown.customerTotalMinor) {
+    throw new Error("Initial order allocations and unassigned courier amount do not reconcile to the quote.");
+  }
+  const rows = [
+    { beneficiaryId: input.merchantOwnerId, beneficiaryType: "MERCHANT" as const, amountMinor: breakdown.merchantEarningsMinor },
+    { beneficiaryId: "platform", beneficiaryType: "PLATFORM" as const, amountMinor: platformMinor },
+  ].filter((row) => row.amountMinor > 0);
+  return rows.map((row, index) => ({
+    id: `alloc_${input.paymentId}_${index + 1}`,
+    paymentId: input.paymentId, transactionType: "ORDER" as PaymentTransactionType,
+    orderId: input.orderId, tripId: "", deliveryId: "",
+    beneficiaryId: row.beneficiaryId, beneficiaryType: row.beneficiaryType,
+    amountMinor: row.amountMinor, currency: "PHP", status: "PENDING",
+    createdAt: input.createdAt, updatedAt: input.createdAt,
+  }));
+}
+
+/** Creates only the platform portion of a ride receipt before driver acceptance. */
+export function buildInitialRidePaymentAllocations(input: Omit<RideAllocationInput, "driverId">): PaymentAllocation[] {
+  const values = [input.fareMinor, input.driverEarningsMinor, input.platformCommissionMinor,
+    input.providerFeeMinor, input.customerTotalMinor];
+  if (!values.every((amount) => Number.isSafeInteger(amount) && amount >= 0)
+    || !input.paymentId || !input.tripId || !Number.isSafeInteger(input.createdAt) || input.createdAt <= 0) {
+    throw new Error("Initial ride allocation identity and amounts are invalid.");
+  }
+  const platformMinor = input.platformCommissionMinor
+    + (input.providerFeePayer === "CUSTOMER" ? input.providerFeeMinor : 0);
+  if (!Number.isSafeInteger(platformMinor) || input.driverEarningsMinor + platformMinor !== input.customerTotalMinor
+    || input.driverEarningsMinor + input.platformCommissionMinor !== input.fareMinor) {
+    throw new Error("Initial ride allocation and unassigned driver amount do not reconcile to the quote.");
+  }
+  if (platformMinor === 0) return [];
+  return [{
+    id: `alloc_${input.paymentId}_1`, paymentId: input.paymentId,
+    transactionType: "RIDE", orderId: "", tripId: input.tripId, deliveryId: "",
+    beneficiaryId: "platform", beneficiaryType: "PLATFORM", amountMinor: platformMinor,
+    currency: "PHP", status: "PENDING", createdAt: input.createdAt, updatedAt: input.createdAt,
+  }];
+}
+
+/** Creates only the platform portion of a standalone-delivery receipt before courier claim. */
+export function buildInitialStandaloneDeliveryPaymentAllocations(input: Omit<StandaloneDeliveryAllocationInput, "courierId">): PaymentAllocation[] {
+  const values = [input.deliveryFeeMinor, input.courierEarningsMinor, input.platformCommissionMinor,
+    input.providerFeeMinor, input.customerTotalMinor];
+  if (!values.every((amount) => Number.isSafeInteger(amount) && amount >= 0)
+    || !input.paymentId || !input.orderId || !Number.isSafeInteger(input.createdAt) || input.createdAt <= 0) {
+    throw new Error("Initial standalone-delivery allocation identity and amounts are invalid.");
+  }
+  const platformMinor = input.platformCommissionMinor
+    + (input.providerFeePayer === "CUSTOMER" ? input.providerFeeMinor : 0);
+  if (!Number.isSafeInteger(platformMinor)
+    || input.courierEarningsMinor + platformMinor !== input.customerTotalMinor
+    || input.courierEarningsMinor + input.platformCommissionMinor !== input.deliveryFeeMinor) {
+    throw new Error("Initial standalone-delivery allocation and unassigned courier amount do not reconcile to the quote.");
+  }
+  if (platformMinor === 0) return [];
+  return [{
+    id: `alloc_${input.paymentId}_1`, paymentId: input.paymentId,
+    transactionType: "ORDER", orderId: input.orderId, tripId: "", deliveryId: "",
+    beneficiaryId: "platform", beneficiaryType: "PLATFORM", amountMinor: platformMinor,
+    currency: "PHP", status: "PENDING", createdAt: input.createdAt, updatedAt: input.createdAt,
+  }];
+}
