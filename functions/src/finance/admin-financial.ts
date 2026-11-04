@@ -19,6 +19,8 @@ type RefundCase = {
   requestedBy: string; createdAt: number; updatedAt: number; reviewedBy?: string;
   reviewedAt?: number; reviewNote?: string; completedBy?: string; completedAt?: number;
   providerReference?: string; method?: string; ledgerOperationId?: string; processingAt?: number;
+  orderId?: string; requestedByRole?: string; origin?: string;
+  verifiedBy?: string; verifiedAt?: number; verificationNote?: string;
 };
 
 function admin(call: AdminCall): string {
@@ -246,15 +248,20 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   const uid = admin(call);
   const refundId = safeId(call.data?.refundId, "Refund ID");
   const providerReference = text(call.data?.providerReference, "Provider/bank refund reference", 160);
+  const verificationNote = text(call.data?.verificationNote, "BDO refund verification note", 500);
   const referenceKey = createHash("sha256").update(providerReference.trim().toUpperCase()).digest("hex");
   const now = Date.now();
   const claim = await db().ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const current = root.refundCases?.[refundId] as RefundCase | undefined;
     if (!current) return;
-    if (current.status === "COMPLETED") return root;
+    if (current.status === "COMPLETED") {
+      if (current.providerReference !== providerReference || current.verificationNote !== verificationNote) return;
+      return root;
+    }
     if (current.status !== "APPROVED" && current.status !== "PROCESSING") return;
-    if (current.status === "PROCESSING" && current.providerReference !== providerReference) return;
+    if (current.status === "PROCESSING"
+      && (current.providerReference !== providerReference || current.verificationNote !== verificationNote)) return;
     const payment = root.payments?.[current.paymentId] as PaymentRecord | undefined;
     if (!payment || payment.id !== current.paymentId) return;
     if (payment.refundProcessingId && payment.refundProcessingId !== refundId) return;
@@ -263,7 +270,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     const nextCase = current.status === "PROCESSING"
       ? current
       : { ...current, status: "PROCESSING", completedBy: uid, providerReference,
-          processingAt: now, updatedAt: now };
+          verifiedBy: uid, verifiedAt: now, verificationNote, processingAt: now, updatedAt: now };
     return {
       ...root,
       payments: { ...root.payments, [current.paymentId]: { ...payment, refundProcessingId: refundId } },
@@ -322,7 +329,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   }
   const completed = rootResult.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
   await recordAdminFinancialAudit({ uid, action: "REFUND_COMPLETED", targetType: "REFUND", targetId: refundId,
-    before: refund, after: completed, note: providerReference });
+    before: refund, after: completed, note: providerReference + " — " + verificationNote });
   return { refundId, status: "COMPLETED", paymentId: refund.paymentId,
     providerReference, ledgerOperationId: posted.operationId };
 });
