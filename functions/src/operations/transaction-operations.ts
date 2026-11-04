@@ -49,11 +49,17 @@ export function buildCancelledOrderRoot(
   let nextRefundCases = root.refundCases ?? {};
   let refundCaseId = readString(order.refundCaseId);
 
+  if (!payment && order.paymentStatus === "CASH_DUE") return null;
   if (payment) {
     if (payment.id !== paymentId || payment.orderId !== orderId || payment.transactionType !== "ORDER"
       || payment.payerId !== order.clientId || payment.currency !== "PHP") return null;
 
-    if (payment.status === "PENDING" || payment.status === "PROCESSING") {
+    if (payment.method === "CASH") {
+      // A cash order has no online checkout lifecycle. Its outstanding
+      // collection is cancelled together with the order, never left CASH_DUE.
+      if (payment.provider !== "CASH" || payment.status !== "PENDING") return null;
+      nextPayment = { ...payment, status: "CANCELLED", updatedAt: now, completedAt: now };
+    } else if (payment.method === "GCASH" && (payment.status === "PENDING" || payment.status === "PROCESSING")) {
       if (hasActiveBdoCheckoutRequest(payment)) return null;
       nextPayment = { ...payment, status: "CANCELLED", updatedAt: now, completedAt: now };
     } else if (payment.status === "SUCCEEDED" || payment.status === "PARTIALLY_REFUNDED") {
