@@ -97,6 +97,10 @@ async function assignSucceededOnlinePaymentShare(
   const allocations = allocationSnapshot.val() as Record<string, Record<string, any>>;
   const existingBeneficiary = Object.entries(allocations).find(([, row]) => row.beneficiaryType === beneficiaryType);
   const now = Date.now();
+  const transferCreatedAt = Number(payment.completedAt ?? payment.updatedAt ?? payment.createdAt);
+  if (!Number.isSafeInteger(transferCreatedAt) || transferCreatedAt <= 0) {
+    fail("The succeeded payment has no stable ledger timestamp for claim allocation.");
+  }
 
   if (existingBeneficiary) {
     const [existingId, existing] = existingBeneficiary;
@@ -129,17 +133,23 @@ async function assignSucceededOnlinePaymentShare(
     }
     return sum + row.amountMinor;
   }, 0);
+  if (!Number.isSafeInteger(allocatedMinor)) fail("The payment allocation total exceeds the safe integer range.");
   const amountMinor = Number(payment.amountMinor) - allocatedMinor;
   if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) {
     fail("The succeeded payment has no unassigned provider share to allocate.");
   }
   const allocationId = `alloc_${paymentId}_${beneficiaryType.toLowerCase()}`;
   const transfer = buildClaimAllocationTransfer({
-    paymentId, allocationId, beneficiaryId, beneficiaryType, amountMinor, createdAt: now,
+    paymentId, allocationId, beneficiaryId, beneficiaryType, amountMinor, createdAt: transferCreatedAt,
   });
-  const clearing = await getFinancialAccount(`unallocated_payment_${paymentId}`);
-  if (!clearing || clearing.clearingMinor < amountMinor) {
-    fail("The payment clearing balance does not cover the unassigned provider share.");
+  // If a previous invocation committed the transfer but failed before its
+  // RTDB allocation write, the same immutable operation must be resumed even
+  // though its clearing balance has already been consumed.
+  if (!await getFinancialOperation(transfer.operationId)) {
+    const clearing = await getFinancialAccount(`unallocated_payment_${paymentId}`);
+    if (!clearing || clearing.clearingMinor < amountMinor) {
+      fail("The payment clearing balance does not cover the unassigned provider share.");
+    }
   }
   await postFinancialOperation(transfer);
 
