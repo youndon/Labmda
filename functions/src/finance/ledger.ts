@@ -198,8 +198,13 @@ export async function reconcileFinancialLedger(): Promise<ReconciliationResult> 
     if (ledgerMinor !== projectionMinor) discrepancies.push({ accountId: id, bucket, ledgerMinor, projectionMinor });
   }
   const negativeBalances: ReconciliationResult["negativeBalances"] = [];
+  // CLEARING is a settlement/counterparty bucket, not a provider wallet balance.
+  // External counterpart accounts can legitimately carry negative CLEARING entries
+  // because each balanced transfer records the opposite side of the movement there.
+  // Only report negative provider-facing wallet buckets as financial deficits.
+  const monitoredBuckets = ["AVAILABLE", "PENDING", "CASH_OWED"] as const;
   for (const [accountId, balance] of totals) {
-    for (const bucket of buckets) {
+    for (const bucket of monitoredBuckets) {
       const balanceMinor = balance[field[bucket]];
       if (balanceMinor < 0) negativeBalances.push({ accountId, bucket, balanceMinor });
     }
