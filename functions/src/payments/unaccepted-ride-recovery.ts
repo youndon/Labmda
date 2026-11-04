@@ -23,9 +23,7 @@ export function buildUnacceptedPaidRideRecoveryRoot(
 
   const trip = root.trips?.[tripId] as Record<string, any> | undefined;
   if (!trip || trip.id !== tripId || trip.status !== "REQUESTED"
-    || (typeof trip.driverId === "string" && trip.driverId.trim().length > 0)
-    || !Number.isSafeInteger(trip.updatedAtTimestamp)
-    || trip.updatedAtTimestamp > now - timeoutMs) return null;
+    || (typeof trip.driverId === "string" && trip.driverId.trim().length > 0)) return null;
 
   const paymentId = typeof trip.paymentId === "string" ? trip.paymentId : "";
   const passengerId = typeof trip.passengerId === "string" ? trip.passengerId : "";
@@ -107,9 +105,13 @@ export const recoverUnacceptedPaidRides = onSchedule("every 1 minutes", async ()
 
   for (const [tripId, candidate] of Object.entries(candidates.val() as Record<string, Record<string, any>>)) {
     if (!["PAID", "PARTIALLY_REFUNDED"].includes(String(candidate.paymentStatus))
-      || !Number.isSafeInteger(candidate.updatedAtTimestamp)
-      || candidate.updatedAtTimestamp > cutoff
       || (typeof candidate.driverId === "string" && candidate.driverId.trim())) continue;
+
+    const paymentId = typeof candidate.paymentId === "string" ? candidate.paymentId : "";
+    if (!idPattern.test(paymentId)) continue;
+    const paymentSnapshot = await database.ref(`payments/${paymentId}`).get();
+    const payment = paymentSnapshot.val() as Record<string, any> | null;
+    if (!payment || !Number.isSafeInteger(payment.completedAt) || payment.completedAt > cutoff) continue;
 
     await database.ref().transaction((root: RideRoot | null) => {
       if (root === null) return null;
