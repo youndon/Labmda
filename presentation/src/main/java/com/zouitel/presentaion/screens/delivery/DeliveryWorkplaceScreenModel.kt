@@ -27,6 +27,8 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    private val _onlineError = MutableStateFlow<String?>(null)
+    val onlineError: StateFlow<String?> = _onlineError.asStateFlow()
 
     init {
         loadUserProfileAndService()
@@ -150,6 +152,10 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
                     "setCollectorOnline",
                     mapOf("online" to isOnline, "service" to "DELIVERY")
                 )
+            }.onSuccess {
+                _onlineError.value = null
+            }.onFailure {
+                _onlineError.value = it.message ?: "Cash outstanding limit prevents going online."
             }
         }
     }
