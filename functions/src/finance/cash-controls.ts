@@ -149,8 +149,7 @@ export const getAdminCashControlOverview = onCall({ enforceAppCheck: true }, asy
     .sort((a, b) => Number(b.ageHours ?? 0) - Number(a.ageHours ?? 0));
   const collectors = new Map<string, { collectorId: string; outstandingMinor: number }>();
   for (const account of accounts) {
-    const collectorId = typeof account.collectorId === "string" ? account.collectorId
-      : account.accountId.slice("cash_owed_".length).split("_merchant_")[0]!;
+    const collectorId = account.accountId.slice("cash_owed_".length).split("_merchant_")[0]!;
     const current = collectors.get(collectorId) ?? { collectorId, outstandingMinor: 0 };
     current.outstandingMinor += Number(account.cashOwedMinor ?? 0);
     collectors.set(collectorId, current);
