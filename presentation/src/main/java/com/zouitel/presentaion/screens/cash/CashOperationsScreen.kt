@@ -53,6 +53,8 @@ import java.util.UUID
 @Serializable data class CashMerchantHandover(val paymentId: String = "", val merchantId: String = "", val amountMinor: Long = 0, val collectedAt: Long = 0)
 @Serializable data class CashSettlementItem(val paymentId: String = "", val amountMinor: Long = 0, val collectedAt: Long = 0)
 @Serializable data class MyCashOperations(val collectorId: String = "", val currency: String = "PHP", val platformOutstandingMinor: Long = 0, val merchantOutstandingMinor: Long = 0, val totalOutstandingMinor: Long = 0, val merchantSettlements: List<CashMerchantHandover> = emptyList())
+@Serializable data class CashOutstandingBreakdown(val accountId: String = "", val amountMinor: Long = 0)
+@Serializable data class MyCashOutstanding(val collectorId: String = "", val currency: String = "PHP", val totalOutstandingMinor: Long = 0, val breakdown: List<CashOutstandingBreakdown> = emptyList())
 @Serializable data class MyCashSettlementItems(val currency: String = "PHP", val items: List<CashSettlementItem> = emptyList())
 @Serializable data class CashControlsConfig(val alertAfterHours: Int = 24, val maxCollectorOutstandingMinor: Long = 50_000)
 @Serializable data class CashOverdueAlert(val paymentId: String = "", val collectorId: String = "", val amountMinor: Long = 0, val ageHours: Int = 0, val status: String = "")
@@ -73,7 +75,17 @@ class CashOperationsScreenModel : ScreenModel {
     val message = _message.asStateFlow()
 
     fun refreshCollector() { screenModelScope.launch { runCatching {
-        _collector.value = functions.httpsCallable("getMyCashOperations").invoke().data<MyCashOperations>()
+        val outstanding = functions.httpsCallable("getMyCashOutstanding").invoke().data<MyCashOutstanding>()
+        val operations = functions.httpsCallable("getMyCashOperations").invoke().data<MyCashOperations>()
+        val platform = outstanding.breakdown.filter { it.accountId == "cash_owed_${outstanding.collectorId}" }
+            .sumOf { it.amountMinor }
+        val merchant = outstanding.breakdown.filter { it.accountId.startsWith("cash_owed_${outstanding.collectorId}_merchant_") }
+            .sumOf { it.amountMinor }
+        _collector.value = operations.copy(
+            platformOutstandingMinor = platform,
+            merchantOutstandingMinor = merchant,
+            totalOutstandingMinor = outstanding.totalOutstandingMinor
+        )
     }.onFailure { _message.value = it.message ?: "Could not load your cash balance." } } }
     fun refreshMerchant() { screenModelScope.launch { runCatching {
         _merchant.value = functions.httpsCallable("getMyCashSettlementItems").invoke().data<MyCashSettlementItems>()
