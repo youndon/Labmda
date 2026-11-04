@@ -85,7 +85,8 @@ data class AdminBalancesResponse(val accounts: List<AdminBalanceRow> = emptyList
 data class AdminRefundCaseRow(
     val id: String = "", val paymentId: String = "", val payerId: String = "",
     val amountMinor: Long = 0, val currency: String = "PHP", val reason: String = "",
-    val status: String = "", val providerReference: String? = null, val createdAt: Long = 0
+    val status: String = "", val providerReference: String? = null, val createdAt: Long = 0,
+    val orderId: String = "", val tripId: String = "", val origin: String = ""
 )
 
 @Serializable
@@ -273,7 +274,7 @@ class AdminFinancialOperationsScreen : Screen {
             normalizedSearch.isBlank() || listOf(row.accountId, row.kind, row.ownerId).any { it.lowercase().contains(normalizedSearch) }
         }
         val visibleRefunds = refunds.filter { row ->
-            normalizedSearch.isBlank() || listOf(row.id, row.paymentId, row.payerId, row.reason, row.status, row.providerReference.orEmpty()).any { it.lowercase().contains(normalizedSearch) }
+            normalizedSearch.isBlank() || listOf(row.id, row.paymentId, row.payerId, row.reason, row.status, row.providerReference.orEmpty(), row.orderId, row.tripId, row.origin).any { it.lowercase().contains(normalizedSearch) }
         }
         val visibleAudit = audit.filter { row ->
             normalizedSearch.isBlank() || listOf(row.id, row.actorUid, row.action, row.targetType, row.targetId, row.note).any { it.lowercase().contains(normalizedSearch) }
@@ -385,7 +386,12 @@ class AdminFinancialOperationsScreen : Screen {
                                     Text(refund.status, color = MaterialTheme.colorScheme.tertiary)
                                 }
                                 Text(refund.reason, style = MaterialTheme.typography.bodySmall)
-                                Text("Refund ${refund.id} • Payment ${refund.paymentId}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val transactionLabel = when {
+                                    refund.tripId.isNotBlank() -> "Ride ${refund.tripId}"
+                                    refund.orderId.isNotBlank() -> "Order ${refund.orderId}"
+                                    else -> "Payment refund"
+                                }
+                                Text("$transactionLabel • Refund ${refund.id} • Payment ${refund.paymentId}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 when (refund.status) {
                                     "REQUESTED" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         OutlinedButton(onClick = { model.reviewRefund(refund.id, "REJECTED") }, enabled = !busy) { Text("Reject") }

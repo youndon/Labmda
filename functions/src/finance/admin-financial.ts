@@ -19,7 +19,7 @@ type RefundCase = {
   requestedBy: string; createdAt: number; updatedAt: number; reviewedBy?: string;
   reviewedAt?: number; reviewNote?: string; completedBy?: string; completedAt?: number;
   providerReference?: string; method?: string; ledgerOperationId?: string; processingAt?: number;
-  orderId?: string; requestedByRole?: string; origin?: string;
+  orderId?: string; tripId?: string; requestedByRole?: string; origin?: string;
   verifiedBy?: string; verifiedAt?: number; verificationNote?: string; verifiedAmountMinor?: number;
 };
 

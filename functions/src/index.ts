@@ -246,6 +246,9 @@ export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payme
 export { createSimulatedGcashRefund } from "./payments/refunds.js";
 export { expireSimulatedGcashSessions } from "./payments/expiration.js"; // null outside the emulator
 
+// Phase 05 — cancel and refund paid ride requests that expire without driver acceptance.
+export { recoverUnacceptedPaidRides } from "./payments/unaccepted-ride-recovery.js";
+
 // Phase 06 — provider earnings, private payout profiles and admin-managed payouts.
 export {
   saveMyPayoutProfile,
