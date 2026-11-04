@@ -35,7 +35,7 @@ function readString(value: unknown): string {
  * succeeded GCash payment. The payment receipt and payment status are never
  * rewritten; only the refund reservation and case are added.
  */
-function buildCancelledOrderRoot(
+export function buildCancelledOrderRoot(
   root: Record<string, any>,
   orderId: string,
   order: Record<string, any>,
