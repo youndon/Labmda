@@ -313,42 +313,103 @@ async function ensureOrderAllocations(orderId: string, courierId: string): Promi
   }
 }
 
-async function releaseSucceededOnlinePaymentAllocations(paymentId: string): Promise<void> {
+/**
+ * Retry-safe release for a completed order/ride. Refund reversals are applied
+ * to the same provider's PENDING bucket before release, so subtract the exact
+ * provider-side refund postings from each allocation before moving its remainder.
+ */
+export async function releaseCompletedPaymentAllocations(paymentId: string): Promise<void> {
   const paymentSnapshot = await db().ref("payments/" + paymentId).get();
   if (!paymentSnapshot.exists()) return;
   const payment = paymentSnapshot.val() as Record<string, any>;
   // Cash earners already hold their physical cash; cash settlement uses the
-  // separate CASH_OWED/CASH_RETAINED workflow and must not credit wallets twice.
-  if (payment.method !== "GCASH" || payment.status !== "SUCCEEDED") return;
+  // separate CASH_OWED workflow and must not credit wallets twice.
+  if (payment.method !== "GCASH"
+    || (payment.status !== "SUCCEEDED" && payment.status !== "PARTIALLY_REFUNDED")) return;
 
   const allocationsSnapshot = await db().ref("paymentAllocations/" + paymentId).get();
   if (!allocationsSnapshot.exists()) throw new HttpsError("failed-precondition", "Payment allocations are missing.");
   const allocations = allocationsSnapshot.val() as Record<string, Record<string, any>>;
+  const refundCasesSnapshot = await db().ref("refundCases").orderByChild("paymentId").equalTo(paymentId).get();
+  const completedRefunds = Object.values((refundCasesSnapshot.val() ?? {}) as Record<string, Record<string, any>>)
+    .filter((refund) => refund.status === "COMPLETED");
+  const refundOperations = await Promise.all(completedRefunds.map(async (refund) => {
+    const operation = await getFinancialOperation("refund_" + String(refund.id) + "_posted");
+    if (!operation) throw new HttpsError("failed-precondition", "A completed refund is missing its immutable ledger reversal.");
+    return operation;
+  }));
+
   for (const [allocationId, allocation] of Object.entries(allocations)) {
-    if (allocation.status === "READY") continue;
+    if (allocation.status === "READY" || allocation.status === "REFUNDED") continue;
     if (allocation.status !== "PENDING" || allocation.paymentId !== paymentId
       || !Number.isSafeInteger(allocation.amountMinor) || allocation.amountMinor <= 0
-      || allocation.currency !== "PHP") {
+      || allocation.currency !== "PHP" || !allocation.beneficiaryId) {
       throw new HttpsError("failed-precondition", "A payment allocation cannot be released.");
     }
-    const partyType = allocation.beneficiaryType === "DELIVERY" ? "COURIER"
-      : allocation.beneficiaryType;
+    const partyType = allocation.beneficiaryType === "DELIVERY" ? "COURIER" : allocation.beneficiaryType;
     const accountId = "wallet_" + String(allocation.beneficiaryType).toLowerCase() + "_" + allocation.beneficiaryId;
+    const refundedMinor = refundOperations.reduce((sum, operation) => sum + operation.postings.reduce((postingSum, posting) => {
+      if (posting.accountId === accountId && posting.partyId === allocation.beneficiaryId
+        && posting.partyType === partyType && (posting.bucket === "PENDING" || posting.bucket === "AVAILABLE")
+        && posting.deltaMinor < 0) return postingSum - posting.deltaMinor;
+      return postingSum;
+    }, 0), 0);
+    if (!Number.isSafeInteger(refundedMinor) || refundedMinor > allocation.amountMinor) {
+      throw new HttpsError("failed-precondition", "Refund reversals exceed this provider allocation.");
+    }
+    const releasableMinor = allocation.amountMinor - refundedMinor;
+    if (releasableMinor === 0) {
+      const marked = await db().ref("paymentAllocations/" + paymentId + "/" + allocationId).transaction((current: Record<string, any> | null) => {
+        if (!current || current.status === "REFUNDED") return current;
+        if (current.status !== "PENDING") return;
+        return { ...current, status: "REFUNDED", refundedAmountMinor: refundedMinor, updatedAt: Date.now() };
+      }, undefined, false);
+      if (!marked.committed && marked.snapshot.child("status").val() !== "REFUNDED") {
+        throw new HttpsError("aborted", "The fully refunded allocation changed while being finalized.");
+      }
+      continue;
+    }
+    const createdAt = Number(allocation.createdAt ?? payment.completedAt ?? payment.updatedAt ?? payment.createdAt);
+    if (!Number.isSafeInteger(createdAt) || createdAt <= 0) {
+      throw new HttpsError("failed-precondition", "The payment allocation has no stable ledger timestamp.");
+    }
+    const operationId = "payment_" + paymentId + "_allocation_" + allocationId + "_released";
     const operation = createFinancialTransfer({
-      operationId: "payment_" + paymentId + "_allocation_" + allocationId + "_released",
-      eventType: "ADJUSTMENT", referenceType: "PAYMENT", referenceId: paymentId,
-      idempotencyKey: "payment_" + paymentId + "_allocation_" + allocationId + "_released",
-      createdAt: Date.now(), description: "Release completed-service payment allocation",
-      amountMinor: allocation.amountMinor,
+      operationId, eventType: "ADJUSTMENT", referenceType: "PAYMENT", referenceId: paymentId,
+      idempotencyKey: operationId, createdAt, description: "Release completed-service payment allocation",
+      amountMinor: releasableMinor,
       source: { accountId, bucket: "PENDING", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
       destination: { accountId, bucket: "AVAILABLE", deltaMinor: 0, partyType, partyId: allocation.beneficiaryId },
     });
-    await postFinancialOperation(operation);
-    await db().ref("paymentAllocations/" + paymentId + "/" + allocationId).transaction((current: Record<string, any> | null) => {
+    const priorRelease = await getFinancialOperation(operationId);
+    if (priorRelease) {
+      // Recover releases committed by the previous implementation, which used
+      // Date.now() as createdAt and could therefore not pass strict retry matching.
+      const debit = priorRelease.postings.find((posting) => posting.accountId === accountId
+        && posting.bucket === "PENDING" && posting.partyType === partyType
+        && posting.partyId === allocation.beneficiaryId && posting.deltaMinor < 0);
+      const credit = priorRelease.postings.find((posting) => posting.accountId === accountId
+        && posting.bucket === "AVAILABLE" && posting.partyType === partyType
+        && posting.partyId === allocation.beneficiaryId && posting.deltaMinor > 0);
+      const priorAmount = debit ? -debit.deltaMinor : 0;
+      if (priorRelease.eventType !== "ADJUSTMENT" || priorRelease.referenceType !== "PAYMENT"
+        || priorRelease.referenceId !== paymentId || priorRelease.idempotencyKey !== operationId
+        || !debit || !credit || credit.deltaMinor !== priorAmount
+        || (priorAmount !== releasableMinor && priorAmount !== allocation.amountMinor)) {
+        throw new HttpsError("failed-precondition", "An existing allocation release operation does not match the expected payment release.");
+      }
+    } else {
+      await postFinancialOperation(operation);
+    }
+    const marked = await db().ref("paymentAllocations/" + paymentId + "/" + allocationId).transaction((current: Record<string, any> | null) => {
       if (!current || current.status === "READY") return current;
       if (current.status !== "PENDING") return;
-      return { ...current, status: "READY", updatedAt: Date.now() };
+      return { ...current, status: "READY", releasedAmountMinor: releasableMinor,
+        refundedAmountMinor: refundedMinor, updatedAt: Date.now() };
     }, undefined, false);
+    if (!marked.committed && marked.snapshot.child("status").val() !== "READY") {
+      throw new HttpsError("aborted", "The released allocation could not be finalized; retry the release.");
+    }
   }
 }
 
@@ -766,16 +827,22 @@ export const completeOrderDelivery = onCall({ enforceAppCheck: true }, async (ca
   const orderId = requireId(call.data?.orderId, "Order ID");
   const ref = db().ref(`orders/${orderId}`);
   const result = await ref.transaction((current: Record<string, any> | null) => {
-    if (current === null) return null;
-    if (current.status !== "OUT_FOR_DELIVERY" || current.deliveryId !== uid || current.deliveryReassignment?.status === "PROCESSING") return;
-    return { ...current, status: "DELIVERED", deliveredAt: Date.now(), updatedAtTimestamp: Date.now() };
+    if (current === null || current.deliveryId !== uid || current.deliveryReassignment?.status === "PROCESSING") return;
+    if (current.status === "DELIVERED") return current;
+    if (current.status !== "OUT_FOR_DELIVERY") return;
+    return { ...current, status: "DELIVERED", deliveredAt: current.deliveredAt ?? Date.now(), updatedAtTimestamp: Date.now() };
   }, undefined, false);
-  if (!result.committed) fail("Only the assigned courier can complete an active delivery.");
+  if (!result.committed) {
+    const latest = result.snapshot.val() as Record<string, any> | null;
+    if (!latest || latest.status !== "DELIVERED" || latest.deliveryId !== uid) {
+      fail("Only the assigned courier can complete an active delivery.");
+    }
+  }
   const completedOrder = result.snapshot.val() as Record<string, any>;
   if (typeof completedOrder.paymentId === "string" && completedOrder.paymentId) {
-    await releaseSucceededOnlinePaymentAllocations(completedOrder.paymentId);
+    await releaseCompletedPaymentAllocations(completedOrder.paymentId);
   }
-  return { orderId, status: "DELIVERED" };
+  return { orderId, status: "DELIVERED", duplicate: !result.committed };
 });
 
 /** Driver acceptance is a first-claim-wins transaction, not a client-side read-then-write. */
@@ -832,18 +899,24 @@ export const transitionTripStatus = onCall({ enforceAppCheck: true }, async (cal
   }
   const ref = db().ref(`trips/${tripId}`);
   const result = await ref.transaction((current: Record<string, any> | null) => {
-    if (current === null) return null;
-    if (current.driverId !== uid || !isAllowedTripTransition(readString(current.status), nextStatus)) return;
-    return { ...current, status: nextStatus, updatedAtTimestamp: Date.now(), ...(nextStatus === "COMPLETED" ? { completedAt: Date.now() } : {}) };
+    if (current === null || current.driverId !== uid) return;
+    if (current.status === nextStatus && nextStatus === "COMPLETED") return current;
+    if (!isAllowedTripTransition(readString(current.status), nextStatus)) return;
+    return { ...current, status: nextStatus, updatedAtTimestamp: Date.now(), ...(nextStatus === "COMPLETED" ? { completedAt: current.completedAt ?? Date.now() } : {}) };
   }, undefined, false);
-  if (!result.committed) fail("Only the assigned driver can make this valid trip transition.");
+  if (!result.committed) {
+    const latest = result.snapshot.val() as Record<string, any> | null;
+    if (!latest || latest.driverId !== uid || latest.status !== nextStatus || nextStatus !== "COMPLETED") {
+      fail("Only the assigned driver can make this valid trip transition.");
+    }
+  }
   if (nextStatus === "COMPLETED") {
     const completedTrip = result.snapshot.val() as Record<string, any>;
     if (typeof completedTrip.paymentId === "string" && completedTrip.paymentId) {
-      await releaseSucceededOnlinePaymentAllocations(completedTrip.paymentId);
+      await releaseCompletedPaymentAllocations(completedTrip.paymentId);
     }
   }
-  return { tripId, status: nextStatus };
+  return { tripId, status: nextStatus, duplicate: !result.committed };
 });
 
 /** Passenger may cancel only their own trip before the ride starts. */
