@@ -48,19 +48,22 @@ class DriverDashboardScreenModel : ScreenModel {
 
     fun setOnline(online: Boolean) {
         val uid = currentUser?.uid ?: return
-        val onlineRef = db.child("users").child(uid).child("driverService").child("isOnline")
-
         screenModelScope.launch {
-            if (online) {
-                // Do not republish an old GPS fix when the driver reconnects.
-                db.child("driverLocations").child(uid).removeValue()
-                // If the app is killed or loses connection, Firebase flips the driver offline.
-                runCatching { onlineRef.onDisconnect().setValue(false) }
-                onlineRef.setValue(true)
-            } else {
-                runCatching { onlineRef.onDisconnect().cancel() }
-                onlineRef.setValue(false)
-                db.child("driverLocations").child(uid).removeValue()
+            runCatching {
+                com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "setCollectorOnline",
+                    mapOf("online" to online, "service" to "DRIVER")
+                )
+                if (online) {
+                    // Do not republish an old GPS fix when the driver reconnects.
+                    db.child("driverLocations").child(uid).removeValue()
+                    runCatching { db.child("users").child(uid).child("driverService").child("isOnline").onDisconnect().setValue(false) }
+                } else {
+                    runCatching { db.child("users").child(uid).child("driverService").child("isOnline").onDisconnect().cancel() }
+                    db.child("driverLocations").child(uid).removeValue()
+                }
+            }.onFailure {
+                // Keep the observed server state; the callable error explains why online was refused.
             }
         }
     }
