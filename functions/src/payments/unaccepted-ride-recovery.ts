@@ -1,4 +1,4 @@
-import type { Database } from "firebase-admin/database";
+import { getDatabase } from "firebase-admin/database";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { buildAutomaticRideRefundCase } from "../finance/ride-refunds.js";
 
@@ -45,39 +45,31 @@ export function buildUnacceptedPaidRideRecoveryRoot(
   if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved)
     || refunded < 0 || reserved < 0 || refunded + reserved > payment.amountMinor) return null;
 
-  const existingCaseId = typeof trip.refundCaseId === "string" ? trip.refundCaseId : "";
+  const refundAmountMinor = payment.amountMinor - refunded - reserved;
+  if (refundAmountMinor <= 0) return null;
+
   const refund = buildAutomaticRideRefundCase({
-    tripId, paymentId, payerId: passengerId,
-    amountMinor: payment.amountMinor - refunded - reserved,
-    createdAt: now,
+    tripId, paymentId, payerId: passengerId, amountMinor: refundAmountMinor, createdAt: now,
   });
   const refundCases = { ...(root.refundCases ?? {}) } as Record<string, Record<string, any>>;
   const existingCase = refundCases[refund.id];
-  let nextPayment = payment;
-  let refundCaseId = refund.id;
-
-  if (existingCaseId || existingCase) {
-    if (existingCaseId !== refund.id || !existingCase
-      || existingCase.paymentId !== paymentId || existingCase.tripId !== tripId
-      || existingCase.payerId !== passengerId || existingCase.status !== "REQUESTED"
-      || !Number.isSafeInteger(existingCase.amountMinor)
-      || reserved < existingCase.amountMinor) return null;
-  } else {
-    if (refund.amountMinor <= 0) return null;
-    refundCases[refund.id] = refund;
-    nextPayment = {
-      ...payment,
-      refundReservedAmountMinor: reserved + refund.amountMinor,
-      updatedAt: now,
-    };
+  if (existingCase) {
+    // The trip, reservation and case are written atomically; an orphaned or
+    // conflicting deterministic case is unsafe to adopt.
+    return null;
   }
 
+  const nextPayment = {
+    ...payment,
+    refundReservedAmountMinor: reserved + refund.amountMinor,
+    updatedAt: now,
+  };
   const nextTrip = {
     ...trip,
     status: "CANCELLED",
     paymentStatus: "REFUND_PENDING",
     paymentState: "REFUND_PENDING",
-    refundCaseId,
+    refundCaseId: refund.id,
     cancellationReason: "NO_DRIVER_ACCEPTED",
     cancelledAt: trip.cancelledAt ?? now,
     updatedAtTimestamp: now,
@@ -94,15 +86,15 @@ export function buildUnacceptedPaidRideRecoveryRoot(
   return {
     ...root,
     trips: { ...root.trips, [tripId]: nextTrip },
-    payments: nextPayment === payment ? root.payments : { ...root.payments, [paymentId]: nextPayment },
-    refundCases,
+    payments: { ...root.payments, [paymentId]: nextPayment },
+    refundCases: { ...refundCases, [refund.id]: refund },
     activeRideRequests,
   };
 }
 
 /** Every minute, recover paid ride requests that have waited ten minutes without driver acceptance. */
 export const recoverUnacceptedPaidRides = onSchedule("every 1 minutes", async () => {
-  const database = (await import("firebase-admin/database")).getDatabase();
+  const database = getDatabase();
   const now = Date.now();
   const cutoff = now - UNACCEPTED_PAID_RIDE_TIMEOUT_MS;
   const candidates = await database.ref("trips")
@@ -114,24 +106,18 @@ export const recoverUnacceptedPaidRides = onSchedule("every 1 minutes", async ()
 
   let scanned = 0;
   let cancelled = 0;
-  const tasks: Promise<void>[] = [];
-  candidates.forEach((child) => {
-    const tripId = child.key;
-    if (!tripId) return;
-    const candidate = child.val() as Record<string, any>;
+  for (const [tripId, candidate] of Object.entries(candidates.val() as Record<string, Record<string, any>>)) {
     if (!Number.isSafeInteger(candidate.createdAtTimestamp)
       || candidate.createdAtTimestamp > cutoff
-      || (typeof candidate.driverId === "string" && candidate.driverId.trim())) return;
+      || (typeof candidate.driverId === "string" && candidate.driverId.trim())) continue;
 
     scanned += 1;
-    tasks.push(database.ref().transaction((root: RideRoot | null) => {
+    const result = await database.ref().transaction((root: RideRoot | null) => {
       if (root === null) return null;
       return buildUnacceptedPaidRideRecoveryRoot(root, tripId, now);
-    }, undefined, false).then((result) => {
-      if (result.committed) cancelled += 1;
-    }));
-  });
+    }, undefined, false);
+    if (result.committed) cancelled += 1;
+  }
 
-  await Promise.all(tasks);
   return { scanned, cancelled };
 });
