@@ -460,19 +460,86 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
   }
   const name = readString(profile.child("fullName").val()) || "Delivery";
   const phone = readString(profile.child("phoneNumber").val()) || readString(profile.child("phone").val());
-  const orderRef = db().ref(`orders/${orderId}`);
-  const result = await orderRef.transaction((current: Record<string, any> | null) => {
-    if (current === null) return null;
-    if (current.status !== "OUT_FOR_DELIVERY") return;
-    if (readString(current.deliveryId).trim()) return;
-    return { ...current, deliveryId: uid, deliveryName: name, deliveryPhone: phone, assignedAt: Date.now() };
+  const rootRef = db().ref();
+  const result = await rootRef.transaction((root: Record<string, any> | null) => {
+    if (root === null) return null;
+    const current = root.orders?.[orderId] as Record<string, any> | undefined;
+    if (!current || current.status !== "OUT_FOR_DELIVERY" || readString(current.deliveryId).trim()) return;
+
+    const paymentId = readString(current.paymentId);
+    let nextRoot: Record<string, any> = {
+      ...root,
+      orders: {
+        ...root.orders,
+        [orderId]: { ...current, deliveryId: uid, deliveryName: name, deliveryPhone: phone, assignedAt: Date.now() },
+      },
+    };
+
+    if (paymentId) {
+      const payment = root.payments?.[paymentId] as Record<string, any> | undefined;
+      if (!payment || payment.orderId !== orderId || payment.transactionType !== "ORDER") return;
+      const existing = root.paymentAllocations?.[paymentId] as Record<string, Record<string, any>> | undefined;
+      const succeededGcash = payment.method === "GCASH" && payment.status === "SUCCEEDED";
+
+      const existingCourier = existing
+        ? Object.values(existing).find((row) => row.beneficiaryType === "DELIVERY")
+        : undefined;
+      if (succeededGcash) {
+        // A succeeded receipt must already have its immutable initial
+        // allocations. The unassigned courier share is posted by the
+        // idempotent ledger-transfer recovery below after this transaction.
+        if (!existing || (existingCourier && existingCourier.beneficiaryId !== uid)
+          || (existingCourier && existingCourier.status === "REVERSED")) return;
+      } else if (!existingCourier
+        && (!existing || (payment.method === "GCASH" && ["PENDING", "PROCESSING"].includes(payment.status)))) {
+        // GCash orders are created with merchant/platform-only initial rows.
+        // Before payment succeeds, replace those rows with the complete split
+        // in the same transaction that claims the courier.
+        const breakdown = current.paymentBreakdown as Record<string, number>;
+        const rows = current.orderType === "DELIVERY"
+          ? buildStandaloneDeliveryAllocations({
+              paymentId, orderId, courierId: uid,
+              deliveryFeeMinor: breakdown.deliveryFeeMinor,
+              courierEarningsMinor: breakdown.courierEarningsMinor,
+              platformCommissionMinor: breakdown.platformCommissionMinor,
+              providerFeeMinor: breakdown.providerFeeMinor,
+              providerFeePayer: current.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM",
+              customerTotalMinor: breakdown.customerTotalMinor, createdAt: Date.now(),
+            })
+          : buildOrderPaymentAllocations({
+              paymentId, orderId, merchantOwnerId: readString(current.merchantOwnerId),
+              courierId: uid, breakdown: breakdown as any,
+              providerFeePayer: current.providerFeePayer === "CUSTOMER" ? "CUSTOMER" : "PLATFORM",
+              createdAt: Date.now(),
+            });
+        const allocationRows: Record<string, unknown> = {};
+        for (const allocation of rows) allocationRows[allocation.id] = allocation;
+        nextRoot.paymentAllocations = { ...root.paymentAllocations, [paymentId]: allocationRows };
+      } else if (!existingCourier || existingCourier.beneficiaryId !== uid
+        || existingCourier.status === "REVERSED") {
+        // Do not silently adopt an incomplete or differently assigned split.
+        return;
+      }
+
+      nextRoot.payments = {
+        ...root.payments,
+        [paymentId]: { ...payment, deliveryId: uid, updatedAt: Date.now() },
+      };
+    }
+    return nextRoot;
   }, undefined, false);
   if (!result.committed) {
     const latest = result.snapshot.val() as Record<string, any> | null;
-    if (latest?.deliveryId !== uid) fail("This delivery has already been claimed or is not ready for pickup.");
+    if (latest?.orders?.[orderId]?.deliveryId !== uid) {
+      fail("This delivery has already been claimed, its payment allocation is invalid, or it is not ready for pickup.");
+    }
     await ensureOrderAllocations(orderId, uid);
     return { orderId, deliveryId: uid, duplicate: true };
   }
+  // For ordinary pending/cash payments, the assignment and full allocation
+  // split were committed in one RTDB transaction. For succeeded GCash, this
+  // resumes the deterministic clearing-to-wallet transfer and allocation
+  // metadata; a retry by the same courier safely completes an interrupted step.
   await ensureOrderAllocations(orderId, uid);
   return { orderId, deliveryId: uid, duplicate: false };
 });
