@@ -55,6 +55,11 @@ describe("order and ride Realtime Database rules fragment", () => {
     expect(financialRules.adminCashAlerts[".write"]).toBe(false);
   });
 
+  it("indexes the cash status and collector queries used by scheduled monitoring and screens", () => {
+    expect(financialRules.payments[".indexOn"]).toContain("status");
+    expect(financialRules.cashCollections[".indexOn"]).toEqual(expect.arrayContaining(["collectorId", "status"]));
+  });
+
   it("prevents users from self-approving driver or delivery services", () => {
     expect(rules.users["$uid"].driverService.status[".write"]).toContain("newData.val() == 'PENDING'");
     expect(rules.users["$uid"].deliveryServices.status[".write"]).toContain("newData.val() == 'PENDING'");
