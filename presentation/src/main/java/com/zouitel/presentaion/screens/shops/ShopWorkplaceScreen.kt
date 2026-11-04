@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Store
@@ -25,6 +26,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.koin.koinScreenModel
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.screens.cash.MerchantCashSettlementScreen
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.AppCard
 import com.zouitel.presentaion.common.AppPrimaryButton
@@ -72,6 +74,9 @@ class ShopWorkplaceScreen : Screen {
                                 navigator?.push(ShopRegistrationScreen(userShop))
                             }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit Store")
+                            }
+                            IconButton(onClick = { navigator?.push(MerchantCashSettlementScreen()) }) {
+                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Cash settlements")
                             }
                         }
                     }
