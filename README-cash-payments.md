@@ -94,3 +94,16 @@ A courier/driver may confirm cash only after the service is complete:
 This prevents a courier or driver from prematurely recording a cash receipt while a service is still active, and closes the race where a service could be reassigned or its linked payment changed between the callable's initial read and the collection transaction.
 
 Focused tests cover successful delivered-order and completed-ride collection, retries, wrong collector assignments, incomplete services, changed order courier assignment, failed payments, and amount mismatches.
+
+
+## Cash exposure controls and operations UI
+
+- `alertOverdueCashCollections` runs hourly. It finds cash payments still `PENDING` more than the configured age (default 24 hours) after the linked order is `DELIVERED` or trip is `COMPLETED` and writes a deduplicated alert to `adminCashAlerts/{paymentId}`. Alerts repeat at most every 12 hours while the payment remains pending and resolve when its state changes. The admin Cash Controls screen displays this durable alert inbox; this is an in-app admin alert, not an FCM push notification.
+- `cashControls/config` stores `alertAfterHours` and `maxCollectorOutstandingMinor`. Defaults are 24 hours and PHP 500.00 (50,000 centavos). Admins can update both through `updateAdminCashControls`; a cap of 0 disables the online cap.
+- `setCollectorOnline` is the only supported transition to online for drivers and couriers. It checks the authenticated provider's combined platform and merchant cash-owed balance before setting `driverService/isOnline` or `deliveryServices/isOnline`. Database rules allow a client to set the flag to false but not true. The `claimRide` and `claimOrderDelivery` callables independently re-check the cap, so stale or forged online state cannot bypass the work-claim guard.
+- `getMyCashOperations` supplies the collector's separate platform and merchant outstanding balances. Driver and courier dashboards link to the Cash Balance screen.
+- `getMyCashSettlementItems` lists a merchant's own collected-cash allocations that are not yet handed over. Restaurant and shop workspaces link to the Merchant Cash Settlements screen, which invokes the existing `confirmMerchantCashSettlement` callable.
+- The Admin Cash Controls screen shows overdue payments and collector balances, edits the age/cap settings, and confirms platform remittances through the existing `confirmCashRemittance` callable. Merchant handovers and platform remittances remain independent ledger transfers.
+- The Android client does not write payment, allocation, cash collection, handover, remittance, or ledger records. All monetary values remain integer PHP centavos and all eligibility/authorization checks execute in Cloud Functions.
+
+Deploy the Realtime Database rules fragment only after merging it into the complete production ruleset and running the existing security/emulator checks.

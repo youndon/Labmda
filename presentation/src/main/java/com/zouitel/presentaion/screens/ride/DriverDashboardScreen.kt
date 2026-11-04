@@ -6,6 +6,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Looper
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -16,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.LocationOn
@@ -47,6 +49,7 @@ import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberUpdatedMarkerState
 import com.zouitel.presentaion.common.Trip
+import com.zouitel.presentaion.screens.cash.CollectorCashScreen
 
 class DriverDashboardScreen : Screen {
     @SuppressLint("MissingPermission")
@@ -66,6 +69,7 @@ class DriverDashboardScreen : Screen {
 
         val context = LocalContext.current
         val isOnline by screenModel.isOnline.collectAsState()
+        val onlineError by screenModel.onlineError.collectAsState()
         val hasActiveTrip = activeTrips.any { it.status != "COMPLETED" }
         var myLocation by remember { mutableStateOf<LatLng?>(null) }
 
@@ -84,6 +88,10 @@ class DriverDashboardScreen : Screen {
             if (hasLocationPermission) screenModel.setOnline(true)
         }
         val fusedClient = remember { LocationServices.getFusedLocationProviderClient(context) }
+
+        LaunchedEffect(onlineError) {
+            if (!onlineError.isNullOrBlank()) Toast.makeText(context, onlineError, Toast.LENGTH_LONG).show()
+        }
 
         DisposableEffect(isOnline, hasLocationPermission) {
             if (!isOnline || !hasLocationPermission) {
@@ -144,6 +152,11 @@ class DriverDashboardScreen : Screen {
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { navigator?.push(CollectorCashScreen()) }) {
+                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Cash balance")
                         }
                     }
                 )

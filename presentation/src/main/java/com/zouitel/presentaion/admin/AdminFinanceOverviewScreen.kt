@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Scale
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -47,6 +48,7 @@ import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.functions.functions
+import com.zouitel.presentaion.screens.cash.AdminCashControlsScreen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -163,6 +165,9 @@ class AdminFinanceOverviewScreen : Screen {
                         }
                     },
                     actions = {
+                        IconButton(onClick = { navigator?.push(AdminCashControlsScreen()) }) {
+                            Icon(Icons.Default.Warning, contentDescription = "Cash controls")
+                        }
                         IconButton(onClick = { model.refresh() }, enabled = !loading) {
                             Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                         }

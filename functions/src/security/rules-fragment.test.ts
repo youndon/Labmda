@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 const rules = JSON.parse(
   readFileSync(resolve(process.cwd(), "../database.order-ride.rules.fragment.json"), "utf8"),
 ).rules;
+const financialRules = JSON.parse(
+  readFileSync(resolve(process.cwd(), "../database.financial.rules.fragment.json"), "utf8"),
+).rules;
 
 describe("order and ride Realtime Database rules fragment", () => {
   it("denies direct client writes to authoritative orders and trips", () => {
@@ -38,6 +41,23 @@ describe("order and ride Realtime Database rules fragment", () => {
     expect(rules.restaurants["$restaurantId"].isOpen[".write"]).toContain("$restaurantId");
     expect(rules.shopProducts["$shopId"]["$productId"][".write"]).toContain("ownerUid");
     expect(rules.restaurantMeals["$restaurantId"]["$mealId"][".write"]).toContain("$restaurantId");
+  });
+
+  it("allows clients to go offline but requires the server to authorize going online", () => {
+    expect(rules.users["$uid"].driverService.isOnline[".write"]).toContain("newData.val() == false");
+    expect(rules.users["$uid"].deliveryServices.isOnline[".write"]).toContain("newData.val() == false");
+  });
+
+  it("keeps cash control configuration and overdue alerts server-write-only", () => {
+    expect(financialRules.cashControls[".read"]).toBe(false);
+    expect(financialRules.cashControls[".write"]).toBe(false);
+    expect(financialRules.adminCashAlerts[".read"]).toBe(false);
+    expect(financialRules.adminCashAlerts[".write"]).toBe(false);
+  });
+
+  it("indexes the cash status and collector queries used by scheduled monitoring and screens", () => {
+    expect(financialRules.payments[".indexOn"]).toContain("status");
+    expect(financialRules.cashCollections[".indexOn"]).toEqual(expect.arrayContaining(["collectorId", "status"]));
   });
 
   it("prevents users from self-approving driver or delivery services", () => {

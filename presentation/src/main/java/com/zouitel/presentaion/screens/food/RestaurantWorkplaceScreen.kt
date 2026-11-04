@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Fastfood
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Person
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
+import com.zouitel.presentaion.screens.cash.MerchantCashSettlementScreen
 import com.zouitel.presentaion.screens.finance.ProviderEarningsScreen
 import com.zouitel.presentaion.common.Status
 import com.zouitel.presentaion.common.AppCard
@@ -76,6 +78,9 @@ class RestaurantWorkplaceScreen : Screen {
                         if (selectedRoleMode != UserMode.CLIENT && profile.foodStatus == Status.APPROVED && !isEditing) {
                             IconButton(onClick = { isEditing = true }) {
                                 Icon(Icons.Default.Edit, contentDescription = "Edit Restaurant")
+                            }
+                            IconButton(onClick = { navigator?.push(MerchantCashSettlementScreen()) }) {
+                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Cash settlements")
                             }
                         }
                     }

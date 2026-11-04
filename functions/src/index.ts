@@ -230,6 +230,16 @@ export {
   cancelCustomerOrder,
 } from "./operations/transaction-operations.js";
 
+// Phase 08 — cash exposure controls, aged collection alerts and cash operations views.
+export {
+  setCollectorOnline,
+  getMyCashOperations,
+  getMyCashSettlementItems,
+  getAdminCashControlOverview,
+  updateAdminCashControls,
+  alertOverdueCashCollections,
+} from "./finance/cash-controls.js";
+
 // Phase 08 — authenticated cash collection, settlement, remittance and reconciliation.
 export {
   confirmCashCollection,

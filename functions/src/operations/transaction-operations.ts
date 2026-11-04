@@ -6,6 +6,7 @@ import { postPaymentReceiptFromDatabase } from "../finance/payment-repository.js
 import { hasActiveBdoCheckoutRequest } from "../payments/payment-lifecycle-guards.js";
 import { createFinancialTransfer, getFinancialAccount, getFinancialOperation, postFinancialOperation } from "../finance/ledger.js";
 import { buildAutomaticOrderRefundCase } from "../finance/order-refunds.js";
+import { assertCollectorCashLimit } from "../finance/cash-controls.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -519,6 +520,7 @@ export const claimOrderDelivery = onCall({ enforceAppCheck: true }, async (call)
   if (profile.child("deliveryServices/isOnline").val() !== true) {
     throw new HttpsError("failed-precondition", "Go online before claiming a delivery.");
   }
+  await assertCollectorCashLimit(uid);
   const name = readString(profile.child("fullName").val()) || "Delivery";
   const phone = readString(profile.child("phoneNumber").val()) || readString(profile.child("phone").val());
   const rootRef = db().ref();
@@ -856,6 +858,7 @@ export const claimRide = onCall({ enforceAppCheck: true }, async (call) => {
   if (profile.child("driverService/isOnline").val() !== true) {
     throw new HttpsError("failed-precondition", "Go online before accepting a ride.");
   }
+  await assertCollectorCashLimit(uid);
   const fullName = readString(profile.child("fullName").val()) || "Verified Driver";
   const phone = readString(profile.child("phoneNumber").val()) || readString(profile.child("phone").val());
   const vehicle = profile.child("driverService/vehicleInfo");

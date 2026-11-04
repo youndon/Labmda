@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsBike
@@ -24,6 +25,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.screen.Screen
 import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.model.Order
+import com.zouitel.presentaion.screens.cash.CollectorCashScreen
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -152,6 +154,11 @@ class DeliveryDashboardScreen : Screen {
                     navigationIcon = {
                         IconButton(onClick = { navigator?.pop() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { navigator?.push(CollectorCashScreen()) }) {
+                            Icon(Icons.Default.AccountBalanceWallet, contentDescription = "Cash balance")
                         }
                     }
                 )

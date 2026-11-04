@@ -27,6 +27,8 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    private val _onlineError = MutableStateFlow<String?>(null)
+    val onlineError: StateFlow<String?> = _onlineError.asStateFlow()
 
     init {
         loadUserProfileAndService()
@@ -146,8 +148,19 @@ class DeliveryWorkplaceScreenModel : ScreenModel {
     fun updateOnlineStatus(isOnline: Boolean) {
         val uid = auth.currentUser?.uid ?: return
         screenModelScope.launch(Dispatchers.IO) {
-            db.child("users").child(uid).child("deliveryServices").child("isOnline")
-                .setValue(isOnline)
+            runCatching {
+                com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "setCollectorOnline",
+                    mapOf("online" to isOnline, "service" to "DELIVERY")
+                )
+            }.onSuccess {
+                val onlineRef = db.child("users").child(uid).child("deliveryServices").child("isOnline")
+                if (isOnline) runCatching { onlineRef.onDisconnect().setValue(false) }
+                else runCatching { onlineRef.onDisconnect().cancel() }
+                _onlineError.value = null
+            }.onFailure {
+                _onlineError.value = it.message ?: "Cash outstanding limit prevents going online."
+            }
         }
     }
 

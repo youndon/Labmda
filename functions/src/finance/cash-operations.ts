@@ -5,7 +5,7 @@ import { recordAdminFinancialAudit } from "./admin-financial.js";
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 import { commitCashCollection } from "./cash-collection.js";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
-import { createFinancialTransfer, postFinancialOperation, reconcileFinancialLedger, listFinancialAccounts, listCashOwedAccounts } from "./ledger.js";
+import { createFinancialTransfer, getFinancialOperation, postFinancialOperation, reconcileFinancialLedger, listFinancialAccounts, listCashOwedAccounts } from "./ledger.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -101,13 +101,17 @@ export const confirmMerchantCashSettlement = onCall({ enforceAppCheck: true }, a
     throw new HttpsError("failed-precondition", "Merchant allocation does not match the payment.");
   }
   const handoverId = `merchant_${paymentId}_${merchantId}`;
+  const settlementCreatedAt = Number(collection.collectedAt ?? collection.createdAt);
+  if (!Number.isSafeInteger(settlementCreatedAt) || settlementCreatedAt <= 0) {
+    throw new HttpsError("failed-precondition", "Cash collection has no stable settlement timestamp.");
+  }
   const existing = await db().ref(`cashHandovers/${handoverId}`).get();
   if (existing.exists() && (existing.child("status").val() === "CONFIRMED")) return { handoverId, duplicate: true };
 
   const operation = createFinancialTransfer({
     operationId: `cash_merchant_settlement_${handoverId}`, eventType: "MERCHANT_EARNING",
     referenceType: "PAYMENT", referenceId: paymentId, idempotencyKey: `cash_merchant_settlement_${handoverId}`,
-    createdAt: Date.now(), description: "Merchant confirmed receipt of cash order earnings",
+    createdAt: settlementCreatedAt, description: "Merchant confirmed receipt of cash order earnings",
     amountMinor: allocation.amountMinor,
     source: { accountId: `cash_owed_${collection.collectorId}_merchant_${merchantId}`, bucket: "CASH_OWED", deltaMinor: 0, partyType: "CASH", partyId: collection.collectorId },
     destination: { accountId: `wallet_merchant_${merchantId}`, bucket: "AVAILABLE", deltaMinor: 0, partyType: "MERCHANT", partyId: merchantId },
@@ -134,10 +138,12 @@ export const confirmCashRemittance = onCall({ enforceAppCheck: true }, async (ca
     if (prior.collectorId !== collectorId || prior.amountMinor !== amountMinor) throw new HttpsError("already-exists", "Remittance ID was reused with different details.");
     return { remittanceId, duplicate: true };
   }
+  const operationId = `cash_platform_remittance_${remittanceId}`;
+  const priorOperation = await getFinancialOperation(operationId);
   const operation = createFinancialTransfer({
-    operationId: `cash_platform_remittance_${remittanceId}`, eventType: "CASH_COLLECTION",
-    referenceType: "MANUAL", referenceId: remittanceId, idempotencyKey: `cash_platform_remittance_${remittanceId}`,
-    createdAt: Date.now(), description: "Admin-confirmed driver/courier cash remittance to platform",
+    operationId, eventType: "CASH_COLLECTION",
+    referenceType: "MANUAL", referenceId: remittanceId, idempotencyKey: operationId,
+    createdAt: priorOperation?.createdAt ?? Date.now(), description: "Admin-confirmed driver/courier cash remittance to platform",
     amountMinor,
     source: { accountId: `cash_owed_${collectorId}`, bucket: "CASH_OWED", deltaMinor: 0, partyType: "CASH", partyId: collectorId },
     destination: { accountId: "platform_revenue", bucket: "AVAILABLE", deltaMinor: 0, partyType: "PLATFORM", partyId: "platform" },

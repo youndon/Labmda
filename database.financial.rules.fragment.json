@@ -4,7 +4,10 @@
       "$paymentId": {
         ".write": false,
         ".read": "auth != null && data.child('payerId').val() === auth.uid"
-      }
+      },
+      ".indexOn": [
+        "status"
+      ]
     },
     "paymentAllocations": {
       "$paymentId": {
@@ -36,7 +39,11 @@
       "$paymentId": {
         ".write": false,
         ".read": "auth != null && (data.child('payerId').val() === auth.uid || data.child('collectorId').val() === auth.uid)"
-      }
+      },
+      ".indexOn": [
+        "collectorId",
+        "status"
+      ]
     },
     "payoutProfiles": {
       "$uid": {
@@ -167,6 +174,14 @@
       ".write": false
     },
     "paymentConfig": {
+      ".read": false,
+      ".write": false
+    },
+    "cashControls": {
+      ".read": false,
+      ".write": false
+    },
+    "adminCashAlerts": {
       ".read": false,
       ".write": false
     }
