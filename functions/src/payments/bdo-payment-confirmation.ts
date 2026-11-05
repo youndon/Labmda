@@ -41,18 +41,23 @@ export async function confirmBdoGcashPaymentRecord(
 
     const confirmations = root.bdoPaymentConfirmations ?? {};
     const referenceIndex = root.bdoPaymentReferenceIndex ?? {};
+    const legacyReferenceEntries = Object.entries(referenceIndex).filter(([key]) =>
+      key !== referenceKey && !/^[a-f0-9]{64}$/.test(key)
+        && providerReferenceIndexKey(key) === referenceKey,
+    );
+    const legacyReferenceOwner = legacyReferenceEntries.map(([, owner]) => owner).find(Boolean);
     const prior = confirmations[paymentId];
     if (prior) {
       const alreadyConfirmed = prior.transferReference === transferReference
         && prior.amountMinor === amountMinor && prior.currency === "PHP"
         && prior.status === "VERIFIED" && payment.providerReference === transferReference
         && ["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status);
-      const indexedOwner = referenceIndex[referenceKey] ?? referenceIndex[transferReference];
+      const indexedOwner = referenceIndex[referenceKey] ?? referenceIndex[transferReference] ?? legacyReferenceOwner;
       if (!alreadyConfirmed || indexedOwner !== paymentId) return;
       return;
     }
 
-    const indexedPaymentId = referenceIndex[referenceKey] ?? referenceIndex[transferReference];
+    const indexedPaymentId = referenceIndex[referenceKey] ?? referenceIndex[transferReference] ?? legacyReferenceOwner;
     if (indexedPaymentId && indexedPaymentId !== paymentId) return;
     if (payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
 
@@ -79,7 +84,7 @@ export async function confirmBdoGcashPaymentRecord(
       bdoPaymentReferenceIndex: {
         ...referenceIndex,
         [referenceKey]: paymentId,
-        ...(transferReference !== referenceKey ? { [transferReference]: null } : {}),
+        ...Object.fromEntries(legacyReferenceEntries.map(([legacyKey]) => [legacyKey, null])),
       },
     };
 
