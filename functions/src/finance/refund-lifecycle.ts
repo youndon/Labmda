@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 type Root = Record<string, any>;
 
 export function buildCompletedRefundRoot(
@@ -113,13 +115,12 @@ export function buildAbortRefundProcessingRoot(
   const nextCase = { ...currentCase, status: "APPROVED", abortedAt: now, abortedBy: actorUid,
     abortReason: reason, updatedAt: now, processingLeaseUntil: null };
   for (const key of ["providerReference", "verificationNote", "verifiedAmountMinor", "verifiedBy",
-    "verifiedAt", "processingAt", "completedBy"]) delete nextCase[key];
+    "verifiedAt", "processingAt", "processingLeaseUntil", "providerReferenceKey", "completedBy"]) delete nextCase[key];
   const referenceIndex = { ...(root.refundProviderReferenceIndex ?? {}) };
   if (currentCase.providerReference) {
-    const referenceKey = currentCase.providerReferenceKey;
-    if (typeof referenceKey === "string" && referenceIndex[referenceKey] === refundId) {
-      delete referenceIndex[referenceKey];
-    }
+    const referenceKey = currentCase.providerReferenceKey
+      ?? createHash("sha256").update(String(currentCase.providerReference).trim().toUpperCase()).digest("hex");
+    if (referenceIndex[referenceKey] === refundId) delete referenceIndex[referenceKey];
   }
   return {
     ...root,
