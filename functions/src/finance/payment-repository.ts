@@ -60,7 +60,7 @@ export async function postPaymentReceiptFromDatabase(
     }
   }
 
-  let operation;
+  let operation: ReturnType<typeof createPaymentReceiptOperation>;
   try {
     operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
   } catch (error) {
