@@ -93,7 +93,7 @@ export async function postFinancialOperation(operation: FinancialOperation): Pro
     if (prior.exists || idempotency.exists) {
       const saved = prior.data() as StoredOperation | undefined;
       if (idempotency.get("operationId") === operation.operationId && saved && sameOperation(saved, operation)) return { operationId: operation.operationId, duplicate: true };
-      throw new Error("Idempotency or operation ID was reused with different financial data.");
+      throw new PermanentPaymentLedgerError("Idempotency or operation ID was reused with different financial data.");
     }
     const balances = new Map<string, AccountBalance>();
     accountRefs.forEach((ref, index) => {
@@ -104,7 +104,7 @@ export async function postFinancialOperation(operation: FinancialOperation): Pro
         updatedAt: Number(raw.updatedAt ?? operation.createdAt),
       } : emptyAccount(ref.id, operation.createdAt);
       if (![account.availableMinor, account.pendingMinor, account.cashOwedMinor, account.clearingMinor].every(Number.isSafeInteger)) {
-        throw new Error(`Account ${ref.id} contains an invalid balance projection.`);
+        throw new PermanentPaymentLedgerError(`Account ${ref.id} contains an invalid balance projection.`);
       }
       balances.set(ref.id, account);
     });
