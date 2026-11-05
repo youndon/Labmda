@@ -1,84 +1,51 @@
 # Labmda Firebase and Maps environment isolation
 
-## Current repository state
+## Android Firebase configuration
 
-The current `app/google-services.json` points to the shared Firebase project
-`lateral-command-305601`. It registers `com.zouitel.labmda` alongside unrelated
-Android applications. This means Labmda currently shares the Firebase project's
-project-level resources, quotas and configuration boundaries. App Check,
-Authentication, Realtime Database and Functions are not isolated from those
-other apps by having a distinct Android package registration.
+The Android app has two product flavors in `app/build.gradle.kts`:
 
-The repository does not yet contain separate Labmda development and production
-Firebase projects. Do not copy the existing JSON into two environment folders:
-that would still connect both builds to the same Firebase project.
+- `development`
+- `production`
 
-## Required Firebase setup (manual Google Cloud/Firebase Console work)
+Firebase configuration must be supplied by the matching Android source set:
 
-Create two new Firebase projects:
+- Development: `app/src/development/google-services.json`
+- Production: `app/src/production/google-services.json`
 
-- `labmda-dev` — development and testing only.
-- `labmda-prod` — production only.
+There is deliberately no root `app/google-services.json`. A root-level file would be a fallback for a flavor missing its own configuration and could silently connect a production build to the wrong Firebase project. The root fallback has been removed. The production flavor must fail its Google Services processing/build until the real production file is added at the production path.
 
-For **each** project:
+The current development candidate points to Firebase project `lateral-command-305601` and contains a `com.zouitel.labmda` Android client entry. Confirm in Firebase Console that this is the intended development project and replace the file with a freshly downloaded configuration for the dedicated Labmda development app. The existing file contains registrations for unrelated Android packages; use a clean app-specific download.
 
-1. Register an Android app with package name `com.zouitel.labmda`.
-2. Enable only the Firebase products Labmda actually uses: Authentication,
-   Realtime Database, Cloud Functions and any other required product.
-3. Configure Authentication providers and authorized domains independently.
-4. Create the Realtime Database in the intended region and deploy the reviewed
-   production rules to the production project. Do not copy permissive test rules.
-5. Deploy Functions independently and configure that environment's secrets.
-   Use separate Xendit credentials/webhook configuration for sandbox and live
-   environments; never put server credentials in the Android app.
-6. Register App Check separately. Use the debug provider only for development
-   builds and Play Integrity for production. Do not register debug tokens as
-   production devices.
-7. Download each project's Android configuration file.
+Before production release:
 
-Once both projects exist, the intended Android source layout is:
+1. Create/confirm the separate production Firebase project.
+2. Register Android package `com.zouitel.labmda` in that project.
+3. Download its actual `google-services.json` into `app/src/production/`.
+4. Verify the project ID and Android package in the file before building.
+5. Build `assembleProductionRelease` and verify it resolves only the production project.
 
-- `app/src/dev/google-services.json`
-- `app/src/prod/google-services.json`
+Do not copy the development file into the production source set. Do not commit placeholder or fabricated Firebase project configuration.
 
-Then add `dev` and `prod` product flavors and verify the Google Services
-plugin selects the matching file for each variant. Until both real files are
-available, the flavors are intentionally not enabled: enabling them now would
-either break CI or silently keep one environment pointed at the shared project.
+## Firebase backend environments
+
+Keep development and production Firebase projects, Realtime Database instances, Functions deployments, secrets, App Check registrations and operational data separate. Configure GitHub Environments named `development` and `production` with their own project IDs and Workload Identity Federation settings. Protect production deployment with required reviewers.
+
+The current payment integration is BDO Checkout for GCash collection using the manual checkout-link flow, with manual provider payouts. There is no Xendit integration. Do not add Xendit credentials or webhook configuration to either environment.
+
+## Realtime Database deployment safety
+
+There is not yet a complete, audited application RTDB ruleset. For that reason, `firebase.json` intentionally has no `database.rules` deployment mapping. A normal `firebase deploy` must not deploy the emulator's deny-all rules or either incomplete rules fragment.
+
+The deny-all test rules are isolated in `testing/database.emulator.rules.json` and referenced only by `firebase.emulator.json` for explicit local emulator use. Those rules are a safe deny-all baseline, not a substitute for application rules and not evidence that application reads/writes pass.
+
+Before enabling RTDB deployment, inventory all app reads, queries and writes; merge the order/ride and financial fragments into a complete least-privilege ruleset; account for profile creation/update and the full `deliveryServices` registration payload; then run emulator tests for allowed and denied operations. Do not add broad parent-level grants to make existing writes pass because RTDB grants cascade into protected child paths.
 
 ## Google Maps Android key
 
-The Maps key has been removed from the checked-in manifest. Supply it locally
-through a Gradle property or environment variable named
-`LABMDA_MAPS_API_KEY`.
+Supply the Android Maps key through the Gradle property or environment variable `LABMDA_MAPS_API_KEY`; do not commit it. Restrict the key in Google Cloud Console to package `com.zouitel.labmda`, the appropriate signing certificate SHA-1 fingerprints, and only the APIs required by the Android client.
 
-For local development, add this to the user's untracked
-`~/.gradle/gradle.properties`:
-
-```properties
-LABMDA_MAPS_API_KEY=YOUR_RESTRICTED_ANDROID_MAPS_KEY
-```
-
-For CI, store the value as a protected repository/environment secret and expose
-it to Gradle as the `LABMDA_MAPS_API_KEY` environment variable. Do not commit
-the key in `gradle.properties`, `local.properties`, manifests, or source.
-
-In Google Cloud Console, restrict the Android key as follows:
-
-- Application restriction: **Android apps**.
-- Package: `com.zouitel.labmda`.
-- SHA-1: add the debug signing certificate for development and the actual
-  Play App Signing/release certificate SHA-1 used by production.
-- API restriction: **Maps SDK for Android** only, unless a separately required
-  Google API needs its own dedicated key.
-
-The key previously committed in `presentation/src/main/AndroidManifest.xml`
-must be rotated/replaced in Google Cloud Console. Removing it from the current
-manifest does not erase it from Git history or invalidate the old key.
+The key previously committed in `presentation/src/main/AndroidManifest.xml` must be rotated/replaced in Google Cloud Console. Removing a key from the current source does not erase it from Git history or invalidate it.
 
 ## Release gate
 
-Do not release Labmda against `lateral-command-305601`. Before production
-release, verify that the production build resolves only `labmda-prod`, the
-development build resolves only `labmda-dev`, and the Maps key is restricted
-to the production signing certificate and required APIs.
+Do not release until the production Firebase Android configuration is supplied and verified, production App Check/Play Integrity is configured, server credentials are stored in Secret Manager, RTDB rules have been completed and tested, and backups/monitoring are configured for the production project.
