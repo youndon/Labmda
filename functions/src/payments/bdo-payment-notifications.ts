@@ -149,7 +149,7 @@ export const registerFcmToken = onCall({ enforceAppCheck: true }, async (call) =
   if (call.auth?.token?.admin === true) {
     await db().ref(`adminFcmTokens/${uid}/${tokenId}`).set(record);
   } else {
-    await db().ref(`adminFcmTokens/${uid}/${tokenId}`).remove();
+    await db().ref(`adminFcmTokens/${uid}`).remove();
   }
   return { registered: true };
 });
