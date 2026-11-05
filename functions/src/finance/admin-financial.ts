@@ -348,6 +348,53 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     providerReference, verifiedAmountMinor, verificationNote, ledgerOperationId: posted.operationId };
 });
 
+/**
+ * Release a stale refund-processing lock only when an administrator confirms
+ * the provider did NOT send the refund. A posted ledger reversal cannot be aborted.
+ */
+export const abortAdminRefundProcessing = onCall({ enforceAppCheck: true }, async (call) => {
+  const uid = admin(call);
+  const refundId = safeId(call.data?.refundId, "Refund ID");
+  const reason = text(call.data?.reason, "Abort reason");
+  const now = Date.now();
+  const initial = await db().ref(`refundCases/${refundId}`).get();
+  if (!initial.exists()) throw new HttpsError("not-found", "Refund case was not found.");
+  const initialCase = initial.val() as RefundCase;
+  if (initialCase.status !== "PROCESSING" && initialCase.status !== "ABORTING") {
+    throw new HttpsError("failed-precondition", "Only a refund with a stale PROCESSING lock can be aborted.");
+  }
+  if (initialCase.status === "PROCESSING" && Number(initialCase.processingLeaseUntil ?? 0) > now) {
+    throw new HttpsError("aborted", "Refund processing is still active. Wait for its processing lease to expire.");
+  }
+  const operationId = `refund_${refundId}_posted`;
+  if (await getFinancialOperation(operationId)) {
+    throw new HttpsError("failed-precondition", "The refund reversal is already posted. Resume completion instead of aborting this refund.");
+  }
+  const claim = await db().ref().transaction((root: Record<string, any> | null) => {
+    if (!root) return null;
+    const current = root.refundCases?.[refundId] as RefundCase | undefined;
+    if (!current) return;
+    if (current.status === "ABORTING") return root;
+    if (current.status !== "PROCESSING" || Number(current.processingLeaseUntil ?? 0) > Date.now()) return;
+    return { ...root, refundCases: { ...root.refundCases, [refundId]: { ...current, status: "ABORTING", abortRequestedBy: uid, abortRequestedAt: Date.now(), abortReason: reason } } };
+  }, undefined, false);
+  const claimed = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase | null;
+  if (!claimed || claimed.status !== "ABORTING") {
+    throw new HttpsError("aborted", "Refund processing resumed before the abort could be claimed. Refresh and try again later.");
+  }
+  if (await getFinancialOperation(operationId)) {
+    await db().ref(`refundCases/${refundId}`).transaction((current: RefundCase | null) =>
+      current?.status === "ABORTING" ? { ...current, status: "PROCESSING", processingLeaseUntil: null } : current, undefined, false);
+    throw new HttpsError("failed-precondition", "The refund reversal was posted while the abort was being checked. Resume completion; the payment lock was retained.");
+  }
+  const result = await db().ref().transaction((root: Record<string, any> | null) =>
+    root === null ? null : buildAbortRefundProcessingRoot(root, refundId, uid, reason, Date.now()), undefined, false);
+  if (!result.committed) throw new HttpsError("failed-precondition", "The refund lock changed. Refresh the refund case before retrying.");
+  const aborted = result.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
+  await recordAdminFinancialAudit({ uid, action: "REFUND_PROCESSING_ABORTED", targetType: "REFUND", targetId: refundId, before: claimed, after: aborted, note: reason });
+  return { refundId, status: "APPROVED", paymentId: aborted.paymentId, message: "The processing lock was released. The refund remains approved and can be retried after the provider transfer is actually completed." };
+});
+
 export const getAdminRefundCases = onCall({ enforceAppCheck: true }, async (call) => {
   admin(call);
   const snapshot = await db().ref("refundCases").orderByChild("createdAt").limitToLast(200).get();
