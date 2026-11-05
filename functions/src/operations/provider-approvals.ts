@@ -35,7 +35,6 @@ export const submitRestaurantApplication = onCall({ enforceAppCheck: true }, asy
   const imageUrl = typeof data.imageUrl === "string" ? data.imageUrl.trim() : "";
   const managerPhone = typeof data.managerPhone === "string" ? data.managerPhone.trim() : "";
   const address = typeof data.address === "string" ? data.address.trim() : "";
-  const deliveryFee = Number(data.deliveryFee);
   const estimatedTimeMinutes = Number(data.estimatedTimeMinutes);
   const latitude = Number(data.latitude);
   const longitude = Number(data.longitude);
@@ -43,7 +42,6 @@ export const submitRestaurantApplication = onCall({ enforceAppCheck: true }, asy
   if (restaurantName.length < 2 || restaurantName.length > 100
     || managerPhone.length < 5 || managerPhone.length > 30
     || address.length < 5 || address.length > 300
-    || !Number.isFinite(deliveryFee) || deliveryFee < 0 || deliveryFee > 10000
     || !Number.isSafeInteger(estimatedTimeMinutes) || estimatedTimeMinutes < 1 || estimatedTimeMinutes > 600
     || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
     || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
@@ -61,7 +59,7 @@ export const submitRestaurantApplication = onCall({ enforceAppCheck: true }, asy
   await userRef.update({
     sourceName: restaurantName,
     restaurantImageUrl: imageUrl,
-    deliveryFee,
+    deliveryFee: null,
     estimatedTimeMinutes,
     managerPhone,
     restaurantAddress: address,
@@ -177,7 +175,6 @@ export const adminUpdateProviderStatus = onCall({ enforceAppCheck: true }, async
         name: String(user.child("sourceName").val() ?? "Restaurant"),
         imageUrl: String(user.child("restaurantImageUrl").val() ?? ""),
         rating: 5.0,
-        deliveryFee: Number(user.child("deliveryFee").val() ?? 0),
         estimatedTimeMinutes: Number(user.child("estimatedTimeMinutes").val() ?? 20),
         isOpen: false,
         managers: [String(user.child("managerPhone").val() ?? "")].filter(Boolean),
