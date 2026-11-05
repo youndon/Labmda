@@ -1,6 +1,7 @@
 import { onValueWritten } from "firebase-functions/v2/database";
 import { getDatabase } from "firebase-admin/database";
 import { postPaymentReceiptFromDatabase } from "./payment-repository.js";
+import { isPermanentPaymentLedgerError } from "./payment-ledger-errors.js";
 
 /**
  * Every GCash transaction is created with its known merchant/platform
@@ -35,6 +36,18 @@ export const postSucceededPaymentToLedger = onValueWritten(
     const allocations = await database.ref(`paymentAllocations/${paymentId}`).get();
     if (!shouldPostSucceededPaymentToLedger(before, after, allocations.exists())) return;
 
-    await postPaymentReceiptFromDatabase(database, paymentId);
+    try {
+      await postPaymentReceiptFromDatabase(database, paymentId);
+    } catch (error) {
+      if (isPermanentPaymentLedgerError(error)) {
+        console.error("Permanent payment-ledger validation failure; manual repair required.", {
+          paymentId,
+          code: "PERMANENT_PAYMENT_LEDGER_ERROR",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      throw error;
+    }
   },
 );

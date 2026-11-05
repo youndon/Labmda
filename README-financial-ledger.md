@@ -240,3 +240,11 @@ Do not deploy the new Functions before importing existing ledger data: the new w
 ### Production boundary
 - There is no production BDO checkout-creation API, authenticated BDO webhook, or BDO refund API integration in this repository. Do not enable an assumed wire protocol. Continue using the manual BDO portal link and administrator verification bridge until BDO supplies the merchant-specific Website Plug-in/API, callback authentication and refund specifications.
 - The development-only simulated GCash checkout/refund functions remain emulator-only and are not production payment evidence.
+
+
+## Ledger trigger and refund recovery safeguards
+
+- `postSucceededPaymentToLedger` still retries transient database/Firestore failures. Deterministic source-record and journal validation failures are wrapped as `PermanentPaymentLedgerError`, logged with the payment ID and acknowledged rather than retried indefinitely. Operators must repair the source records and use the existing controlled reconciliation/recovery path; the trigger does not silently rewrite payment data.
+- Refund processing uses a 15-minute execution lease. Concurrent completion attempts are rejected while a lease is active; a retry can resume after expiry using the same verified provider reference. A stale processing lock can be aborted only when an administrator records that the provider did **not** send the refund. The callable refuses to abort if the immutable refund ledger operation already exists.
+- Aborting a stale refund releases `payment.refundProcessingId`, the reserved refund amount and the provider-reference reservation, and marks the case ABORTED. If a refund is still required, an administrator creates a fresh refund case.
+- A fully refunded order or ride is marked CANCELLED atomically with the payment/refund completion. Ride completion also removes the passenger entry from `activeRideRequests`. Partial refunds do not cancel an otherwise active transaction.

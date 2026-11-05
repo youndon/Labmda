@@ -173,6 +173,11 @@ class AdminFinancialOperationsScreenModel : ScreenModel {
         "Refund $decision."
     }
 
+    fun abortRefundProcessing(refundId: String, reason: String) = action {
+        functions.httpsCallable("abortAdminRefundProcessing").invoke(mapOf("refundId" to refundId, "reason" to reason))
+        "Stale refund lock and refund reservation released. Create a new case if a refund is still required."
+    }
+
     fun completeRefund(refundId: String, reference: String, verifiedAmountPesos: String, verificationNote: String) = action {
         functions.httpsCallable("completeAdminRefundCase").invoke(
             mapOf(
@@ -254,6 +259,8 @@ class AdminFinancialOperationsScreen : Screen {
         var refundAmount by remember { mutableStateOf("") }
         var refundReason by remember { mutableStateOf("") }
         var completionTarget by remember { mutableStateOf<AdminRefundCaseRow?>(null) }
+        var abortTarget by remember { mutableStateOf<AdminRefundCaseRow?>(null) }
+        var abortReason by remember { mutableStateOf("") }
         var providerReference by remember { mutableStateOf("") }
         var verifiedRefundAmount by remember { mutableStateOf("") }
         var refundVerificationNote by remember { mutableStateOf("") }
@@ -397,13 +404,18 @@ class AdminFinancialOperationsScreen : Screen {
                                         OutlinedButton(onClick = { model.reviewRefund(refund.id, "REJECTED") }, enabled = !busy) { Text("Reject") }
                                         Button(onClick = { model.reviewRefund(refund.id, "APPROVED") }, enabled = !busy) { Text("Approve") }
                                     }
-                                    "APPROVED", "PROCESSING" -> Button(onClick = {
-                                        completionTarget = refund
-                                        providerReference = refund.providerReference.orEmpty()
-                                        verifiedRefundAmount = BigDecimal.valueOf(refund.amountMinor, 2).stripTrailingZeros().toPlainString()
-                                        refundVerificationNote = ""
-                                    }, enabled = !busy) {
-                                        Text("Verify BDO refund")
+                                    "APPROVED", "PROCESSING" -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(onClick = {
+                                            completionTarget = refund
+                                            providerReference = refund.providerReference.orEmpty()
+                                            verifiedRefundAmount = BigDecimal.valueOf(refund.amountMinor, 2).stripTrailingZeros().toPlainString()
+                                            refundVerificationNote = ""
+                                        }, enabled = !busy) { Text("Verify BDO refund") }
+                                        if (refund.status == "PROCESSING") {
+                                            OutlinedButton(onClick = { abortTarget = refund; abortReason = "" }, enabled = !busy) {
+                                                Text("Release stale processing lock")
+                                            }
+                                        }
                                     }
                                 }
                                 refund.providerReference?.let { Text("Provider reference: $it", style = MaterialTheme.typography.labelSmall) }
@@ -501,6 +513,23 @@ class AdminFinancialOperationsScreen : Screen {
                     ) { Text("Verify and post reversal") }
                 },
                 dismissButton = { TextButton(onClick = { completionTarget = null }) { Text("Cancel") } }
+            )
+        }
+
+        abortTarget?.let { refund ->
+            LabmdaAlertDialog(
+                onDismissRequest = { abortTarget = null },
+                title = { Text("Release stale refund lock") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Use this only after checking BDO/bank records and confirming that the refund transfer was NOT sent. If it was sent, do not abort: retry verification so Labmda can finish the ledger reversal.")
+                        OutlinedTextField(value = abortReason, onValueChange = { abortReason = it }, label = { Text("Why was no refund transfer sent?") })
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { model.abortRefundProcessing(refund.id, abortReason); abortTarget = null }, enabled = !busy && abortReason.isNotBlank()) { Text("Confirm no transfer was sent") }
+                },
+                dismissButton = { TextButton(onClick = { abortTarget = null }) { Text("Keep processing") } }
             )
         }
 

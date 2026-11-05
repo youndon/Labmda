@@ -1,4 +1,5 @@
 import { FieldPath, getFirestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { PermanentPaymentLedgerError } from "./payment-ledger-errors.js";
 
 export type BalanceBucket = "AVAILABLE" | "PENDING" | "CASH_OWED" | "CLEARING";
 export type FinancialEventType = "CUSTOMER_PAYMENT" | "MERCHANT_EARNING" | "DRIVER_EARNING" | "COURIER_EARNING" | "PLATFORM_REVENUE" | "CASH_COLLECTION" | "PAYOUT" | "REFUND" | "ADJUSTMENT";
@@ -67,7 +68,11 @@ function sameOperation(stored: StoredOperation, operation: FinancialOperation): 
 
 /** Atomically commits the immutable journal, idempotency, balances and provider activity in Firestore. */
 export async function postFinancialOperation(operation: FinancialOperation): Promise<{ operationId: string; duplicate: boolean }> {
-  validateFinancialOperation(operation);
+  try {
+    validateFinancialOperation(operation);
+  } catch (error) {
+    throw new PermanentPaymentLedgerError(error instanceof Error ? error.message : "Financial operation validation failed.", { cause: error });
+  }
   const db = firestore();
   const operationRef = db.collection("financialOperations").doc(operation.operationId);
   const idempotencyRef = db.collection("financialIdempotency").doc(operation.idempotencyKey);
@@ -88,7 +93,7 @@ export async function postFinancialOperation(operation: FinancialOperation): Pro
     if (prior.exists || idempotency.exists) {
       const saved = prior.data() as StoredOperation | undefined;
       if (idempotency.get("operationId") === operation.operationId && saved && sameOperation(saved, operation)) return { operationId: operation.operationId, duplicate: true };
-      throw new Error("Idempotency or operation ID was reused with different financial data.");
+      throw new PermanentPaymentLedgerError("Idempotency or operation ID was reused with different financial data.");
     }
     const balances = new Map<string, AccountBalance>();
     accountRefs.forEach((ref, index) => {
@@ -99,7 +104,7 @@ export async function postFinancialOperation(operation: FinancialOperation): Pro
         updatedAt: Number(raw.updatedAt ?? operation.createdAt),
       } : emptyAccount(ref.id, operation.createdAt);
       if (![account.availableMinor, account.pendingMinor, account.cashOwedMinor, account.clearingMinor].every(Number.isSafeInteger)) {
-        throw new Error(`Account ${ref.id} contains an invalid balance projection.`);
+        throw new PermanentPaymentLedgerError(`Account ${ref.id} contains an invalid balance projection.`);
       }
       balances.set(ref.id, account);
     });
