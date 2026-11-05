@@ -86,6 +86,17 @@ describe("confirmBdoGcashPaymentRecord", () => {
     expect(fake.value().payments.pay_1.status).toBe("PENDING");
   });
 
+  it("detects a conflicting legacy raw key regardless of reference casing", async () => {
+    const fake = fakeDatabase(seed({
+      root: { bdoPaymentReferenceIndex: { "BDO-REF-1234": "another_payment" } },
+    }));
+
+    await expect(confirmBdoGcashPaymentRecord(fake.database, {
+      ...input, transferReference: "bdo-ref-1234",
+    })).rejects.toThrow(/could not be verified/i);
+    expect(fake.value().payments.pay_1.status).toBe("PENDING");
+  });
+
   it("rejects an amount mismatch without changing payment state", async () => {
     const fake = fakeDatabase(seed());
     await expect(confirmBdoGcashPaymentRecord(fake.database, { ...input, amountMinor: 12_499 }))
