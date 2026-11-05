@@ -146,6 +146,6 @@ export const registerFcmToken = onCall({ enforceAppCheck: true }, async (call) =
   const tokenId = createHash("sha256").update(token).digest("hex");
   const record = { token, updatedAt: Date.now(), platform: "ANDROID" };
   await db().ref(`users/${uid}/fcmTokens/${tokenId}`).set(record);
-  if (call.auth.token.admin === true) await db().ref(`adminFcmTokens/${uid}/${tokenId}`).set(record);
+  if (call.auth?.token?.admin === true) await db().ref(`adminFcmTokens/${uid}/${tokenId}`).set(record);
   return { registered: true };
 });
