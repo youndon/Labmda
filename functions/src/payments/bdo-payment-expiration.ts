@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { Database } from "firebase-admin/database";
+import { providerReferenceIndexKey } from "./provider-reference-key.js";
 
 export interface BdoPaymentExpiryInput {
   paymentId: string;
@@ -34,7 +34,7 @@ export async function expireBdoGcashPaymentRecord(
     || reason.length < 5 || reason.length > 500 || !input.expiredBy.trim()) {
     throw new Error("BDO payment expiry details are invalid.");
   }
-  const referenceKey = createHash("sha256").update(closureReference.toUpperCase()).digest("hex");
+  const referenceKey = providerReferenceIndexKey(closureReference);
   const now = Date.now();
 
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
