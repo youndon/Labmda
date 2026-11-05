@@ -40,3 +40,13 @@ The live GCash API Portal / partner approval has **not** been obtained. This cha
 ## Safety rule
 
 Until the relevant capability passes its readiness gate and the real adapter is implemented and tested, keep live GCash collection and disbursement disabled. Do not switch the simulated provider into production or interpret a simulated session as customer funds.
+
+
+## Manual BDO checkout operations and notifications
+
+- Android registers its FCM token through the authenticated `registerFcmToken` callable. Tokens are stored server-side and are never written by client code.
+- `notifyBdoPaymentChanges` sends customer and administrator push notifications when a BDO checkout link is attached, a customer requests cancellation, or trusted payment status changes. A durable notification event record makes trigger retries idempotent.
+- `remindOverdueBdoCheckoutPayments` checks pending BDO GCash links hourly. After 24 hours it reminds the customer and administrators, with a 12-hour reminder cooldown.
+- Customers may call `requestBdoCheckoutCancellation` after a link is attached. This records the request and alerts administrators; it does not mark the order cancelled or the payment expired.
+- An administrator must first verify in the BDO portal that the payment request has been closed, then use `expireBdoGcashPayment` with the closure reference. Labmda cannot safely auto-expire or revoke an external BDO link while it may still accept money.
+- FCM delivery requires Android notification permission and a valid registered device token. Push delivery is best-effort; payment state remains available from the trusted RTDB payment/order/trip records.

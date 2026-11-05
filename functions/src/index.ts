@@ -305,3 +305,7 @@ export {
   getAdminRefundCases,
   getAdminAuditTrail,
 } from "./finance/admin-financial.js";
+
+// BDO GCash operations notifications, reminders and customer cancellation requests.
+export { notifyBdoPaymentChanges, remindOverdueBdoCheckoutPayments, registerFcmToken } from "./payments/bdo-payment-notifications.js";
+export { requestBdoCheckoutCancellation } from "./payments/bdo-payment-cancellation.js";
