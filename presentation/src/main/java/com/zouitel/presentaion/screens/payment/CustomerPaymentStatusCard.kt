@@ -10,10 +10,18 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.functions.functions
+import kotlinx.coroutines.launch
 import java.net.URI
 
 /**
@@ -27,12 +35,17 @@ fun CustomerPaymentStatusCard(
     paymentMethod: String,
     paymentStatus: String,
     checkoutUrl: String,
+    transactionId: String = "",
+    transactionType: String = "",
     modifier: Modifier = Modifier
 ) {
     val method = paymentMethod.trim().uppercase()
     val status = paymentStatus.trim().uppercase()
     val uriHandler = LocalUriHandler.current
     val validBdoLink = isTrustedBdoCheckoutUrl(checkoutUrl)
+    val scope = rememberCoroutineScope()
+    var cancellationBusy by remember(transactionId) { mutableStateOf(false) }
+    var cancellationMessage by remember(transactionId) { mutableStateOf<String?>(null) }
 
     val presentation = when (status) {
         "PAID", "SUCCEEDED", "COLLECTED" -> PaymentStatusPresentation(
@@ -137,6 +150,39 @@ fun CustomerPaymentStatusCard(
                         style = MaterialTheme.typography.labelSmall,
                         color = presentation.content
                     )
+                    if (transactionId.isNotBlank() && transactionType in setOf("ORDER", "RIDE")) {
+                        Button(
+                            onClick = {
+                                if (!cancellationBusy) {
+                                    cancellationBusy = true
+                                    cancellationMessage = null
+                                    scope.launch {
+                                        runCatching {
+                                            Firebase.functions.httpsCallable("requestBdoCheckoutCancellation")
+                                                .invoke(mapOf("transactionType" to transactionType, "transactionId" to transactionId))
+                                        }.onSuccess {
+                                            cancellationMessage = "Cancellation requested. Labmda will cancel this transaction after an administrator verifies that the BDO link is closed."
+                                        }.onFailure {
+                                            cancellationMessage = it.message ?: "Could not request cancellation. Please try again."
+                                        }
+                                        cancellationBusy = false
+                                    }
+                                }
+                            },
+                            enabled = !cancellationBusy,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (cancellationBusy) "Sending request…" else "Request cancellation")
+                        }
+                        Text(
+                            "The external BDO link cannot be cancelled by Labmda. Do not pay after requesting cancellation; an administrator must close and verify the link first.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = presentation.content
+                        )
+                        cancellationMessage?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = presentation.content)
+                        }
+                    }
                 } else {
                     Text(
                         "The payment request link has not been added yet. Your order or ride remains pending.",
