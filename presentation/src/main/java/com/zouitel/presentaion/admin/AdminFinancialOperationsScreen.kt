@@ -175,7 +175,7 @@ class AdminFinancialOperationsScreenModel : ScreenModel {
 
     fun abortRefundProcessing(refundId: String, reason: String) = action {
         functions.httpsCallable("abortAdminRefundProcessing").invoke(mapOf("refundId" to refundId, "reason" to reason))
-        "Stale refund processing lock released. The refund remains approved for retry."
+        "Stale refund lock and refund reservation released. Create a new case if a refund is still required."
     }
 
     fun completeRefund(refundId: String, reference: String, verifiedAmountPesos: String, verificationNote: String) = action {
