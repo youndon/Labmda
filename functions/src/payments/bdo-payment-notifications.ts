@@ -117,7 +117,7 @@ export const remindOverdueBdoCheckoutPayments = onSchedule("every 1 hours", asyn
     const claim = await stateRef.transaction((current: { lastSentAt?: number; leaseUntil?: number; reminderCount?: number } | null) => {
       if (current?.lastSentAt && now - current.lastSentAt < reminderCooldownMs) return;
       if (current?.leaseUntil && current.leaseUntil > now) return;
-      return { ...current, leaseUntil: now + 5 * 60 * 1000 };
+      return { ...(current ?? {}), leaseUntil: now + 5 * 60 * 1000 };
     }, undefined, false);
     if (!claim.committed) continue;
     const eventId = `bdo_${paymentId}_overdue_${Math.floor(now / reminderCooldownMs)}`;
