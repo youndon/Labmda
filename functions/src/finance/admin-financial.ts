@@ -3,6 +3,7 @@ import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { reconcileFinancialLedger, createFinancialTransfer, postFinancialOperation, getFinancialOperation, listFinancialAccounts, type BalanceBucket, type LedgerPosting } from "./ledger.js";
 import { buildRefundReversal } from "./refund-ledger.js";
+import { buildAbortRefundProcessingRoot, buildCompletedRefundRoot } from "./refund-lifecycle.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -21,6 +22,7 @@ type RefundCase = {
   providerReference?: string; method?: string; ledgerOperationId?: string; processingAt?: number;
   orderId?: string; tripId?: string; requestedByRole?: string; origin?: string;
   verifiedBy?: string; verifiedAt?: number; verificationNote?: string; verifiedAmountMinor?: number;
+  processingLeaseUntil?: number | null; providerReferenceKey?: string;
 };
 
 function admin(call: AdminCall): string {
