@@ -67,7 +67,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         var deliveryAddress by remember { mutableStateOf("") }
         val paymentAvailability = rememberCustomerPaymentAvailability("FOOD")
         val paymentOptions = paymentAvailability.methods.map { method ->
-            if (method == "GCASH") "GCash" else "Cash on Delivery"
+            if (method == "GCASH") "GCash" else "Cash"
         }
         var paymentMethod by remember { mutableStateOf("") }
         LaunchedEffect(paymentOptions) {
