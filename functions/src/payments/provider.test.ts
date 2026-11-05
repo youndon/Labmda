@@ -1,7 +1,22 @@
-import { describe, expect, it } from "vitest";
-import { SimulatedPaymentProvider, SimulatedPaymentRefundProvider, HmacPaymentSignatureVerifier } from "./provider.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SimulatedPaymentProvider, SimulatedPaymentRefundProvider, HmacPaymentSignatureVerifier, isSimulationRuntime } from "./provider.js";
 
 describe("payment provider development adapters", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("allows simulation runtime only inside the non-production Functions emulator", () => {
+    vi.stubEnv("FUNCTIONS_EMULATOR", "true");
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("K_SERVICE", "");
+    expect(isSimulationRuntime()).toBe(true);
+    vi.stubEnv("K_SERVICE", "production-service");
+    expect(isSimulationRuntime()).toBe(false);
+    vi.stubEnv("K_SERVICE", "");
+    vi.stubEnv("NODE_ENV", "production");
+    expect(isSimulationRuntime()).toBe(false);
+    vi.stubEnv("FUNCTIONS_EMULATOR", "false");
+    vi.stubEnv("NODE_ENV", "test");
+    expect(isSimulationRuntime()).toBe(false);
+  });
   it("refuses to construct a simulated provider when simulation is disabled", () => {
     expect(() => new SimulatedPaymentProvider(false)).toThrow("disabled");
     expect(() => new SimulatedPaymentRefundProvider(false)).toThrow("disabled");
