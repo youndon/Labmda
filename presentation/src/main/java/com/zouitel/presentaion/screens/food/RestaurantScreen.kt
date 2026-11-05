@@ -361,24 +361,11 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(if (orderQuote == null) "Calculated from route" else "₱%.2f".format((((orderQuote?.get("breakdown") as? Map<*, *>)?.get("deliveryFeeMinor") as? Number)?.toDouble() ?: 0.0) / 100.0), style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Total Amount", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text(
-                                "₱${"%.2f".format(grandTotal)}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
+                    Text(
+                        "Items subtotal: ₱${"%.2f".format(subtotal)}. Delivery fee and final total will appear in the server quote.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
                     if (orderQuote != null) {
                         OrderQuoteReviewPanel(
@@ -518,7 +505,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.End) {
                             Text("Delivery fee", style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₱${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.titleSmall,
+                            Text("Calculated at checkout", style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold)
                         }
                     }
