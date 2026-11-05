@@ -1,4 +1,5 @@
 import type { Database } from "firebase-admin/database";
+import { providerReferenceIndexKey } from "./provider-reference-key.js";
 
 export interface BdoGcashConfirmationInput {
   paymentId: string;
@@ -30,6 +31,7 @@ export async function confirmBdoGcashPaymentRecord(
     throw new Error("BDO payment confirmation input is invalid.");
   }
 
+  const referenceKey = providerReferenceIndexKey(transferReference);
   const result = await database.ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
     const payment = root.payments?.[paymentId];
@@ -45,11 +47,12 @@ export async function confirmBdoGcashPaymentRecord(
         && prior.amountMinor === amountMinor && prior.currency === "PHP"
         && prior.status === "VERIFIED" && payment.providerReference === transferReference
         && ["SUCCEEDED", "PARTIALLY_REFUNDED", "REFUNDED"].includes(payment.status);
-      if (!alreadyConfirmed || referenceIndex[transferReference] !== paymentId) return;
+      const indexedOwner = referenceIndex[referenceKey] ?? referenceIndex[transferReference];
+      if (!alreadyConfirmed || indexedOwner !== paymentId) return;
       return;
     }
 
-    const indexedPaymentId = referenceIndex[transferReference];
+    const indexedPaymentId = referenceIndex[referenceKey] ?? referenceIndex[transferReference];
     if (indexedPaymentId && indexedPaymentId !== paymentId) return;
     if (payment.status !== "PENDING" && payment.status !== "PROCESSING") return;
 
@@ -73,7 +76,11 @@ export async function confirmBdoGcashPaymentRecord(
           status: "VERIFIED", verifiedBy, verifiedAt: now,
         },
       },
-      bdoPaymentReferenceIndex: { ...referenceIndex, [transferReference]: paymentId },
+      bdoPaymentReferenceIndex: {
+        ...referenceIndex,
+        [referenceKey]: paymentId,
+        ...(transferReference !== referenceKey ? { [transferReference]: null } : {}),
+      },
     };
 
     if (payment.transactionType === "ORDER" && payment.orderId) {
