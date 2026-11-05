@@ -83,14 +83,22 @@ export const notifyBdoPaymentChanges = onValueWritten(
     if (!notice || !after) return;
     const paymentId = event.params.paymentId;
     const eventId = `bdo_${paymentId}_${notice.kind}_${String(after.updatedAt ?? after.checkoutLinkCreatedAt ?? "event")}`;
-    const claim = await db().ref(`paymentNotificationEvents/${eventId}`).transaction((current) => current ?? {
-      paymentId, kind: notice.kind, createdAt: Date.now(),
+    const eventRef = db().ref(`paymentNotificationEvents/${eventId}`);
+    const claim = await eventRef.transaction((current) => {
+      if (current?.status === "SENT" || (current?.leaseUntil && current.leaseUntil > Date.now())) return;
+      return { paymentId, kind: notice.kind, status: "SENDING", leaseUntil: Date.now() + 5 * 60 * 1000, createdAt: current?.createdAt ?? Date.now() };
     }, undefined, false);
     if (!claim.committed) return;
     const data = { type: "PAYMENT_UPDATE", paymentId, transactionType: String(after.transactionType ?? ""), transactionId: String(after.orderId || after.tripId || "") };
     const payerId = typeof after.payerId === "string" ? after.payerId : "";
-    if (payerId) await sendToUser(payerId, eventId, notice.title, notice.body, data);
-    await sendToAdmins(eventId, notice.title, notice.body, data);
+    try {
+      if (payerId) await sendToUser(payerId, eventId, notice.title, notice.body, data);
+      await sendToAdmins(eventId, notice.title, notice.body, data);
+      await eventRef.update({ status: "SENT", sentAt: Date.now(), leaseUntil: null });
+    } catch (error) {
+      await eventRef.update({ status: "RETRY", leaseUntil: null });
+      throw error;
+    }
   },
 );
 
