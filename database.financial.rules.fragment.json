@@ -6,7 +6,8 @@
         ".read": "auth != null && data.child('payerId').val() === auth.uid"
       },
       ".indexOn": [
-        "status"
+        "status",
+        "provider"
       ]
     },
     "paymentAllocations": {
@@ -184,6 +185,36 @@
     "adminCashAlerts": {
       ".read": false,
       ".write": false
+    },
+    "paymentNotifications": {
+      ".write": false,
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid"
+      }
+    },
+    "adminPaymentNotifications": {
+      ".read": "auth != null && auth.token.admin == true",
+      ".write": false
+    },
+    "adminFcmTokens": {
+      ".read": false,
+      ".write": false
+    },
+    "paymentNotificationEvents": {
+      ".read": false,
+      ".write": false
+    },
+    "bdoPaymentReminderState": {
+      ".read": false,
+      ".write": false
+    },
+    "users": {
+      "$uid": {
+        "fcmTokens": {
+          ".read": false,
+          ".write": false
+        }
+      }
     }
   }
 }
