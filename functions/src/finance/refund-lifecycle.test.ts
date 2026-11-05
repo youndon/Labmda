@@ -55,9 +55,9 @@ describe("refund lifecycle completion effects", () => {
     root.refundCases.refund_1.providerReferenceKey = "ref_hash";
     root.refundCases.refund_1.processingAt = 100;
     const next = buildAbortRefundProcessingRoot(root, "refund_1", "admin_1", "Provider confirmed no transfer was sent.", 200)!;
-    expect(next.payments.payment_order).toMatchObject({ status: "SUCCEEDED", refundReservedAmountMinor: 10_000 });
+    expect(next.payments.payment_order).toMatchObject({ status: "SUCCEEDED", refundReservedAmountMinor: 0 });
     expect(next.payments.payment_order).not.toHaveProperty("refundProcessingId");
-    expect(next.refundCases.refund_1).toMatchObject({ status: "APPROVED", abortedBy: "admin_1" });
+    expect(next.refundCases.refund_1).toMatchObject({ status: "ABORTED", abortedBy: "admin_1" });
     expect(next.refundCases.refund_1.providerReference).toBeUndefined();
     expect(next.refundProviderReferenceIndex.ref_hash).toBeUndefined();
   });
