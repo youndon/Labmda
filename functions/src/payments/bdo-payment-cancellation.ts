@@ -23,7 +23,7 @@ export const requestBdoCheckoutCancellation = onCall({ enforceAppCheck: true }, 
   const result = await db().ref().transaction((root: Record<string, any> | null) => {
     if (!root) return;
     const transaction = root[transactionPath]?.[transactionId] as Record<string, any> | undefined;
-    if (!transaction) return;
+    if (!transaction || transaction.status !== "PENDING_PAYMENT") return;
     const ownerId = transactionType === "ORDER" ? transaction.clientId : transaction.passengerId;
     if (ownerId !== uid) return;
     const paymentId = transaction.paymentId;
