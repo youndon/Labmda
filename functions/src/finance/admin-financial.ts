@@ -16,7 +16,7 @@ type PaymentRecord = {
 };
 type RefundCase = {
   id: string; paymentId: string; payerId: string; amountMinor: number; currency: "PHP";
-  reason: string; status: "REQUESTED" | "APPROVED" | "PROCESSING" | "REJECTED" | "COMPLETED";
+  reason: string; status: "REQUESTED" | "APPROVED" | "PROCESSING" | "ABORTING" | "ABORTED" | "REJECTED" | "COMPLETED";
   requestedBy: string; createdAt: number; updatedAt: number; reviewedBy?: string;
   reviewedAt?: number; reviewNote?: string; completedBy?: string; completedAt?: number;
   providerReference?: string; method?: string; ledgerOperationId?: string; processingAt?: number;
@@ -394,7 +394,7 @@ export const abortAdminRefundProcessing = onCall({ enforceAppCheck: true }, asyn
   if (!result.committed) throw new HttpsError("failed-precondition", "The refund lock changed. Refresh the refund case before retrying.");
   const aborted = result.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
   await recordAdminFinancialAudit({ uid, action: "REFUND_PROCESSING_ABORTED", targetType: "REFUND", targetId: refundId, before: claimed, after: aborted, note: reason });
-  return { refundId, status: "APPROVED", paymentId: aborted.paymentId, message: "The processing lock was released. The refund remains approved and can be retried after the provider transfer is actually completed." };
+  return { refundId, status: "ABORTED", paymentId: aborted.paymentId, message: "The processing lock and refund reservation were released. Create a new refund case if a refund is still required." };
 });
 
 export const getAdminRefundCases = onCall({ enforceAppCheck: true }, async (call) => {
