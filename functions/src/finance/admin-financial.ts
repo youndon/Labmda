@@ -195,7 +195,7 @@ export const createAdminRefundCase = onCall({ enforceAppCheck: true }, async (ca
     const reserved = payment.refundReservedAmountMinor ?? 0;
     if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved)
       || refunded + reserved + amountMinor > payment.amountMinor) return;
-    const savedRefund = { ...refund, payerId: payment.payerId };
+    const savedRefund = { ...refund, payerId: payment.payerId, orderId: payment.orderId ?? "", tripId: payment.tripId ?? "" };
     return {
       ...root,
       payments: { ...root.payments, [paymentId]: { ...payment, refundReservedAmountMinor: reserved + amountMinor } },
@@ -374,7 +374,9 @@ export const abortAdminRefundProcessing = onCall({ enforceAppCheck: true }, asyn
     if (!root) return null;
     const current = root.refundCases?.[refundId] as RefundCase | undefined;
     if (!current) return;
-    if (current.status === "ABORTING") return root;
+    if (current.status === "ABORTING") {
+      return { ...root, refundCases: { ...root.refundCases, [refundId]: { ...current, abortAttemptAt: Date.now() } } };
+    }
     if (current.status !== "PROCESSING" || Number(current.processingLeaseUntil ?? 0) > Date.now()) return;
     return { ...root, refundCases: { ...root.refundCases, [refundId]: { ...current, status: "ABORTING", abortRequestedBy: uid, abortRequestedAt: Date.now(), abortReason: reason } } };
   }, undefined, false);
