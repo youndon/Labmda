@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { getDatabase } from "firebase-admin/database";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { reconcileFinancialLedger, createFinancialTransfer, postFinancialOperation, getFinancialOperation, listFinancialAccounts, type BalanceBucket, type LedgerPosting } from "./ledger.js";
 import { buildRefundReversal } from "./refund-ledger.js";
 import { buildAbortRefundProcessingRoot, buildCompletedRefundRoot } from "./refund-lifecycle.js";
+import { providerReferenceIndexKey } from "../payments/provider-reference-key.js";
 
 const db = () => getDatabase();
 const idPattern = /^[A-Za-z0-9_-]{1,128}$/;
@@ -252,7 +253,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
   const providerReference = text(call.data?.providerReference, "Provider/bank refund reference", 160);
   const verificationNote = text(call.data?.verificationNote, "BDO refund verification note", 500);
   const verifiedAmountMinor = positiveMinor(call.data?.verifiedAmountMinor, "Verified BDO refund amount");
-  const referenceKey = createHash("sha256").update(providerReference.trim().toUpperCase()).digest("hex");
+  const referenceKey = providerReferenceIndexKey(providerReference);
   const now = Date.now();
   const claim = await db().ref().transaction((root: Record<string, any> | null) => {
     if (root === null) return null;
