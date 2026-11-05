@@ -51,7 +51,14 @@ fun OrderQuoteReviewPanel(
             val discount = (breakdown["discountMinor"] as? Number)?.toLong() ?: 0L
             if (discount > 0L) QuoteRow("Discount", "−₱%.2f".format(discount / 100.0))
             val providerFee = (breakdown["providerFeeMinor"] as? Number)?.toLong() ?: 0L
-            if (providerFee > 0L) QuoteRow("GCash processing fee", money("providerFeeMinor"))
+            val subtotal = (breakdown["subtotalMinor"] as? Number)?.toLong() ?: 0L
+            val delivery = (breakdown["deliveryFeeMinor"] as? Number)?.toLong() ?: 0L
+            val discountTotal = (breakdown["discountMinor"] as? Number)?.toLong() ?: 0L
+            val customerTotal = (breakdown["customerTotalMinor"] as? Number)?.toLong() ?: 0L
+            if (providerFee > 0L && customerTotal > subtotal + delivery - discountTotal) {
+                QuoteRow("GCash processing fee", money("providerFeeMinor"))
+            }
+            QuoteRow("Payment method", if (quote["paymentMethod"] == "GCASH") "GCash" else "Cash")
             HorizontalDivider()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Total to pay", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
