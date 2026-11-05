@@ -261,7 +261,6 @@ class RestaurantWorkplaceScreen : Screen {
     ) {
         var restaurantName by remember { mutableStateOf(initialName) }
         var imageUrl by remember { mutableStateOf(initialImage) }
-        var deliveryFee by remember { mutableStateOf(initialFee) }
         var estimatedTime by remember { mutableStateOf(initialTime) }
         var managerPhone by remember { mutableStateOf(initialPhone) }
         var address by remember { mutableStateOf(initialAddress) }
@@ -318,13 +317,10 @@ class RestaurantWorkplaceScreen : Screen {
                 )
             }
             item {
-                OutlinedTextField(
-                    value = deliveryFee, onValueChange = { deliveryFee = it },
-                    label = { Text("Delivery Fee (₱)") },
-                    supportingText = { Text("Enter the fee in Philippine pesos (PHP).") },
-                    shape = RoundedCornerShape(12.dp),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                Text(
+                    "Delivery fees are calculated automatically from the customer's route using admin pricing.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             item {
@@ -368,7 +364,7 @@ class RestaurantWorkplaceScreen : Screen {
                         onSubmit(
                             restaurantName,
                             imageUrl,
-                            deliveryFee.toDoubleOrNull() ?: 0.0,
+                            0.0,
                             estimatedTime.toIntOrNull() ?: 20,
                             managerPhone,
                             address,
