@@ -267,6 +267,7 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     if (current.status === "PROCESSING"
       && (current.providerReference !== providerReference || current.verificationNote !== verificationNote
         || current.verifiedAmountMinor !== verifiedAmountMinor)) return;
+    if (current.status === "PROCESSING" && Number(current.processingLeaseUntil ?? 0) > now) return;
     if (current.amountMinor !== verifiedAmountMinor) return;
     const payment = root.payments?.[current.paymentId] as PaymentRecord | undefined;
     if (!payment || payment.id !== current.paymentId || payment.method !== "GCASH"
@@ -274,10 +275,12 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     if (payment.refundProcessingId && payment.refundProcessingId !== refundId) return;
     const referenceOwner = root.refundProviderReferenceIndex?.[referenceKey];
     if (referenceOwner && referenceOwner !== refundId) return;
-    const nextCase = current.status === "PROCESSING"
-      ? current
-      : { ...current, status: "PROCESSING", completedBy: uid, providerReference,
-          verifiedBy: uid, verifiedAt: now, verificationNote, verifiedAmountMinor, processingAt: now, updatedAt: now };
+    const nextCase = {
+      ...current, status: "PROCESSING", completedBy: uid, providerReference,
+      providerReferenceKey: referenceKey, verifiedBy: uid, verifiedAt: current.verifiedAt ?? now,
+      verificationNote, verifiedAmountMinor, processingAt: current.processingAt ?? now,
+      processingLeaseUntil: now + 15 * 60 * 1000, updatedAt: now,
+    };
     return {
       ...root,
       payments: { ...root.payments, [current.paymentId]: { ...payment, refundProcessingId: refundId } },
@@ -297,6 +300,9 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     if (current?.status !== "PROCESSING" || current.providerReference !== providerReference
       || current.verificationNote !== verificationNote || current.verifiedAmountMinor !== verifiedAmountMinor) {
       throw new HttpsError("failed-precondition", "Refund is not approved, another refund for this payment is processing, or the transfer reference is already assigned.");
+    }
+    if (Number(current.processingLeaseUntil ?? 0) > now) {
+      throw new HttpsError("aborted", "This refund is already being processed. Retry after its processing lease expires if it remains stuck.");
     }
   }
   const claimedCase = claim.snapshot.child(`refundCases/${refundId}`).val() as RefundCase;
@@ -328,28 +334,10 @@ export const completeAdminRefundCase = onCall({ enforceAppCheck: true }, async (
     originalPostings: postings, currentBalances,
   });
   const posted = await postFinancialOperation(reversal);
-  const rootResult = await db().ref().transaction((root: Record<string, any> | null) => {
-    if (root === null) return null;
-    const currentCase = root.refundCases?.[refundId] as RefundCase | undefined;
-    const currentPayment = root.payments?.[refund.paymentId] as PaymentRecord | undefined;
-    if (!currentCase || currentCase.status !== "PROCESSING" || currentCase.providerReference !== providerReference
-      || !currentPayment || currentPayment.refundProcessingId !== refundId) return;
-    const refunded = currentPayment.refundedAmountMinor ?? 0;
-    const reserved = currentPayment.refundReservedAmountMinor ?? 0;
-    if (!Number.isSafeInteger(refunded) || !Number.isSafeInteger(reserved) || reserved < refund.amountMinor
-      || refunded + refund.amountMinor > currentPayment.amountMinor
-      || (currentPayment.status !== "SUCCEEDED" && currentPayment.status !== "PARTIALLY_REFUNDED")) return;
-    const nextRefunded = refunded + refund.amountMinor;
-    const nextPayment = { ...currentPayment, refundedAmountMinor: nextRefunded,
-      refundReservedAmountMinor: reserved - refund.amountMinor,
-      refundProcessingId: null,
-      status: nextRefunded === currentPayment.amountMinor ? "REFUNDED" : "PARTIALLY_REFUNDED",
-      updatedAt: Date.now() };
-    const nextCase = { ...currentCase, status: "COMPLETED", providerReference,
-      completedBy: uid, completedAt: Date.now(), updatedAt: Date.now(), ledgerOperationId: posted.operationId };
-    return { ...root, payments: { ...root.payments, [refund.paymentId]: nextPayment },
-      refundCases: { ...root.refundCases, [refundId]: nextCase } };
-  }, undefined, false);
+  const rootResult = await db().ref().transaction((root: Record<string, any> | null) =>
+    root === null ? null : buildCompletedRefundRoot(
+      root, refundId, uid, providerReference, posted.operationId, Date.now(),
+    ), undefined, false);
   if (!rootResult.committed) {
     throw new HttpsError("failed-precondition", "Payment refund balance changed or this refund is no longer processable. Review the case before retrying.");
   }
