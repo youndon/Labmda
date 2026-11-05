@@ -31,6 +31,7 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.LocationPickerDialog
 import com.zouitel.presentaion.screens.payment.rememberCustomerPaymentAvailability
+import com.zouitel.presentaion.screens.payment.OrderQuoteReviewPanel
 import kotlinx.coroutines.launch
 import android.content.Context
 import android.location.Geocoder
@@ -80,6 +81,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
             }
         }
         var showOrderSheet by remember { mutableStateOf(false) }
+        var orderQuote by remember { mutableStateOf<Map<String, Any?>?>(null) }
 
         var deliveryAddress by remember { mutableStateOf("") }
         var paymentMethod by remember { mutableStateOf("") }
@@ -104,8 +106,8 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
 
         val totalItemsCount = cartItems.values.sumOf { it.quantity }
         val subtotal = cartItems.values.sumOf { it.totalPrice }
-        val courierFee = 3.00
-        val grandTotal = if (totalItemsCount > 0) subtotal + courierFee else 0.0
+        val grandTotal = subtotal
+        LaunchedEffect(cartItems.toMap(), dropoff, deliveryAddress, paymentMethod) { orderQuote = null }
 
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -413,45 +415,64 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
                             Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.primary)
                         }
 
-                        Button(
-                            enabled = dropoff != null && deliveryAddress.isNotBlank() && cartItems.isNotEmpty() && !isSubmitting &&
-                                !paymentAvailability.isLoading && paymentAvailability.serviceEnabled && paymentMethod.isNotBlank(),
-                            onClick = {
-                                val drop = dropoff ?: return@Button
-                                isSubmitting = true
-                                scope.launch {
-                                    screenModel.placeShopOrder(
+                        if (orderQuote != null) {
+                            OrderQuoteReviewPanel(
+                                quote = orderQuote!!,
+                                isSubmitting = isSubmitting,
+                                onEdit = { orderQuote = null },
+                                onConfirm = {
+                                    val quoteId = orderQuote?.get("quoteId") as? String ?: return@OrderQuoteReviewPanel
+                                    isSubmitting = true
+                                    screenModel.confirmQuotedShopOrder(
+                                        quoteId,
+                                        onSuccess = { orderId ->
+                                            isSubmitting = false
+                                            showOrderSheet = false
+                                            orderQuote = null
+                                            cartItems.clear()
+                                            dropoff = null
+                                            deliveryAddress = ""
+                                            navigator?.push(LiveOrderTrackingScreen(orderId))
+                                        },
+                                        onError = { message ->
+                                            isSubmitting = false
+                                            scope.launch { snackbarHostState.showSnackbar(message) }
+                                        }
+                                    )
+                                }
+                            )
+                        } else {
+                            Button(
+                                enabled = dropoff != null && deliveryAddress.isNotBlank() && cartItems.isNotEmpty() && !isSubmitting &&
+                                    !paymentAvailability.isLoading && paymentAvailability.serviceEnabled && paymentMethod.isNotBlank(),
+                                onClick = {
+                                    val drop = dropoff ?: return@Button
+                                    isSubmitting = true
+                                    screenModel.requestShopOrderQuote(
                                         cartItems = cartItems.values.toList(),
-                                        subtotal = subtotal,
-                                        courierFee = courierFee,
-                                        totalPrice = grandTotal,
                                         pickupLat = shopPoint?.latitude ?: 0.0,
                                         pickupLng = shopPoint?.longitude ?: 0.0,
                                         dropoffAddress = deliveryAddress,
                                         dropoffLat = drop.latitude,
                                         dropoffLng = drop.longitude,
                                         paymentMethod = paymentMethod,
-                                        onSuccess = { orderId ->
+                                        onSuccess = { quote -> orderQuote = quote; isSubmitting = false },
+                                        onError = { message ->
                                             isSubmitting = false
-                                            showOrderSheet = false
-                                            cartItems.clear()
-                                            dropoff = null
-                                            deliveryAddress = ""
-                                            navigator?.push(LiveOrderTrackingScreen(orderId))
-                                        },
-                                        onError = { message -> scope.launch { snackbarHostState.showSnackbar(message) }; isSubmitting = false }
+                                            scope.launch { snackbarHostState.showSnackbar(message) }
+                                        }
                                     )
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth().height(52.dp)
+                            ) {
+                                if (isSubmitting) {
+                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
+                                } else {
+                                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Get delivery quote", fontWeight = FontWeight.Bold)
                                 }
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.fillMaxWidth().height(52.dp)
-                        ) {
-                            if (isSubmitting) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
-                            } else {
-                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Send Demand Card", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
