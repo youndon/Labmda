@@ -68,25 +68,20 @@ class RestaurantScreenModel(
         _error.value = null
     }
 
-    /**
-     * Pickup is always the restaurant's saved location; drop-off is the point the client
-     * picked on the map. Totals are computed here so the stored order is the source of truth.
-     */
-    fun placeOrder(
+    fun requestOrderQuote(
         lines: List<Meal>,
         paymentMethod: String,
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
-        onSuccess: (String) -> Unit
+        onSuccess: (Map<String, Any?>) -> Unit,
+        onError: (String) -> Unit
     ) {
-        if (_isSubmitting.value) return
-        if (auth.currentUser?.uid == null) {
-            _error.value = "Please sign in to place an order."
+        if (auth.currentUser?.uid == null || lines.isEmpty()) {
+            onError("Please sign in and add items before requesting a quote.")
             return
         }
-        if (lines.isEmpty()) return
-
+        if (_isSubmitting.value) return
         _isSubmitting.value = true
         screenModelScope.launch {
             try {
@@ -105,21 +100,33 @@ class RestaurantScreenModel(
                         "paymentMethod" to method
                     )
                 )
-                val quoteId = quote["quoteId"] as? String
-                    ?: throw IllegalStateException("The server did not return an order quote.")
-                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
-                    "createOrderFromQuote",
-                    mapOf("quoteId" to quoteId, "kind" to "FOOD")
-                )
-                val orderId = created["orderId"] as? String
-                    ?: throw IllegalStateException("The server did not return the new order ID.")
-                clearCart()
-                onSuccess(orderId)
+                if (quote["quoteId"] !is String) error("The server did not return an order quote.")
+                onSuccess(quote)
             } catch (e: Exception) {
-                _error.value = e.message ?: "Could not place the order. Please try again."
+                onError(e.message ?: "Could not calculate the order total.")
             } finally {
                 _isSubmitting.value = false
             }
         }
     }
+
+    fun confirmQuotedOrder(quoteId: String, onSuccess: (String) -> Unit, onError: (String) -> Unit) {
+        if (_isSubmitting.value) return
+        _isSubmitting.value = true
+        screenModelScope.launch {
+            try {
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createOrderFromQuote", mapOf("quoteId" to quoteId, "kind" to "FOOD")
+                )
+                val orderId = created["orderId"] as? String ?: error("The server did not return the new order ID.")
+                clearCart()
+                onSuccess(orderId)
+            } catch (e: Exception) {
+                onError(e.message ?: "Could not confirm the order. Request a fresh quote and try again.")
+            } finally {
+                _isSubmitting.value = false
+            }
+        }
+    }
+
 }
