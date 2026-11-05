@@ -67,7 +67,7 @@ class FoodRepository {
             "estimatedTimeMinutes" to estimatedTimeMinutes,
             "isOpen" to true,
             "managers" to managers,
-            "paymentMethods" to listOf("Cash on Delivery", "Card on Delivery"),
+            "paymentMethods" to listOf("GCASH", "CASH"),
             "address" to address,
             "latitude" to latitude,
             "longitude" to longitude
