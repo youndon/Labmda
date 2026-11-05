@@ -77,21 +77,21 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
         }
     }
 
-    fun placeShopOrder(
+    fun requestShopOrderQuote(
         cartItems: List<ShopCartItem>,
-        subtotal: Double,
-        courierFee: Double,
-        totalPrice: Double,
         pickupLat: Double,
         pickupLng: Double,
         dropoffAddress: String,
         dropoffLat: Double,
         dropoffLng: Double,
         paymentMethod: String,
-        onSuccess: (String) -> Unit,
-        onError: (String) -> Unit = {}
+        onSuccess: (Map<String, Any?>) -> Unit,
+        onError: (String) -> Unit
     ) {
-        if (auth.currentUser?.uid == null || cartItems.isEmpty()) return
+        if (auth.currentUser?.uid == null || cartItems.isEmpty()) {
+            onError("Please sign in and add items before requesting a quote.")
+            return
+        }
         screenModelScope.launch {
             runCatching {
                 val method = if (paymentMethod.contains("GCASH", ignoreCase = true)) "GCASH" else "CASH"
@@ -99,9 +99,7 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
                     "quoteShopOrder",
                     mapOf(
                         "sourceId" to shop.id,
-                        "items" to cartItems.map { item ->
-                            mapOf("itemId" to item.productId, "quantity" to item.quantity)
-                        },
+                        "items" to cartItems.map { item -> mapOf("itemId" to item.productId, "quantity" to item.quantity) },
                         "pickup" to mapOf("latitude" to pickupLat, "longitude" to pickupLng),
                         "dropoff" to mapOf("latitude" to dropoffLat, "longitude" to dropoffLng),
                         "pickupAddress" to shop.address,
@@ -109,16 +107,21 @@ class StoreDetailsScreenModel(val shop: Shop) : ScreenModel {
                         "paymentMethod" to method
                     )
                 )
-                val quoteId = quote["quoteId"] as? String
-                    ?: error("The server did not return a shop order quote.")
-                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
-                    "createOrderFromQuote",
-                    mapOf("quoteId" to quoteId, "kind" to "SHOP")
-                )
-                val orderId = created["orderId"] as? String
-                    ?: error("The server did not return the new shop order ID.")
-                onSuccess(orderId)
-            }.onFailure { error -> onError(error.message ?: "Could not place the shop order.") }
+                if (quote["quoteId"] !is String) error("The server did not return a shop order quote.")
+                onSuccess(quote)
+            }.onFailure { onError(it.message ?: "Could not calculate the shop order total.") }
         }
     }
+
+    fun confirmQuotedShopOrder(quoteId: String, onSuccess: (String) -> Unit, onError: (String) -> Unit) {
+        screenModelScope.launch {
+            runCatching {
+                val created = com.zouitel.presentaion.screens.trustedTransactionCallData(
+                    "createOrderFromQuote", mapOf("quoteId" to quoteId, "kind" to "SHOP")
+                )
+                created["orderId"] as? String ?: error("The server did not return the new shop order ID.")
+            }.onSuccess(onSuccess).onFailure { onError(it.message ?: "Could not confirm the shop order. Request a fresh quote.") }
+        }
+    }
+
 }

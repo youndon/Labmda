@@ -34,6 +34,8 @@ import com.google.android.gms.maps.model.LatLng
 import com.zouitel.presentaion.common.LiveOrderTrackingScreen
 import com.zouitel.presentaion.common.LocationPickerDialog
 import com.zouitel.presentaion.screens.payment.rememberCustomerPaymentAvailability
+import com.zouitel.presentaion.screens.payment.OrderQuoteReviewPanel
+import kotlinx.coroutines.launch
 
 data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
@@ -58,6 +60,8 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         }
 
         var showOrderSheet by remember { mutableStateOf(false) }
+        var orderQuote by remember { mutableStateOf<Map<String, Any?>?>(null) }
+        val scope = rememberCoroutineScope()
         var showMapPicker by remember { mutableStateOf(false) }
         var dropoff by remember { mutableStateOf<LatLng?>(null) }
         var deliveryAddress by remember { mutableStateOf("") }
@@ -79,7 +83,8 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
         val cartLines = availableMeals.filter { (quantities[it.id] ?: 0) > 0 }
         val itemCount = cartLines.sumOf { quantities[it.id] ?: 0 }
         val subtotal = cartLines.sumOf { it.basePrice * (quantities[it.id] ?: 0) }
-        val grandTotal = if (itemCount > 0) subtotal + restaurant.deliveryFee else 0.0
+        val grandTotal = subtotal
+        LaunchedEffect(quantities, dropoff, deliveryAddress, paymentMethod) { orderQuote = null }
 
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
         val groupedMeals = remember(availableMeals) { availableMeals.groupBy { it.category }.toList() }
@@ -106,7 +111,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     }
                                 ) {
                                     Text(
-                                        "Fee: ₱${"%.2f".format(restaurant.deliveryFee)}",
+                                        "Route-based delivery",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -171,7 +176,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(
-                                    "₱${"%.2f".format(grandTotal)}",
+                                    if (orderQuote == null) "Items subtotal" else "₱%.2f".format((((orderQuote?.get("breakdown") as? Map<*, *>)?.get("customerTotalMinor") as? Number)?.toDouble() ?: 0.0) / 100.0),
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -356,56 +361,55 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
 
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Subtotal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₱${"%.2f".format(subtotal)}", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Delivery Fee", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₱${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("Total Amount", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                            Text(
-                                "₱${"%.2f".format(grandTotal)}",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
+                    Text(
+                        "Items subtotal: ₱${"%.2f".format(subtotal)}. Delivery fee and final total will appear in the server quote.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                    Button(
-                        enabled = restaurant.isOpen && restaurantPoint != null && dropoff != null &&
-                                deliveryAddress.isNotBlank() && cartLines.isNotEmpty() && !isSubmitting &&
-                                !paymentAvailability.isLoading && paymentAvailability.serviceEnabled &&
-                                paymentMethod.isNotBlank(),
-                        onClick = {
-                            val drop = dropoff ?: return@Button
-                            screenModel.placeOrder(
-                                lines = cartLines,
-                                paymentMethod = paymentMethod,
-                                dropoffAddress = deliveryAddress,
-                                dropoffLat = drop.latitude,
-                                dropoffLng = drop.longitude,
-                                onSuccess = { orderId ->
-                                    showOrderSheet = false
-                                    dropoff = null
-                                    deliveryAddress = ""
-                                    navigator?.push(LiveOrderTrackingScreen(orderId))
-                                }
-                            )
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth().height(52.dp)
-                    ) {
-                        if (isSubmitting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        } else {
-                            Text("Place Order Now", fontWeight = FontWeight.Bold)
+                    if (orderQuote != null) {
+                        OrderQuoteReviewPanel(
+                            quote = orderQuote!!,
+                            isSubmitting = isSubmitting,
+                            onEdit = { orderQuote = null },
+                            onConfirm = {
+                                val quoteId = orderQuote?.get("quoteId") as? String ?: return@OrderQuoteReviewPanel
+                                screenModel.confirmQuotedOrder(
+                                    quoteId,
+                                    onSuccess = { orderId ->
+                                        showOrderSheet = false
+                                        orderQuote = null
+                                        dropoff = null
+                                        deliveryAddress = ""
+                                        navigator?.push(LiveOrderTrackingScreen(orderId))
+                                    },
+                                    onError = { message -> scope.launch { snackbarHostState.showSnackbar(message) } }
+                                )
+                            }
+                        )
+                    } else {
+                        Button(
+                            enabled = restaurant.isOpen && restaurantPoint != null && dropoff != null &&
+                                    deliveryAddress.isNotBlank() && cartLines.isNotEmpty() && !isSubmitting &&
+                                    !paymentAvailability.isLoading && paymentAvailability.serviceEnabled &&
+                                    paymentMethod.isNotBlank(),
+                            onClick = {
+                                val drop = dropoff ?: return@Button
+                                screenModel.requestOrderQuote(
+                                    lines = cartLines,
+                                    paymentMethod = paymentMethod,
+                                    dropoffAddress = deliveryAddress,
+                                    dropoffLat = drop.latitude,
+                                    dropoffLng = drop.longitude,
+                                    onSuccess = { quote -> orderQuote = quote },
+                                    onError = { message -> scope.launch { snackbarHostState.showSnackbar(message) } }
+                                )
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier.fillMaxWidth().height(52.dp)
+                        ) {
+                            if (isSubmitting) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary)
+                            else Text("Get delivery quote", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -501,7 +505,7 @@ data class RestaurantScreen(val restaurant: Restaurant) : Screen {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.End) {
                             Text("Delivery fee", style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("₱${"%.2f".format(restaurant.deliveryFee)}", style = MaterialTheme.typography.titleSmall,
+                            Text("Calculated at checkout", style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold)
                         }
                     }

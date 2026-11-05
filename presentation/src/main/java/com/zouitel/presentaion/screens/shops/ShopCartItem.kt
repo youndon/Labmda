@@ -22,7 +22,7 @@ data class ShopOrder(
     val userId: String = "",
     val items: List<ShopCartItem> = emptyList(),
     val subtotal: Double = 0.0,
-    val courierFee: Double = 3.00,
+    val courierFee: Double = 0.0,
     val totalPrice: Double = 0.0,
     val status: OrderStatus = OrderStatus.PLACED,
     val deliveryAddress: String = "",
