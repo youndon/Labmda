@@ -45,7 +45,7 @@ async function sendToUser(uid: string, eventId: string, title: string, body: str
   if (tokens.length) {
     const result = await getMessaging().sendEachForMulticast({
       tokens, notification: { title, body }, data,
-      android: { priority: "high", notification: { channelId: "payment_updates" } },
+      android: { priority: "high", notification: { channelId: "order_status_channel" } },
     });
     const invalid = result.responses.flatMap((response, index) =>
       !response.success && ["messaging/registration-token-not-registered", "messaging/invalid-registration-token"].includes(response.error?.code ?? "")
@@ -69,7 +69,7 @@ async function sendToAdmins(eventId: string, title: string, body: string, data: 
   if (tokens.length) {
     await getMessaging().sendEachForMulticast({
       tokens, notification: { title, body }, data,
-      android: { priority: "high", notification: { channelId: "payment_updates" } },
+      android: { priority: "high", notification: { channelId: "order_status_channel" } },
     });
   }
 }
