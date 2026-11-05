@@ -65,7 +65,7 @@ data class StoreDetailsScreen(val shop: Shop) : Screen {
         val isLoading by screenModel.isLoading.collectAsState()
         val paymentAvailability = rememberCustomerPaymentAvailability("SHOP")
         val paymentOptions = paymentAvailability.methods.map { method ->
-            if (method == "GCASH") "GCash" else "Cash on Delivery"
+            if (method == "GCASH") "GCash" else "Cash"
         }
 
         val cartItems = remember { mutableStateMapOf<String, ShopCartItem>() }
