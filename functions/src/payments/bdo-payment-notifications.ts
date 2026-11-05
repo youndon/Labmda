@@ -114,17 +114,24 @@ export const remindOverdueBdoCheckoutPayments = onSchedule("every 1 hours", asyn
     const linkedAt = Number(payment.checkoutLinkCreatedAt ?? payment.updatedAt ?? payment.createdAt);
     if (!Number.isSafeInteger(linkedAt) || now - linkedAt < reminderAgeMs) continue;
     const stateRef = db().ref(`bdoPaymentReminderState/${paymentId}`);
-    const claim = await stateRef.transaction((current: { lastSentAt?: number } | null) => {
+    const claim = await stateRef.transaction((current: { lastSentAt?: number; leaseUntil?: number; reminderCount?: number } | null) => {
       if (current?.lastSentAt && now - current.lastSentAt < reminderCooldownMs) return;
-      return { lastSentAt: now, reminderCount: (current?.reminderCount ?? 0) + 1 };
+      if (current?.leaseUntil && current.leaseUntil > now) return;
+      return { ...current, leaseUntil: now + 5 * 60 * 1000 };
     }, undefined, false);
     if (!claim.committed) continue;
     const eventId = `bdo_${paymentId}_overdue_${Math.floor(now / reminderCooldownMs)}`;
     const data = { type: "PAYMENT_REMINDER", paymentId, transactionType: String(payment.transactionType ?? ""), transactionId: String(payment.orderId || payment.tripId || "") };
     const title = "GCash payment link needs review";
     const body = "This BDO checkout link has been pending for over 24 hours. Check its status in the BDO portal; Labmda will not expire it unless BDO confirms it is no longer payable.";
-    if (typeof payment.payerId === "string") await sendToUser(payment.payerId, eventId, "GCash payment is still pending", "Your payment has not yet been verified. Please do not pay again; Labmda will update you when its status is confirmed.", data);
-    await sendToAdmins(eventId, title, body, data);
+    try {
+      if (typeof payment.payerId === "string") await sendToUser(payment.payerId, eventId, "GCash payment is still pending", "Your payment has not yet been verified. Please do not pay again; Labmda will update you when its status is confirmed.", data);
+      await sendToAdmins(eventId, title, body, data);
+      await stateRef.update({ lastSentAt: Date.now(), reminderCount: (claim.snapshot.val()?.reminderCount ?? 0) + 1, leaseUntil: null });
+    } catch (error) {
+      await stateRef.update({ leaseUntil: null });
+      throw error;
+    }
   }
 });
 
