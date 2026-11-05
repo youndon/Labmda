@@ -5,6 +5,9 @@ import { defineSecret } from "firebase-functions/params";
 import { assertPaymentMethodEnabled, assertPaymentServiceEnabled } from "./payments/payment-config.js";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { requireMerchantPickup } from "./operations/merchant-location.js";
+import { isSimulationRuntime } from "./payments/provider.js";
+import { createSimulatedGcashSession as createSimulatedGcashSessionHandler, simulateGcashPaymentResult as simulateGcashPaymentResultHandler } from "./payments/payment-sessions.js";
+import { createSimulatedGcashRefund as createSimulatedGcashRefundHandler } from "./payments/refunds.js";
 import {
   calculateDeliveryOnlyBreakdown, calculateOrderBreakdown, calculateRideFare, calculateProviderFee,
   decimalPesosToMinor, type DiscountRule, type PaymentMethod, type PricingConfig,
@@ -256,8 +259,10 @@ export { getPaymentConfiguration, updateAdminPaymentConfiguration } from "./paym
 export { confirmBdoGcashPayment, attachBdoCheckoutLink, expireBdoGcashPayment } from "./payments/bdo-payment-operations.js";
 
 // Development-only simulated GCash checkout, webhook and refund lifecycle.
-export { createSimulatedGcashSession, simulateGcashPaymentResult } from "./payments/payment-sessions.js";
-export { createSimulatedGcashRefund } from "./payments/refunds.js";
+// The simulation callables are not exported by deployed production Functions.
+export const createSimulatedGcashSession = isSimulationRuntime() ? createSimulatedGcashSessionHandler : null;
+export const simulateGcashPaymentResult = isSimulationRuntime() ? simulateGcashPaymentResultHandler : null;
+export const createSimulatedGcashRefund = isSimulationRuntime() ? createSimulatedGcashRefundHandler : null;
 export { expireSimulatedGcashSessions } from "./payments/expiration.js"; // null outside the emulator
 
 // Phase 05 — cancel and refund paid ride requests that expire without driver acceptance.
