@@ -218,7 +218,9 @@ private fun RideHistoryCard(trip: Trip) {
             CustomerPaymentStatusCard(
                 paymentMethod = trip.paymentMethod,
                 paymentStatus = trip.paymentStatus,
-                checkoutUrl = trip.checkoutUrl
+                checkoutUrl = trip.checkoutUrl,
+                transactionId = trip.id,
+                transactionType = "RIDE"
             )
         }
     }
