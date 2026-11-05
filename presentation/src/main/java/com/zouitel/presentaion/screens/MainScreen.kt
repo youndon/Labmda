@@ -62,6 +62,12 @@ import cafe.adriel.voyager.navigator.CurrentScreen
 import cafe.adriel.voyager.navigator.Navigator
 import coil3.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.messaging.FirebaseMessaging
+import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.functions.functions
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.zouitel.presentaion.admin.PanelScreen
 import com.zouitel.presentaion.common.AppTheme
 import com.zouitel.presentaion.common.UserMode
@@ -96,7 +102,17 @@ class MainScreen() : Screen {
             val listener = FirebaseAuth.AuthStateListener { state ->
                 isAdmin = false
                 state.currentUser?.getIdToken(true)
-                    ?.addOnSuccessListener { token -> isAdmin = token.claims["admin"] == true }
+                    ?.addOnSuccessListener { tokenResult ->
+                        isAdmin = tokenResult.claims["admin"] == true
+                        FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                            CoroutineScope(Dispatchers.IO).launch {
+                                runCatching {
+                                    Firebase.functions.httpsCallable("registerFcmToken")
+                                        .invoke(mapOf("token" to token))
+                                }
+                            }
+                        }
+                    }
                     ?.addOnFailureListener { isAdmin = false }
             }
             auth.addAuthStateListener(listener)
