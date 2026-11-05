@@ -2,10 +2,11 @@ import type { Database } from "firebase-admin/database";
 import type { CashCollection, Payment, PaymentAllocation } from "../models/payment.js";
 import { createPaymentReceiptOperation } from "./payment-ledger.js";
 import { postFinancialOperation } from "./ledger.js";
+import { PermanentPaymentLedgerError } from "./payment-ledger-errors.js";
 
 function assertFirebaseId(value: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
-    throw new Error("Payment ID must be a valid Firebase-safe identifier.");
+    throw new PermanentPaymentLedgerError("Payment ID must be a valid Firebase-safe identifier.");
   }
 }
 
@@ -30,21 +31,21 @@ export async function postPaymentReceiptFromDatabase(
   assertFirebaseId(paymentId);
 
   const paymentSnapshot = await database.ref(`payments/${paymentId}`).get();
-  if (!paymentSnapshot.exists()) throw new Error("Payment record was not found.");
+  if (!paymentSnapshot.exists()) throw new PermanentPaymentLedgerError("Payment record was not found.");
   const payment = paymentSnapshot.val() as Payment;
   if (!payment || payment.id !== paymentId) {
-    throw new Error("Payment record identity does not match its database path.");
+    throw new PermanentPaymentLedgerError("Payment record identity does not match its database path.");
   }
 
   const allocationsSnapshot = await database.ref(`paymentAllocations/${paymentId}`).get();
-  if (!allocationsSnapshot.exists()) throw new Error("Payment allocations were not found.");
+  if (!allocationsSnapshot.exists()) throw new PermanentPaymentLedgerError("Payment allocations were not found.");
   const rawAllocations = allocationsSnapshot.val() as Record<string, PaymentAllocation>;
   if (!rawAllocations || typeof rawAllocations !== "object" || Array.isArray(rawAllocations)) {
-    throw new Error("Payment allocations must be stored as an ID-keyed object.");
+    throw new PermanentPaymentLedgerError("Payment allocations must be stored as an ID-keyed object.");
   }
   const allocations = Object.entries(rawAllocations).map(([allocationId, allocation]) => {
     if (!allocation || allocation.id !== allocationId) {
-      throw new Error("Payment allocation identity does not match its database key.");
+      throw new PermanentPaymentLedgerError("Payment allocation identity does not match its database key.");
     }
     return allocation;
   });
@@ -52,13 +53,18 @@ export async function postPaymentReceiptFromDatabase(
   let cashCollection: CashCollection | undefined;
   if (payment.method === "CASH") {
     const cashSnapshot = await database.ref(`cashCollections/${paymentId}`).get();
-    if (!cashSnapshot.exists()) throw new Error("Confirmed cash collection record was not found.");
+    if (!cashSnapshot.exists()) throw new PermanentPaymentLedgerError("Confirmed cash collection record was not found.");
     cashCollection = cashSnapshot.val() as CashCollection;
     if (!cashCollection || cashCollection.paymentId !== paymentId) {
-      throw new Error("Cash collection identity does not match its payment.");
+      throw new PermanentPaymentLedgerError("Cash collection identity does not match its payment.");
     }
   }
 
-  const operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
+  let operation;
+  try {
+    operation = createPaymentReceiptOperation(payment, allocations, { cashCollection });
+  } catch (error) {
+    throw new PermanentPaymentLedgerError(error instanceof Error ? error.message : "Payment receipt validation failed.", { cause: error });
+  }
   return postFinancialOperation(operation);
 }
