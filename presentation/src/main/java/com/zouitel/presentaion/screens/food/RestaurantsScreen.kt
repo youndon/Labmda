@@ -304,7 +304,7 @@ private fun RestaurantCardItem(
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text("Delivery fee", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
-                            "₱${"%.2f".format(restaurant.deliveryFee)}",
+                            "Calculated at checkout",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold
                         )
