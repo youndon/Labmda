@@ -218,9 +218,9 @@ Do not deploy the new Functions before importing existing ledger data: the new w
 - The payment status trigger projects the canonical result to the order/trip and posts the receipt only after persisted allocations exist. A redirect, client callback or screenshot is never proof of payment.
 
 ### Cancellation and expiry
-- A customer can cancel an unpaid transaction before a BDO checkout link is attached. Once an active BDO link exists, customer cancellation is blocked because Labmda cannot revoke the external BDO request without a documented provider API.
+- A customer can cancel an unpaid transaction before a BDO checkout link is attached. After a link is attached, the customer can submit a cancellation request from order/ride tracking. The request is recorded and administrators are notified, but the transaction remains pending until an administrator verifies that the external BDO request has been closed. Labmda cannot revoke the external BDO request without a documented provider API.
 - `expireBdoGcashPayment` is an administrator-only, App Check-protected callable. It may be used only after an administrator verifies in the BDO merchant portal that the request is expired, voided or no longer payable. It records a unique closure reference and reason, checks the payment/order-or-trip association and exact transaction amount, marks the payment `EXPIRED`, closes the pending transaction and removes expired rides from active dispatch.
-- This is a manual evidence workflow, not an automatic time-based expiry or BDO webhook. Never expire a request merely because a local timer elapsed.
+- The hourly overdue-link job sends customer and administrator reminders after 24 hours and repeats no more than every 12 hours. It does not expire the payment. This is a manual evidence workflow, not an automatic time-based expiry or BDO webhook. Never expire a request merely because a local timer elapsed.
 
 ### Refunds
 - Refund cases reserve the refundable amount so concurrent cases cannot over-refund one payment. Admin review can reject (releasing the reservation) or approve.
