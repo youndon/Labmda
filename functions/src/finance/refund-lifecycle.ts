@@ -110,9 +110,11 @@ export function buildAbortRefundProcessingRoot(
   const paymentId = currentCase.paymentId;
   const payment = root.payments?.[paymentId];
   if (!payment || payment.refundProcessingId !== refundId) return null;
-  const nextPayment = { ...payment };
+  const reserved = payment.refundReservedAmountMinor ?? 0;
+  if (!Number.isSafeInteger(reserved) || reserved < currentCase.amountMinor) return null;
+  const nextPayment = { ...payment, refundReservedAmountMinor: reserved - currentCase.amountMinor, updatedAt: now };
   delete nextPayment.refundProcessingId;
-  const nextCase = { ...currentCase, status: "APPROVED", abortedAt: now, abortedBy: actorUid,
+  const nextCase = { ...currentCase, status: "ABORTED", abortedAt: now, abortedBy: actorUid,
     abortReason: reason, updatedAt: now, processingLeaseUntil: null };
   for (const key of ["providerReference", "verificationNote", "verifiedAmountMinor", "verifiedBy",
     "verifiedAt", "processingAt", "processingLeaseUntil", "providerReferenceKey", "completedBy"]) delete nextCase[key];
