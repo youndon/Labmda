@@ -56,8 +56,18 @@ describe("order and ride Realtime Database rules fragment", () => {
   });
 
   it("indexes the cash status and collector queries used by scheduled monitoring and screens", () => {
-    expect(financialRules.payments[".indexOn"]).toContain("status");
+    expect(financialRules.payments[".indexOn"]).toEqual(expect.arrayContaining(["status", "provider"]));
     expect(financialRules.cashCollections[".indexOn"]).toEqual(expect.arrayContaining(["collectorId", "status"]));
+  });
+
+  it("keeps FCM token registries and notification events server-write-only", () => {
+    expect(financialRules.users["$uid"].fcmTokens[".read"]).toBe(false);
+    expect(financialRules.users["$uid"].fcmTokens[".write"]).toBe(false);
+    expect(financialRules.adminFcmTokens[".read"]).toBe(false);
+    expect(financialRules.adminFcmTokens[".write"]).toBe(false);
+    expect(financialRules.paymentNotificationEvents[".write"]).toBe(false);
+    expect(financialRules.paymentNotifications[".write"]).toBe(false);
+    expect(financialRules.adminPaymentNotifications[".write"]).toBe(false);
   });
 
   it("prevents users from self-approving driver or delivery services", () => {
