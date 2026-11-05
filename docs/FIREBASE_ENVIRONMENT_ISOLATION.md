@@ -30,7 +30,7 @@ Do not copy the development file into the production source set. Do not commit p
 
 Keep development and production Firebase projects, Realtime Database instances, Functions deployments, secrets, App Check registrations and operational data separate. Configure GitHub Environments named `development` and `production` with their own project IDs and Workload Identity Federation settings. Protect production deployment with required reviewers.
 
-The current payment integration is BDO Checkout for GCash collection using the manual checkout-link flow, with manual provider payouts. There is no Xendit integration. Do not add Xendit credentials or webhook configuration to either environment.
+The current payment integration is BDO Checkout for GCash collection using the manual checkout-link flow, with manual provider payouts. Store only the active provider's server credentials and webhook secrets in that environment's Secret Manager; never place them in Android configuration.
 
 ## Realtime Database deployment safety
 
