@@ -205,7 +205,7 @@ class ShopActivitiesScreen : Screen {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                 Text(
-                    "Payment · ${order.paymentMethod.ifBlank { "Cash on Delivery" }}",
+                    "Payment · ${order.paymentMethod.ifBlank { "Cash" }}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
