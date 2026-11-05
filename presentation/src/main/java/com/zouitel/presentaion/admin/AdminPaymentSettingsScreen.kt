@@ -323,7 +323,6 @@ private fun SettingsToggle(
  
 private fun paymentProviderLabel(provider: String): String = when (provider.uppercase()) {
     "BDO_CHECKOUT" -> "BDO Checkout"
-    "XENDIT" -> "Xendit"
     "MANUAL" -> "Manual collection"
     else -> provider.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
 }
