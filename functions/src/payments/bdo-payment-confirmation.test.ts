@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { confirmBdoGcashPaymentRecord } from "./bdo-payment-confirmation.js";
+import { providerReferenceIndexKey } from "./provider-reference-key.js";
 
 const payment = {
   id: "pay_1", transactionType: "ORDER", orderId: "order_1", tripId: "",
@@ -51,7 +52,9 @@ describe("confirmBdoGcashPaymentRecord", () => {
     expect(result).toMatchObject({ paymentId: "pay_1", status: "SUCCEEDED", duplicate: false });
     expect(fake.value().payments.pay_1.providerReference).toBe(input.transferReference);
     expect(fake.value().bdoPaymentConfirmations.pay_1.status).toBe("VERIFIED");
-    expect(fake.value().bdoPaymentReferenceIndex[input.transferReference]).toBe("pay_1");
+    const referenceKey = providerReferenceIndexKey(input.transferReference);
+    expect(fake.value().bdoPaymentReferenceIndex[referenceKey]).toBe("pay_1");
+    expect(fake.value().bdoPaymentReferenceIndex[input.transferReference]).toBeUndefined();
     expect(fake.value().orders.order_1).toMatchObject({ status: "PLACED", paymentStatus: "PAID" });
   });
 
@@ -80,6 +83,17 @@ describe("confirmBdoGcashPaymentRecord", () => {
 
     await expect(confirmBdoGcashPaymentRecord(fake.database, input))
       .rejects.toThrow(/could not be verified/i);
+    expect(fake.value().payments.pay_1.status).toBe("PENDING");
+  });
+
+  it("detects a conflicting legacy raw key regardless of reference casing", async () => {
+    const fake = fakeDatabase(seed({
+      root: { bdoPaymentReferenceIndex: { "BDO-REF-1234": "another_payment" } },
+    }));
+
+    await expect(confirmBdoGcashPaymentRecord(fake.database, {
+      ...input, transferReference: "bdo-ref-1234",
+    })).rejects.toThrow(/could not be verified/i);
     expect(fake.value().payments.pay_1.status).toBe("PENDING");
   });
 
