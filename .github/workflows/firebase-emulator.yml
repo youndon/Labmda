@@ -6,12 +6,14 @@ on:
     paths:
       - "functions/**"
       - "firebase.json"
+      - "firebase.emulator.json"
       - ".github/workflows/firebase-emulator.yml"
   push:
     branches: ["main", "master"]
     paths:
       - "functions/**"
       - "firebase.json"
+      - "firebase.emulator.json"
       - ".github/workflows/firebase-emulator.yml"
 
 permissions:
@@ -49,7 +51,7 @@ jobs:
           FIREBASE_DATABASE_EMULATOR_HOST: 127.0.0.1:9000
           FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
         run: |
-          firebase emulators:exec \
+          firebase --config firebase.emulator.json emulators:exec \
             --only database,firestore \
             --project demo-labmda \
             "npm --prefix functions run test:emulator"

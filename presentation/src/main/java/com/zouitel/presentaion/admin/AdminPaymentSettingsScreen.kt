@@ -281,13 +281,6 @@ class AdminPaymentSettingsScreen : Screen {
                                 modifier = Modifier.fillMaxWidth()
                             ) { Text("Discard local changes / Reload") }
                         }
-                        item {
-                            Text(
-                                if (current.provider != "XENDIT") "Xendit is not the configured collection provider in the current backend configuration. Enabling GCash here does not switch the provider or make live Xendit checkout available." else "Xendit is selected in configuration; live checkout and payout readiness still depend on deployed credentials, enabled services, verified webhooks, and provider approval.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                 }
             }
@@ -323,7 +316,6 @@ private fun SettingsToggle(
  
 private fun paymentProviderLabel(provider: String): String = when (provider.uppercase()) {
     "BDO_CHECKOUT" -> "BDO Checkout"
-    "XENDIT" -> "Xendit"
     "MANUAL" -> "Manual collection"
     else -> provider.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
 }

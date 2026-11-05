@@ -79,7 +79,7 @@ The repository currently has:
 - database.order-ride.rules.fragment.json — an order/ride rules fragment.
 - database.financial.rules.fragment.json — a financial rules fragment.
 - No database.rules.json complete application ruleset.
-- firebase.json configures Cloud Functions only and does not deploy RTDB rules.
+- firebase.json intentionally has no RTDB rules deployment mapping. The deny-all emulator rules are isolated in firebase.emulator.json and must never be deployed to a live database.
 
 Do not attach either fragment to firebase.json or deploy it as a complete
 ruleset. Doing so would deny access to application paths not covered by the
@@ -87,7 +87,10 @@ fragments; adding broad parent grants to compensate could reopen protected
 financial/order paths because RTDB grants cascade.
 
 A separate rules-integration task must inventory every existing app read/query
-and write path, merge the fragments into a complete least-privilege ruleset,
+and write path, including login profile creation/update and the complete
+deliveryServices registration payload. The current fragment only grants a
+small subset of child fields, so broad profile updateChildren/setValue calls
+may be denied. Merge the fragments into a complete least-privilege ruleset,
 remove ancestor grants that override protected children, and run Realtime
 Database Rules Emulator tests for both allowed and denied operations before
 configuring RTDB rules deployment. Until that is complete, **production RTDB

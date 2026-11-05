@@ -1,5 +1,6 @@
 import { getDatabase } from "firebase-admin/database";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { isSimulationRuntime } from "./provider.js";
 
 /** Periodically expires abandoned development checkout sessions. */
 const expireSimulatedGcashSessionsHandler = onSchedule("every 1 minutes", async () => {
@@ -21,6 +22,6 @@ const expireSimulatedGcashSessionsHandler = onSchedule("every 1 minutes", async 
 });
 
 // Keep the simulated checkout scheduler available to local emulators only.
-export const expireSimulatedGcashSessions = process.env.FUNCTIONS_EMULATOR === "true"
+export const expireSimulatedGcashSessions = isSimulationRuntime()
   ? expireSimulatedGcashSessionsHandler
   : null;

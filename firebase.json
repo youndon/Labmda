@@ -19,8 +19,5 @@
     "ui": {
       "enabled": false
     }
-  },
-  "database": {
-    "rules": "testing/database.emulator.rules.json"
   }
 }

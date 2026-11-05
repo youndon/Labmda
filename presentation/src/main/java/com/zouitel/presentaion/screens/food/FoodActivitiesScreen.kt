@@ -230,7 +230,7 @@ class FoodActivitiesScreen : Screen {
                     )
                     Text(text = "Pickup: ${order.pickupLocation.ifBlank { order.sourceName }}", style = MaterialTheme.typography.bodySmall)
                     Text(text = "Drop-off: ${order.dropoffLocation.ifBlank { "Not provided" }}", style = MaterialTheme.typography.bodySmall)
-                    Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash on Delivery" }}", style = MaterialTheme.typography.bodySmall)
+                    Text(text = "Payment: ${order.paymentMethod.ifBlank { "Cash" }}", style = MaterialTheme.typography.bodySmall)
 
                     if (order.deliveryName.isNotBlank()) {
                         Text(text = "Courier: ${order.deliveryName}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
